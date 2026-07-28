@@ -17,7 +17,20 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CODEX_MANIFEST = REPO_ROOT / ".codex-plugin" / "plugin.json"
 CLAUDE_MANIFEST = REPO_ROOT / ".claude-plugin" / "plugin.json"
 SKILLS_ROOT = REPO_ROOT / "skills"
-README = REPO_ROOT / "README.md"
+LICENSE = REPO_ROOT / "LICENSE"
+PUBLIC_FILES = tuple(
+    REPO_ROOT / name
+    for name in (
+        "README.md",
+        "LICENSE",
+        "CHANGELOG.md",
+        "PRIVACY.md",
+        "TERMS.md",
+        "SUPPORT.md",
+        "SECURITY.md",
+    )
+)
+ASSETS_ROOT = REPO_ROOT / "assets"
 DEFAULT_OUTPUT = REPO_ROOT / "dist"
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 FRONTMATTER_NAME = re.compile(r"(?m)^name:\s*([A-Za-z0-9_-]+)\s*$")
@@ -72,10 +85,19 @@ def validate_sources() -> tuple[str, str, Path]:
         raise PackagingError("SKILL.md front matter name must match both plugin manifests")
     if codex.get("skills") != "./skills/":
         raise PackagingError("Codex manifest must point its skills field to ./skills/")
-    if not README.is_file():
-        raise PackagingError(f"Missing root README: {README}")
+    for public_file in PUBLIC_FILES:
+        if not public_file.is_file():
+            raise PackagingError(f"Missing public distribution file: {public_file}")
+    if not (ASSETS_ROOT / "logo.png").is_file():
+        raise PackagingError(f"Missing plugin logo: {ASSETS_ROOT / 'logo.png'}")
 
-    for path in (CODEX_MANIFEST, CLAUDE_MANIFEST, README, *skill_dir.rglob("*")):
+    for path in (
+        CODEX_MANIFEST,
+        CLAUDE_MANIFEST,
+        *PUBLIC_FILES,
+        *ASSETS_ROOT.rglob("*"),
+        *skill_dir.rglob("*"),
+    ):
         if path.is_symlink():
             raise PackagingError(f"Symlinks are not permitted in packages: {path}")
 
@@ -117,8 +139,14 @@ def expected_entries(name: str, skill_dir: Path) -> tuple[list[tuple[Path, str]]
     plugin_entries = [
         (CODEX_MANIFEST, ".codex-plugin/plugin.json"),
         (CLAUDE_MANIFEST, ".claude-plugin/plugin.json"),
-        (README, "README.md"),
     ]
+    plugin_entries.extend(
+        (path, path.relative_to(REPO_ROOT).as_posix()) for path in PUBLIC_FILES
+    )
+    plugin_entries.extend(
+        (path, path.relative_to(REPO_ROOT).as_posix())
+        for path in iter_files(ASSETS_ROOT)
+    )
     plugin_entries.extend(
         (path, path.relative_to(REPO_ROOT).as_posix()) for path in skill_files
     )
@@ -126,6 +154,7 @@ def expected_entries(name: str, skill_dir: Path) -> tuple[list[tuple[Path, str]]
         (path, f"{name}/{path.relative_to(skill_dir).as_posix()}")
         for path in skill_files
     ]
+    skill_entries.append((LICENSE, f"{name}/LICENSE"))
     return plugin_entries, skill_entries
 
 

@@ -44,6 +44,9 @@ class PackagePluginTests(unittest.TestCase):
             self.assertIn(".codex-plugin/plugin.json", names)
             self.assertIn(".claude-plugin/plugin.json", names)
             self.assertIn("skills/agent-ingest-audit-optimize/SKILL.md", names)
+            self.assertIn("LICENSE", names)
+            self.assertIn("assets/logo.png", names)
+            self.assertIn("PRIVACY.md", names)
             self.assertFalse(any(name.startswith(("evals/", "packaging/", ".git/")) for name in names))
 
     def test_skill_archive_has_one_canonical_top_level_directory(self) -> None:
@@ -59,6 +62,7 @@ class PackagePluginTests(unittest.TestCase):
                 {"agent-ingest-audit-optimize"},
             )
             self.assertIn("agent-ingest-audit-optimize/SKILL.md", names)
+            self.assertIn("agent-ingest-audit-optimize/LICENSE", names)
             self.assertFalse(any("/evals/" in name or "/packaging/" in name for name in names))
 
 

@@ -8,6 +8,7 @@
   },
   "homepage": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
   "repository": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
+  "license": "MIT",
   "keywords": [
     "agent-skills",
     "audit",
@@ -27,6 +28,15 @@
       "Write"
     ],
     "websiteURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
-    "defaultPrompt": "Audit this material, verify its claims, and propose safe agent improvements."
+    "privacyPolicyURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/TERMS.md",
+    "brandColor": "#0B1B4D",
+    "composerIcon": "./assets/logo.png",
+    "logo": "./assets/logo.png",
+    "defaultPrompt": [
+      "Audit this material and verify its recommendations.",
+      "Which agent improvements are safe to adopt globally?",
+      "Turn these findings into scoped, reversible proposals."
+    ]
   }
 }

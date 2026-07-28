@@ -4,8 +4,8 @@ This repository produces two distribution artifacts from one canonical Skill:
 
 | Artifact | Contents | Intended use |
 | --- | --- | --- |
-| `agent-ingest-audit-optimize-<version>-plugin.zip` | Codex and Claude plugin manifests, the shared `skills/` tree, and the root README | Plugin installation or local plugin validation |
-| `agent-ingest-audit-optimize-<version>-skill.zip` | One top-level `agent-ingest-audit-optimize/` Skill directory | Agent Skills clients and Claude API Skill upload |
+| `agent-ingest-audit-optimize-<version>-plugin.zip` | Plugin manifests, shared `skills/` tree, logo, license, and public documentation | Plugin installation or local plugin validation |
+| `agent-ingest-audit-optimize-<version>-skill.zip` | One top-level `agent-ingest-audit-optimize/` Skill directory, including the MIT license | Agent Skills clients and Claude API Skill upload |
 
 The plugin manifests are thin platform adapters. They do not duplicate or override the behavior in `skills/agent-ingest-audit-optimize/SKILL.md`.
 
@@ -33,7 +33,7 @@ Verification checks:
 - the canonical Skill name matches its directory;
 - required files are present;
 - symlinks and unsafe archive paths are rejected;
-- plugin archives contain only the manifests, README, and shared Skill;
+- plugin archives contain only the manifests, public documentation, logo, license, and shared Skill;
 - Skill archives contain exactly one top-level Skill directory;
 - generated SHA-256 checksums match.
 
@@ -53,4 +53,4 @@ The first path is a local Codex development-tool path and may differ on another 
 - **Claude API:** upload the generated `-skill.zip` using the Skills API.
 - **Other Agent Skills clients:** install the canonical directory under `skills/` or use the generated Skill archive according to the client's documentation.
 
-No marketplace entry, public release, global installation, or license declaration is created by this packaging workflow.
+The repository marketplace and public release are maintained separately from generated archives. Building a package does not install or publish it.

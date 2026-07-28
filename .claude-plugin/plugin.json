@@ -7,5 +7,6 @@
     "name": "Leonardo Leonel Sobral"
   },
   "homepage": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
-  "repository": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize"
+  "repository": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
+  "license": "MIT"
 }

@@ -1,10 +1,12 @@
 # Agent Ingest, Audit, and Optimize
 
+<img src="assets/logo.png" alt="Agent Ingest, Audit, and Optimize logo" width="160">
+
 A portable Agent Skill that ingests external material, audits recommendations against current evidence, and turns supported findings into scoped, reversible improvements for AI agent ecosystems.
 
 ## Status
 
-The repository contains the canonical English Skill produced by `PROP-2026-005`, its portable regression suite from `PROP-2026-006`, and the cross-client plugin packaging from `PROP-2026-007`. Marketplace publication, public releases, and license selection remain separate decisions.
+The repository contains the canonical English Skill produced by `PROP-2026-005`, its portable regression suite from `PROP-2026-006`, and the cross-client plugin packaging from `PROP-2026-007`. `PROP-2026-008` adds public distribution metadata, a repository marketplace, and the MIT License.
 
 ## What it does
 
@@ -53,6 +55,31 @@ python packaging/scripts/package_plugin.py verify
 
 See [packaging/README.md](packaging/README.md) for the package contract, supported uses, and platform-native validation commands.
 
+## Install
+
+### Codex
+
+Add this repository as a marketplace and install the plugin:
+
+```text
+codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.1.0
+codex plugin add agent-ingest-audit-optimize@agent-ingest-audit-optimize
+```
+
+Start a new Codex task after installation so the Skill can be discovered.
+
+### Claude Code
+
+Clone or download the release, then load the plugin directory:
+
+```text
+claude --plugin-dir <path-to-agent-ingest-audit-optimize>
+```
+
+### Other Agent Skills clients
+
+Download the `agent-ingest-audit-optimize-0.1.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
+
 ## Use
 
 Install or load the directory:
@@ -85,7 +112,11 @@ Analysis and deliberation are read-only. Persistent changes require an unambiguo
 
 The canonical Skill targets clients compatible with the open Agent Skills format. The repository includes native plugin manifests for Codex and Claude Code plus a single-directory archive suitable for portable Skill import. Client-specific behavioral support should be claimed only after structural, explicit-trigger, implicit-trigger, negative-trigger, and resource-resolution tests in that client.
 
-No license has been selected yet.
+## License
+
+This project is available under the [MIT License](LICENSE).
+
+Privacy, terms, support, and security information are available in [PRIVACY.md](PRIVACY.md), [TERMS.md](TERMS.md), [SUPPORT.md](SUPPORT.md), and [SECURITY.md](SECURITY.md).
 
 ## Evaluations
 
