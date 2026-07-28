@@ -112,6 +112,9 @@ Analysis and deliberation are read-only. Persistent changes require an unambiguo
 
 The canonical Skill targets clients compatible with the open Agent Skills format. The repository includes native plugin manifests for Codex and Claude Code plus a single-directory archive suitable for portable Skill import. Client-specific behavioral support should be claimed only after structural, explicit-trigger, implicit-trigger, negative-trigger, and resource-resolution tests in that client.
 
+Codex version 0.1.1 runtime acceptance results are documented in
+[RUN-2026-009](docs/validation/RUN-2026-009.md).
+
 ## License
 
 This project is available under the [MIT License](LICENSE).
