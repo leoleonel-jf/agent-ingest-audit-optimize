@@ -9,7 +9,7 @@ This file is the review-ready source of truth for the initial OpenAI Plugins Dir
 - **Version:** 0.1.1
 - **Developer identity:** Leonardo Leonel Sobral
 - **Category:** Productivity
-- **Short description:** Audit material and optimize agent systems safely.
+- **Short description:** Audit & optimize agent systems
 - **Long description:** Verifies recommendations from videos, articles, documentation, repositories, transcripts, and other external material. It separates claims from evidence, evaluates scope and risk, creates independently authorizable proposals, and applies only explicitly authorized improvements with validation and rollback.
 - **Website:** https://github.com/leoleonel-jf/agent-ingest-audit-optimize
 - **Support:** https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/SUPPORT.md
