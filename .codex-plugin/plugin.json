@@ -1,0 +1,32 @@
+{
+  "name": "agent-ingest-audit-optimize",
+  "version": "0.1.0",
+  "description": "Audit external material and turn verified findings into safe, reversible agent improvements.",
+  "author": {
+    "name": "Leonardo Leonel Sobral",
+    "url": "https://github.com/leoleonel-jf"
+  },
+  "homepage": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
+  "repository": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
+  "keywords": [
+    "agent-skills",
+    "audit",
+    "optimization",
+    "safety",
+    "evaluation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent Ingest, Audit & Optimize",
+    "shortDescription": "Audit material and optimize agent systems safely.",
+    "longDescription": "Verifies external recommendations and converts supported findings into scoped, reversible improvements for agent ecosystems.",
+    "developerName": "Leonardo Leonel Sobral",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
+    "defaultPrompt": "Audit this material, verify its claims, and propose safe agent improvements."
+  }
+}

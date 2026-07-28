@@ -4,7 +4,7 @@ A portable Agent Skill that ingests external material, audits recommendations ag
 
 ## Status
 
-The repository contains the canonical English Skill produced by `PROP-2026-005` and its portable regression suite from `PROP-2026-006`. Product packaging, release workflows, and marketplace publication are intentionally separate follow-up proposals.
+The repository contains the canonical English Skill produced by `PROP-2026-005`, its portable regression suite from `PROP-2026-006`, and the cross-client plugin packaging from `PROP-2026-007`. Marketplace publication, public releases, and license selection remain separate decisions.
 
 ## What it does
 
@@ -31,6 +31,27 @@ skills/
 ```
 
 The canonical bundle follows the open Agent Skills directory model: `SKILL.md` contains the portable workflow, while references and templates load only when needed. `agents/openai.yaml` is optional client metadata and does not define the core behavior.
+
+## Plugin packaging
+
+The repository is also a dual-manifest plugin:
+
+```text
+.codex-plugin/plugin.json
+.claude-plugin/plugin.json
+skills/agent-ingest-audit-optimize/
+```
+
+Both manifests use the same canonical Skill. No platform-specific copy of its behavior is maintained.
+
+Build and verify the distributable plugin and portable Skill archives with:
+
+```text
+python packaging/scripts/package_plugin.py build
+python packaging/scripts/package_plugin.py verify
+```
+
+See [packaging/README.md](packaging/README.md) for the package contract, supported uses, and platform-native validation commands.
 
 ## Use
 
@@ -62,7 +83,7 @@ Analysis and deliberation are read-only. Persistent changes require an unambiguo
 
 ## Compatibility
 
-The canonical Skill targets clients compatible with the open Agent Skills format. Client-specific support should be claimed only after structural, explicit-trigger, implicit-trigger, negative-trigger, and resource-resolution tests in that client.
+The canonical Skill targets clients compatible with the open Agent Skills format. The repository includes native plugin manifests for Codex and Claude Code plus a single-directory archive suitable for portable Skill import. Client-specific behavioral support should be claimed only after structural, explicit-trigger, implicit-trigger, negative-trigger, and resource-resolution tests in that client.
 
 No license has been selected yet.
 
