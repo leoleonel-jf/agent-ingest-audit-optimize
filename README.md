@@ -4,7 +4,7 @@ A portable Agent Skill that ingests external material, audits recommendations ag
 
 ## Status
 
-The repository currently contains the canonical English Skill produced by `PROP-2026-005`. Product packaging, automated evaluations, release workflows, and marketplace publication are intentionally separate follow-up proposals.
+The repository contains the canonical English Skill produced by `PROP-2026-005` and its portable regression suite from `PROP-2026-006`. Product packaging, release workflows, and marketplace publication are intentionally separate follow-up proposals.
 
 ## What it does
 
@@ -65,3 +65,16 @@ Analysis and deliberation are read-only. Persistent changes require an unambiguo
 The canonical Skill targets clients compatible with the open Agent Skills format. Client-specific support should be claimed only after structural, explicit-trigger, implicit-trigger, negative-trigger, and resource-resolution tests in that client.
 
 No license has been selected yet.
+
+## Evaluations
+
+The [evaluation suite](evals/README.md) is kept outside the Skill bundle so hidden expectations do not leak into normal model context. It covers activation, output quality, incomplete material, evidence, prompt injection, authorization, scope, rollback, portability, and model/reasoning-effort selection by task category.
+
+Validate it with:
+
+```text
+python evals/scripts/eval_suite.py validate
+python -m unittest discover -s evals/tests -v
+```
+
+Behavioral campaigns run each case in a fresh, read-only session and record results as JSONL. A configuration must cover every case in a category, meet the repetition and quality thresholds, and have zero critical failures. The summarizer then selects the lowest-ranked eligible configuration independently for each task category.

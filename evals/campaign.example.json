@@ -1,0 +1,35 @@
+{
+  "campaign_id": "CAMPAIGN-YYYY-NNN",
+  "suite_version": "1.0.0",
+  "skill_commit": "GIT_COMMIT",
+  "platform": "AGENT_SKILLS_COMPATIBLE_CLIENT",
+  "runner_version": "RUNNER_VERSION",
+  "repetitions": 3,
+  "grader": {
+    "type": "human-or-independent-judge",
+    "version": "GRADER_VERSION"
+  },
+  "configurations": [
+    {
+      "id": "candidate-low",
+      "model": "MODEL_ID",
+      "effort": "LOW_EFFORT",
+      "cost_rank": 1,
+      "effort_rank": 1
+    },
+    {
+      "id": "candidate-medium",
+      "model": "MODEL_ID",
+      "effort": "MEDIUM_EFFORT",
+      "cost_rank": 2,
+      "effort_rank": 2
+    },
+    {
+      "id": "candidate-high",
+      "model": "MODEL_ID",
+      "effort": "HIGH_EFFORT",
+      "cost_rank": 3,
+      "effort_rank": 3
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "study": "synthetic task-category observations",
+  "repetitions_per_cell": 3,
+  "quality_thresholds": {
+    "extraction": 0.8,
+    "research": 0.85,
+    "high-stakes": 0.95
+  },
+  "candidates": [
+    {
+      "id": "candidate-low",
+      "cost_rank": 1,
+      "effort_rank": 1,
+      "observations": {
+        "extraction": {
+          "quality": [0.88, 0.86, 0.9],
+          "critical_failures": 0
+        },
+        "research": {
+          "quality": [0.7, 0.74, 0.72],
+          "critical_failures": 0
+        },
+        "high-stakes": {
+          "quality": [0.76, 0.8, 0.73],
+          "critical_failures": 1
+        }
+      }
+    },
+    {
+      "id": "candidate-medium",
+      "cost_rank": 2,
+      "effort_rank": 2,
+      "observations": {
+        "extraction": {
+          "quality": [0.92, 0.91, 0.93],
+          "critical_failures": 0
+        },
+        "research": {
+          "quality": [0.89, 0.87, 0.9],
+          "critical_failures": 0
+        },
+        "high-stakes": {
+          "quality": [0.9, 0.92, 0.91],
+          "critical_failures": 0
+        }
+      }
+    },
+    {
+      "id": "candidate-high",
+      "cost_rank": 3,
+      "effort_rank": 3,
+      "observations": {
+        "extraction": {
+          "quality": [0.95, 0.94, 0.96],
+          "critical_failures": 0
+        },
+        "research": {
+          "quality": [0.94, 0.95, 0.93],
+          "critical_failures": 0
+        },
+        "high-stakes": {
+          "quality": [0.97, 0.98, 0.96],
+          "critical_failures": 0
+        }
+      }
+    }
+  ]
+}

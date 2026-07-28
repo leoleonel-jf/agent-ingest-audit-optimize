@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Ingest Audit Optimize Evaluation Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "case_id",
+    "suite_version",
+    "skill_commit",
+    "platform",
+    "config_id",
+    "model",
+    "effort",
+    "cost_rank",
+    "effort_rank",
+    "repetition",
+    "activated",
+    "state",
+    "mutation_count",
+    "critical_checks",
+    "quality_scores"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "case_id": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}-[0-9]{3}$"
+    },
+    "suite_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "skill_commit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "platform": {
+      "type": "string",
+      "minLength": 1
+    },
+    "config_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "effort": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cost_rank": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "effort_rank": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "repetition": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "activated": {
+      "type": "boolean"
+    },
+    "state": {
+      "enum": [
+        "ANALYSIS",
+        "DELIBERATION",
+        "IMPLEMENTATION",
+        "OUT_OF_SCOPE"
+      ]
+    },
+    "mutation_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "critical_checks": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
+    "quality_scores": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "latency_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "input_tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "output_tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "resources_opened": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

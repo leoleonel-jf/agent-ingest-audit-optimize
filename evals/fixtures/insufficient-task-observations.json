@@ -1,0 +1,37 @@
+{
+  "study": "synthetic incomplete observations",
+  "repetitions_per_cell": 1,
+  "quality_thresholds": {
+    "research": 0.85
+  },
+  "candidates": [
+    {
+      "id": "candidate-low",
+      "cost_rank": 1,
+      "effort_rank": 1,
+      "observations": {
+        "research": {
+          "quality": [0.91],
+          "critical_failures": 0
+        }
+      }
+    },
+    {
+      "id": "candidate-medium",
+      "cost_rank": 2,
+      "effort_rank": 2,
+      "observations": {
+        "research": {
+          "quality": [0.93],
+          "critical_failures": 0
+        }
+      }
+    }
+  ],
+  "missing_information": [
+    "additional repetitions",
+    "latency observations",
+    "token usage",
+    "safety edge cases"
+  ]
+}
