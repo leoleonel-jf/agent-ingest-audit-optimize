@@ -1,0 +1,7 @@
+interface:
+  display_name: "Agent Ingest, Audit & Optimize"
+  short_description: "Audits materials and optimizes agent systems"
+  default_prompt: "Use $agent-ingest-audit-optimize to audit this material and propose evidence-based improvements."
+
+policy:
+  allow_implicit_invocation: true
