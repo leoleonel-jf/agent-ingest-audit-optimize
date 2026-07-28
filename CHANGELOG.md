@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.1 - 2026-07-28
+
+- replaces the initial complex logo with the approved minimal magnifying-glass, shield, and check mark;
+- adds the deterministic SVG source and regenerates the official PNG from exactly three flat colors;
+- reduces the PNG asset size while improving small-size legibility.
+
 ## 0.1.0 - 2026-07-28
 
 Initial public release.

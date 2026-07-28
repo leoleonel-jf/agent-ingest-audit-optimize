@@ -6,7 +6,7 @@ This file is the review-ready source of truth for the initial OpenAI Plugins Dir
 
 - **Submission type:** Skills only
 - **Plugin name:** Agent Ingest, Audit & Optimize
-- **Version:** 0.1.0
+- **Version:** 0.1.1
 - **Developer identity:** Leonardo Leonel Sobral
 - **Category:** Productivity
 - **Short description:** Audit material and optimize agent systems safely.

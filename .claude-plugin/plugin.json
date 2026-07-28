@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "agent-ingest-audit-optimize",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Audit external material and turn verified findings into safe, reversible agent improvements.",
   "author": {
     "name": "Leonardo Leonel Sobral"
