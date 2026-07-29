@@ -1,5 +1,6 @@
 {
   "name": "agent-ingest-audit-optimize",
+  "description": "A marketplace for the Agent Ingest, Audit & Optimize plugin.",
   "owner": {
     "name": "Leonardo Leonel Sobral"
   },
