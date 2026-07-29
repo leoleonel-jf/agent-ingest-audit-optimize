@@ -160,9 +160,13 @@ Use IDs consistently:
 - `RUN-YYYY-NNN` for implementation runs;
 - `ADR-YYYY-NNN` for decisions.
 
+When creating persistent records from the templates, write the free-text fields in the user's working language; keep headings, IDs, states, and status labels in canonical English.
+
 Check existing records before assigning an ID. ID sequences are local to each installation: when no records of a type exist yet in the environment, start numbering at `000` (for example, `PROP-YYYY-000`). Never continue a sequence from records that exist only in external material or in this repository's own history.
 
 ## Report clearly
+
+Communicate with the user in the user's language: match the language of the user's request in all prose, summaries, questions, and reports, unless the user asks otherwise. Keep operating states, status labels, classification labels, and record IDs in their canonical English form regardless of the conversation language.
 
 Begin with a concise **Initial Technical Summary** covering the material, objective, state, scope, initial risks, and authorization status.
 

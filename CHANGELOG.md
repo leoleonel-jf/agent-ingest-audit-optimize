@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.3 - 2026-07-28
+
+- instructs the Skill to communicate in the user's language for all prose, summaries, questions, and reports;
+- keeps operating states, status labels, classification labels, and record IDs in canonical English regardless of conversation language;
+- directs template free-text fields to the user's working language while preserving canonical headings and labels.
+
 ## 0.1.2 - 2026-07-28
 
 - ships the required `description` field in the Claude Code marketplace manifest (previously only on `main`, missing from the v0.1.1 tag);
