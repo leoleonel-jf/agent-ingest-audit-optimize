@@ -4,6 +4,7 @@ This file is the review-ready source of truth for public directory submissions: 
 
 ## Claude Code community marketplace
 
+- **Status:** submitted for review via the Console form on 2026-07-28 (version 0.1.2, platform: Claude Code only; confirmation: "Plugin enviado para revisão").
 - **Catalog:** `anthropics/claude-plugins-community`
 - **Submission form (individual developers):** https://platform.claude.com/plugins/submit
 - **Pre-submission check:** `claude plugin validate <path-to-repo>` — must print `✔ Validation passed`.
