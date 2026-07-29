@@ -32,6 +32,8 @@ both, and the state layer is the prerequisite.
 5. Render all of it as a single self-contained HTML file that is attractive, responsive,
    accessible, offline, and in the user's language.
 6. Remain portable: Claude Code, Codex, and unknown clients.
+7. Preserve main-context budget by delegating independently verifiable work to subagents where
+   the client supports them, without ever splitting a single-writer sequence. See section 19.
 
 ## 3. Non-goals
 
@@ -532,6 +534,54 @@ New cases in `evals/suite.json`, one per phase:
 | Question | Resolved in |
 |---|---|
 | Exact Codex configuration paths, verified against current first-party documentation | 0.3.0 |
+| Whether a delegating client can pass ledger write authority to a subagent safely | 0.3.0 |
 | Whether project ledgers should carry a merge driver for git conflicts on `ledger.json` | 0.3.0 |
 | Whether `dashboard.py serve` is ever built | after 0.4.0, separate decision |
 | Which additional language dictionaries ship | after 0.4.0, on demand |
+
+## 19. Subagent delegation
+
+Auditing a substantial piece of material consumes context quickly: acquisition, per-claim
+verification, and environment inventory all produce far more intermediate text than the
+conclusions they yield. Where a client supports subagents, that intermediate text belongs in a
+subagent's context, not the main one.
+
+### 19.1 Delegate
+
+| Unit | Why it is safe to delegate |
+|---|---|
+| Material acquisition, one subagent per source | Read-only; returns a normalized extract |
+| Claim verification, one subagent per claim or small batch | Independent by construction; returns a verdict, evidence URL, and date |
+| Environment inventory, one subagent per configuration area | Read-only; returns a structured item list |
+| Alternative evaluation during DELIBERATION | Independent analyses; a diverse-perspective panel improves the comparison |
+
+A delegated unit returns structured data, never prose to be re-read. The main context keeps
+synthesis, classification, prioritization, proposal authoring, and every user-facing decision.
+
+### 19.2 Never delegate
+
+Implementation is a single-writer sequence. Backup, apply, validate, and record must run in one
+context that owns the stop conditions, because a stop condition reached by one worker cannot
+halt another mid-write. Concretely, the following are prohibited:
+
+- running two authorized proposals concurrently;
+- splitting the steps of one implementation across subagents;
+- delegating backup creation or verification away from the context that applies the change;
+- granting a subagent authority to authorize, or to interpret an authorization.
+
+Ledger writes follow the writer. Until the question in section 18 is resolved, only the main
+context writes the ledger; a subagent returns data for the main context to record.
+
+### 19.3 Portability
+
+Subagent support varies by client and must be detected, never assumed. Absent support, the same
+work runs sequentially in the main context with identical outputs. Delegation is an optimization
+of context budget, never a change to the workflow, the evidence standard, or the result.
+
+The delegation policy is stated briefly in `SKILL.md` and detailed in
+`references/PLATFORM_ADAPTATION.md`, which already carries client-specific guidance.
+
+### 19.4 Applies to this project too
+
+Implementation work on this repository follows the same rule: plan tasks are dispatched to fresh
+subagents per task, while review, integration, and release decisions stay in the main context.
