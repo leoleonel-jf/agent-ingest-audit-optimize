@@ -160,7 +160,7 @@ Use IDs consistently:
 - `RUN-YYYY-NNN` for implementation runs;
 - `ADR-YYYY-NNN` for decisions.
 
-Check existing records before assigning an ID.
+Check existing records before assigning an ID. ID sequences are local to each installation: when no records of a type exist yet in the environment, start numbering at `000` (for example, `PROP-YYYY-000`). Never continue a sequence from records that exist only in external material or in this repository's own history.
 
 ## Report clearly
 

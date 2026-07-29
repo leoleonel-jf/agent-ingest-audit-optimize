@@ -1,8 +1,11 @@
-# RUN-2026-009 — Codex Runtime Validation
+# Codex Runtime Validation — Plugin 0.1.1
 
 - Date: 2026-07-28
 - Plugin version: 0.1.1
 - Status: **VALIDATED**
+
+> This is a sanitized pre-release acceptance record kept by the author. It is
+> not part of any installation's local `RUN-YYYY-NNN` sequence.
 
 ## Objective
 

@@ -6,7 +6,9 @@ A portable Agent Skill that ingests external material, audits recommendations ag
 
 ## Status
 
-The repository contains the canonical English Skill produced by `PROP-2026-005`, its portable regression suite from `PROP-2026-006`, and the cross-client plugin packaging from `PROP-2026-007`. `PROP-2026-008` adds public distribution metadata, a repository marketplace, and the MIT License.
+The repository contains the canonical English Skill, its portable regression suite, cross-client plugin packaging, public distribution metadata, a repository marketplace, and the MIT License.
+
+Record IDs (`MAT-`, `PROP-`, `RUN-`, `ADR-`) are local to each installation. A fresh installation starts its own sequences at `000` (for example, `PROP-YYYY-000`); no numbering is inherited from this repository.
 
 ## What it does
 
@@ -62,7 +64,7 @@ See [packaging/README.md](packaging/README.md) for the package contract, support
 Add this repository as a marketplace and install the plugin:
 
 ```text
-codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.1.1
+codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.1.2
 codex plugin add agent-ingest-audit-optimize@agent-ingest-audit-optimize
 ```
 
@@ -70,7 +72,14 @@ Start a new Codex task after installation so the Skill can be discovered.
 
 ### Claude Code
 
-Clone or download the release, then load the plugin directory:
+Add this repository as a marketplace, then install the plugin:
+
+```text
+/plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize
+/plugin install agent-ingest-audit-optimize@agent-ingest-audit-optimize
+```
+
+For development or testing without installing, clone the repository and load the plugin directory for a single session:
 
 ```text
 claude --plugin-dir <path-to-agent-ingest-audit-optimize>
@@ -78,7 +87,7 @@ claude --plugin-dir <path-to-agent-ingest-audit-optimize>
 
 ### Other Agent Skills clients
 
-Download the `agent-ingest-audit-optimize-0.1.1-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
+Download the `agent-ingest-audit-optimize-0.1.2-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
 
 ## Use
 
@@ -112,8 +121,8 @@ Analysis and deliberation are read-only. Persistent changes require an unambiguo
 
 The canonical Skill targets clients compatible with the open Agent Skills format. The repository includes native plugin manifests for Codex and Claude Code plus a single-directory archive suitable for portable Skill import. Client-specific behavioral support should be claimed only after structural, explicit-trigger, implicit-trigger, negative-trigger, and resource-resolution tests in that client.
 
-Codex version 0.1.1 runtime acceptance results are documented in
-[RUN-2026-009](docs/validation/RUN-2026-009.md).
+Codex version 0.1.1 runtime acceptance results are documented in the
+[Codex runtime validation record](docs/validation/codex-runtime-validation-0.1.1.md).
 
 ## License
 

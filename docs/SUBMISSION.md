@@ -1,12 +1,21 @@
 # Public Plugin Submission
 
-This file is the review-ready source of truth for the initial OpenAI Plugins Directory submission.
+This file is the review-ready source of truth for public directory submissions: the OpenAI Plugins Directory and the Claude Code community marketplace.
+
+## Claude Code community marketplace
+
+- **Catalog:** `anthropics/claude-plugins-community`
+- **Submission form (individual developers):** https://platform.claude.com/plugins/submit
+- **Pre-submission check:** `claude plugin validate <path-to-repo>` — must print `✔ Validation passed`.
+- **Pinning model:** approved plugins are pinned to a commit SHA in the community catalog; CI bumps the pin as new commits are pushed. The catalog syncs nightly, so listing may lag approval.
+- **Listing data:** reuse the fields below (name, descriptions, website, support, privacy, terms, license, logo).
+- **Attestations:** policy attestations must be completed by the verified developer identity in the form; they are not delegated to the plugin or its automation.
 
 ## Listing
 
 - **Submission type:** Skills only
 - **Plugin name:** Agent Ingest, Audit & Optimize
-- **Version:** 0.1.1
+- **Version:** 0.1.2
 - **Developer identity:** Leonardo Leonel Sobral
 - **Category:** Productivity
 - **Short description:** Audit & optimize agent systems
