@@ -11,11 +11,17 @@ All notable changes to this project are documented in this file.
 - corrects the Codex install command and the Skill asset name in `README.md`, and the listing
   version and evaluation-suite case count in `docs/SUBMISSION.md`;
 - adds `packaging/tests/test_version_consistency.py`, which elects `.claude-plugin/plugin.json`
-  as the single source of truth for the version and fails when any of the six other pins drifts
+  as the single source of truth for the version and fails when any of the seven other pins drifts
   from it, naming the file that drifted;
 - documents that test in `packaging/README.md` as the authoritative list of version pins,
   replacing per-release checklists that named four files while seven carry the version;
-- adds the release documents for 0.2.0 and 0.2.1.
+- adds the release documents for 0.2.0 and 0.2.1;
+- excludes `__pycache__` directories and `.pyc`/`.pyo`/`.pyd` files from the archive walk in
+  `packaging/scripts/package_plugin.py`; `build` and `verify` shared that walk, so `verify`
+  could not catch it, and published archives carried whatever compiled bytecode happened to
+  sit under `skills/agent-ingest-audit-optimize/assets/scripts/__pycache__/` on the build
+  machine, meaning republished checksums could not be reproduced from a clean checkout,
+  contradicting the deterministic-packaging claim in `docs/SUBMISSION.md`.
 
 ## 0.2.0 - 2026-07-30
 
