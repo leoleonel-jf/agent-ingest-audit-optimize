@@ -73,6 +73,14 @@ A release that adds a new pin extends that test in the same commit. Do not maint
 per-release checklist; the omission of `.agents/`, `README.md`, and `docs/SUBMISSION.md` from
 the 0.2.0 checklist is what left the four stale pins that 0.2.1 corrected.
 
+`packaging/tests/test_release_checksums.py` rebuilds the archives for the current version and
+compares the result against `docs/releases/v<version>.md`. That comparison is only meaningful
+once such a document exists, since it describes a build that was actually published; the version
+is bumped at the start of a development cycle, before that document is written, and packaged
+content (`dashboard.py`, `references/LEDGER.md`, etc.) keeps changing for the rest of the cycle.
+So the check skips explicitly, by design, until the release document for the current version is
+written -- it does not run against a version still in development.
+
 `.agents/plugins/marketplace.json` is the OpenAI Codex marketplace manifest
 (<https://developers.openai.com/plugins/build/plugins>). Its `ref` is a git ref that does not
 advance on its own, so it must name a tag that exists: bump it in the release commit, then push

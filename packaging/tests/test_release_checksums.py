@@ -39,14 +39,23 @@ class ReleaseChecksumTests(unittest.TestCase):
     against it. That missing check, not the wrong value, was the defect -- so this
     test builds the CURRENT version fresh and compares, rather than trusting either
     the document or a previously recorded digest.
+
+    This only means something once a release document for the current version
+    exists. The version is bumped at the start of a development cycle, before any
+    release document is written, and packaged content keeps changing for the rest
+    of that cycle -- so the check skips explicitly until the document shows up at
+    release time, rather than going red for the entire cycle in between.
     """
 
     def test_release_document_checksums_match_a_real_build(self) -> None:
         version = package_plugin.load_json(CLAUDE_MANIFEST)["version"]
         release_doc = RELEASES_DIR / f"v{version}.md"
         if not release_doc.is_file():
-            raise AssertionError(
-                f"Missing release document for current version {version}: {release_doc}"
+            self.skipTest(
+                f"No release document yet for current version {version} "
+                f"({release_doc} does not exist) -- the version was just bumped for "
+                "a new development cycle, and this check only applies once that "
+                "version has a release document describing a published build."
             )
 
         with tempfile.TemporaryDirectory() as temp:

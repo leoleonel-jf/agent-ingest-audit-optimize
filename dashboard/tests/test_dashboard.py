@@ -2031,12 +2031,26 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
     def test_path_key_normalizes_separator_and_case(self) -> None:
         # _path_key's normalization is what lets a stored ledger_path
         # compare equal to an invocation path that names the same file with
-        # different slashes or case. Replacing _path_key's body with
-        # `return value` leaves every other digest test in this class
-        # green, because each one passes str(path) verbatim on both sides;
-        # none of them differs the two strings in spelling. This one does:
-        # the stored ledger_path uses forward slashes and upper case, the
-        # invocation path is exactly what write_ledger returned.
+        # different slashes or case -- but that is only true on Windows.
+        # os.path.normcase lowercases and turns "/" into "\\" there; on
+        # POSIX, normcase is the identity function and the filesystem is
+        # case-sensitive, so a differently-cased ledger_path names a
+        # DIFFERENT file and correctly does not match. Each platform is
+        # asserted on its own correct behavior below, rather than skipping
+        # POSIX outright.
+        #
+        # Replacing _path_key's body with `return value` leaves every other
+        # digest test in this class green, because each one passes
+        # str(path) verbatim on both sides; none of them differs the two
+        # strings in spelling. This one does: the stored ledger_path uses
+        # forward slashes and upper case, the invocation path is exactly
+        # what write_ledger returned. On Windows, breaking _path_key this
+        # way makes the assertions below fail (ablated: confirmed on this
+        # machine). On POSIX, normcase is already the identity, so this
+        # particular breakage does not change the (already-no-match)
+        # outcome there -- POSIX's assertions are checking that
+        # _path_key stays a no-op for case, not exercising this specific
+        # regression.
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             sub = root / "sub"
@@ -2064,8 +2078,20 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
 
             exit_code, stdout, stderr = _capture_verify([project_path, global_path])
 
-            self.assertEqual(exit_code, 1)
-            self.assertIn("last_digest", stderr)
+            if os.name == "nt":
+                # Same file, different spelling: normcase + normpath fold
+                # them together, so the comparison happens and the
+                # deliberately-wrong last_digest is caught.
+                self.assertEqual(exit_code, 1)
+                self.assertIn("last_digest", stderr)
+            else:
+                # Different case means a different file on a case-sensitive
+                # filesystem. ledger_path names something that was never
+                # passed on the command line, so it is not comparable --
+                # "not checked", never "wrongly matched" -- and verify must
+                # report a clean run.
+                self.assertEqual(exit_code, 0)
+                self.assertNotIn("last_digest", stderr)
 
     def test_verify_matches_relative_ledger_path_against_relative_invocation(
         self,
@@ -2743,6 +2769,41 @@ class AnchorPathTests(unittest.TestCase):
         # _resolve_or_raise's own docstring names. That must never escape
         # anchor_path as an OSError: callers of the anchor-safety layer
         # should only ever have to catch PathSafetyError.
+        #
+        # POSIX has no equivalent construct. Non-strict Path.resolve() (the
+        # default, and what _resolve_or_raise calls) treats a FILE followed
+        # by a trailing "..." component the same way it treats any other
+        # non-symlink, non-existent tail: os.lstat succeeds on the file
+        # component, pathlib never checks whether it is actually a
+        # directory, and the bogus tail is appended without touching the
+        # filesystem again -- no OSError at all, verified by reading
+        # posixpath._joinrealpath directly (this sandbox is Windows-only, so
+        # empirical POSIX execution is not available; the swallow-on-success
+        # behavior in that function is unconditional and version-stable, not
+        # inferred).
+        #
+        # A symlink loop looks like the obvious substitute (ELOOP is a real
+        # POSIX errno), but it is not reliable either. Non-strict
+        # pathlib.Path.resolve() adds a proactive final .stat() specifically
+        # to surface loops that realpath() itself swallows, and its
+        # check_eloop() helper deliberately turns a genuine ELOOP OSError
+        # into a `RuntimeError`, not an `OSError` -- so it would never reach
+        # _resolve_or_raise's `except OSError` either, and this test would
+        # fail for a third, unrelated reason (an uncaught RuntimeError
+        # instead of "PathSafetyError not raised"). No known POSIX
+        # construct provokes an OSError from non-strict resolve(), so this
+        # test is Windows-only, following the same skip idiom as
+        # test_resolved_result_outside_root_is_refused and
+        # test_junction_leaving_anchor_and_looping_back_is_refused above.
+        if os.name != "nt":
+            self.skipTest(
+                "no POSIX construct reliably provokes an OSError from "
+                "non-strict Path.resolve(): a trailing-dot/space segment "
+                "after a file is silently accepted (no filesystem check), "
+                "and a symlink loop is converted by pathlib itself into "
+                "RuntimeError rather than OSError before _resolve_or_raise "
+                "ever sees it"
+            )
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             (root / "f.txt").write_text("x", encoding="utf-8")
@@ -3077,6 +3138,45 @@ class ResolveAnchoredTests(unittest.TestCase):
             with self.assertRaises(dashboard.PathSafetyError) as ctx:
                 dashboard.resolve_anchored("$R/f.txt/...", {"R": root})
             self.assertNotIsInstance(ctx.exception, OSError)
+
+    def test_symlink_loop_is_refused_instead_of_leaking_runtime_error(self) -> None:
+        # The exact defect this commit fixes, reproduced on Ubuntu 24.04 /
+        # Python 3.12.3: root/a -> root/b and root/b -> root/a form a
+        # symlink loop, and non-strict Path.resolve() detects that loop
+        # itself -- in Python, not via the OS -- and raises a bare
+        # RuntimeError ("Symlink loop from '<path>'"), not an OSError.
+        # _resolve_or_raise's original `except OSError` let that sail
+        # straight through uncaught. This is the same class of gap I1 and
+        # I5 closed for a NUL byte and a trailing dot/space segment
+        # respectively: a non-PathSafetyError escaping a layer whose whole
+        # contract is that callers catch exactly one exception type, which
+        # matters because scan (0.2.4) walks real client configuration
+        # directories, where a symlink loop is entirely plausible, and must
+        # report one finding and keep walking rather than abort.
+        #
+        # POSIX-only in practice: creating a symlink needs no elevation
+        # there, but on Windows it needs developer mode or an elevated
+        # process, so this follows the same try/except OSError skip idiom
+        # as test_symlink_leaving_anchor_is_refused_even_if_final_path_
+        # returns_inside above, rather than a hard os.name check -- on a
+        # default, non-elevated Windows account (this sandbox included)
+        # os.symlink itself is what raises and skips the test.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            link_a = root / "a"
+            link_b = root / "b"
+            try:
+                os.symlink(link_b, link_a)
+                os.symlink(link_a, link_b)
+            except OSError as exc:
+                self.skipTest(
+                    f"cannot create a symlink on this platform (needs developer "
+                    f"mode or elevation on Windows): {exc}"
+                )
+            with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                dashboard.resolve_anchored("$R/a", {"R": root})
+            self.assertIn("$R/a", str(ctx.exception))
+            self.assertEqual(ctx.exception.reason, "resolve_failed")
 
     def test_hardlinked_regular_file_is_refused(self) -> None:
         # I4: a hardlink has no symlink target for rules 4/5 to follow, so
