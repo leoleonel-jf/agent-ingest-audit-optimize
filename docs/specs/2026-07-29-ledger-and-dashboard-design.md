@@ -466,9 +466,11 @@ guarantees are missing rather than imply full verification.
 
 ## 15. Required changes to `SKILL.md`
 
-1. Add an ANALYSIS carve-out: writing to this plugin's own ledger, records, and backups is
-   audit bookkeeping, not an environment change. It never requires authorization and never
-   constitutes implementation. Without this the Skill contradicts itself.
+1. Add an ANALYSIS carve-out: writing to this plugin's own ledger and its records is audit
+   bookkeeping, not an environment change. It never requires authorization and never
+   constitutes implementation. Backup creation is excluded from the carve-out: it belongs to
+   IMPLEMENTATION, which already requires a backup before the first change. Without this the
+   Skill contradicts itself.
 2. Add a short "Ledger and dashboard" section pointing to `references/LEDGER.md` and
    `references/DASHBOARD.md`. Keep it brief; both references load on demand.
 3. State that ID allocation belongs to the global ledger.

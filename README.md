@@ -126,7 +126,7 @@ at the client's user configuration root, and a git-versionable one per project a
 Validate every reachable ledger in one invocation so cross-ledger checks run:
 
 ```text
-python assets/scripts/dashboard.py verify <path-to-ledger.json> [more...]
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify <path-to-ledger.json> [more...]
 ```
 
 Exit codes: `0` clean, `1` findings, `2` the ledger could not be read. The tool requires

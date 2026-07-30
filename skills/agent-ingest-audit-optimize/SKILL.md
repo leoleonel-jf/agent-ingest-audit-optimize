@@ -129,6 +129,8 @@ Delegate independently verifiable work when the client supports subagents: mater
 
 Never delegate implementation. Backup, apply, validate, and record form a single-writer sequence, and a stop condition reached by one worker cannot halt another mid-write. Never run two authorized proposals at once, never split one implementation across workers, and never grant a subagent authority to authorize.
 
+Ledger writes follow the writer: a subagent returns data, and the main context records it.
+
 Detect subagent support; never assume it. Without it, run the same work sequentially instead, producing identical results.
 
 Read [references/PLATFORM_ADAPTATION.md](references/PLATFORM_ADAPTATION.md) for fuller delegation guidance.
@@ -178,10 +180,11 @@ Check existing records before assigning an ID. ID sequences are local to each in
 
 Record every material audit, proposal, run, decision, and rollback in this plugin's ledger.
 
-Writing to the plugin's own ledger, records, and backups is audit bookkeeping, not a change to
-the user's environment. It is permitted in every operating state, never requires authorization,
-and never counts as implementing a proposal. Never describe a ledger write as an implemented
-change.
+Writing to the plugin's own ledger and its records is audit bookkeeping, not a change to the
+user's environment. It is permitted in every operating state, never requires authorization, and
+never counts as implementing a proposal. Never describe a ledger write as an implemented change.
+Creating a backup is not bookkeeping: it belongs to IMPLEMENTATION, which already requires a
+recoverable backup before the first change.
 
 The global ledger is the only authority for record identifiers. A project ledger requests the
 next identifier from it, and mints a provisional identifier with a `-P` suffix only when the

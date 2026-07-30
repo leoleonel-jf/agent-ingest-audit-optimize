@@ -5,10 +5,11 @@ writes. It is never transmitted.
 
 ## Bookkeeping is not implementation
 
-Writing to the ledger, to its records, and to its backups is audit bookkeeping, not a change
-to the user's environment. It is permitted in ANALYSIS, DELIBERATION, and IMPLEMENTATION, it
-never requires authorization, and it never constitutes implementing a proposal. Never present
-a ledger write as an implemented change.
+Writing to the ledger and to its records is audit bookkeeping, not a change to the user's
+environment. It is permitted in ANALYSIS, DELIBERATION, and IMPLEMENTATION, it never requires
+authorization, and it never constitutes implementing a proposal. Never present a ledger write
+as an implemented change. Creating a backup is not bookkeeping: it belongs to IMPLEMENTATION,
+which already requires a recoverable backup before the first change.
 
 ## Layout
 
@@ -87,7 +88,9 @@ references were actually rewritten.
 
 `verify` also checks that a ledger's `sequences` value for a prefix is high enough to cover the
 highest number already used by that prefix — never that it matches exactly. A sequence value
-higher than necessary is not flagged.
+higher than necessary is not flagged. This applies to every ledger, including a project ledger
+that never allocates identifiers itself: its `sequences` must still be kept at or above the
+highest number used by its own records.
 
 ## Records
 
@@ -186,6 +189,10 @@ Free text follows the user's working language. Operating states, status labels, 
 labels, and record identifiers stay in canonical English.
 
 ## Validation
+
+Run `verify` after every ledger write, passing every reachable ledger in the same invocation so
+the cross-ledger checks run. Running `verify` is bookkeeping too: it is read-only and permitted
+in any operating state.
 
 ```text
 python assets/scripts/dashboard.py verify <path-to-ledger.json> [more...]
