@@ -33,6 +33,15 @@ dashboard = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(dashboard)
 
 
+def _capture_verify(paths: list[Path]) -> tuple[int, str, str]:
+    """Call verify() and capture stdout/stderr. Returns (exit_code, stdout, stderr)."""
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+        exit_code = dashboard.verify(paths)
+    return exit_code, stdout_buf.getvalue(), stderr_buf.getvalue()
+
+
 def minimal_ledger() -> dict:
     return {
         "schema_version": "1.0",
@@ -298,39 +307,54 @@ class LedgerDocumentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "ledger.json"
             path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
-            self.assertEqual(dashboard.verify([path]), 2)
+            exit_code, stdout, stderr = _capture_verify([path])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("JSON object", stderr)
 
     def test_verify_returns_two_for_string_at_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "ledger.json"
             path.write_text(json.dumps("nope"), encoding="utf-8")
-            self.assertEqual(dashboard.verify([path]), 2)
+            exit_code, stdout, stderr = _capture_verify([path])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("JSON object", stderr)
 
     def test_verify_returns_zero_for_a_valid_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = write_ledger(Path(temp), minimal_ledger())
-            self.assertEqual(dashboard.verify([path]), 0)
+            exit_code, stdout, stderr = _capture_verify([path])
+            self.assertEqual(exit_code, 0)
+            self.assertIn("1 ledger(s) validated", stdout)
 
     def test_verify_returns_one_for_an_invalid_ledger(self) -> None:
         data = minimal_ledger()
         del data["records"]
         with tempfile.TemporaryDirectory() as temp:
             path = write_ledger(Path(temp), data)
-            self.assertEqual(dashboard.verify([path]), 1)
+            exit_code, stdout, stderr = _capture_verify([path])
+            self.assertEqual(exit_code, 1)
+            self.assertIn("records", stderr)
+            self.assertIn("finding(s)", stderr)
 
     def test_verify_returns_two_for_unreadable_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "ledger.json"
             path.write_text("{not json", encoding="utf-8")
-            self.assertEqual(dashboard.verify([path]), 2)
+            exit_code, stdout, stderr = _capture_verify([path])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("Unreadable ledger", stderr)
 
     def test_verify_returns_two_for_a_missing_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            self.assertEqual(dashboard.verify([Path(temp) / "absent.json"]), 2)
+            exit_code, stdout, stderr = _capture_verify([Path(temp) / "absent.json"])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("absent.json", stderr)
 
     def test_verify_returns_two_for_a_directory_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            self.assertEqual(dashboard.verify([Path(temp)]), 2)
+            exit_code, stdout, stderr = _capture_verify([Path(temp)])
+            self.assertEqual(exit_code, 2)
+            self.assertTrue(stderr, "Directory path should produce error output")
 
     def test_list_scope_produces_finding_not_crash(self) -> None:
         # scope is checked with a set-membership test; an unhashable value
@@ -1356,7 +1380,9 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
                 write_ledger(first_dir, first),
                 write_ledger(second_dir, second),
             ]
-            self.assertEqual(dashboard.verify(paths), 1)
+            exit_code, stdout, stderr = _capture_verify(paths)
+            self.assertEqual(exit_code, 1)
+            self.assertIn("duplicate", stderr.lower())
 
 
 class CrossLedgerDefensiveParsingTests(unittest.TestCase):
@@ -1484,11 +1510,9 @@ class PartialSetHonestyTests(unittest.TestCase):
             data["sequences"]["PROP"] = 1
             present_path = write_ledger(present_dir, data)
             missing_path = root / "missing" / "ledger.json"
-            buffer = io.StringIO()
-            with contextlib.redirect_stderr(buffer):
-                result = dashboard.verify([present_path, missing_path])
-            self.assertEqual(result, 2)
-            self.assertNotIn("unknown record", buffer.getvalue())
+            exit_code, stdout, stderr = _capture_verify([present_path, missing_path])
+            self.assertEqual(exit_code, 2)
+            self.assertNotIn("unknown record", stderr)
 
     def test_verify_prints_findings_from_readable_ledgers_before_failing(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1499,11 +1523,9 @@ class PartialSetHonestyTests(unittest.TestCase):
             del broken_data["records"]
             good_path = write_ledger(good_dir, broken_data)
             missing_path = root / "missing" / "ledger.json"
-            buffer = io.StringIO()
-            with contextlib.redirect_stderr(buffer):
-                result = dashboard.verify([good_path, missing_path])
-            self.assertEqual(result, 2)
-            self.assertIn("missing fields", buffer.getvalue())
+            exit_code, stdout, stderr = _capture_verify([good_path, missing_path])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("missing fields", stderr)
 
     def test_verify_continues_past_an_early_unreadable_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1514,18 +1536,21 @@ class PartialSetHonestyTests(unittest.TestCase):
             broken_data = minimal_ledger()
             del broken_data["records"]
             good_path = write_ledger(good_dir, broken_data)
-            buffer = io.StringIO()
-            with contextlib.redirect_stderr(buffer):
-                result = dashboard.verify([missing_path, good_path])
-            self.assertEqual(result, 2)
-            self.assertIn("missing fields", buffer.getvalue())
+            exit_code, stdout, stderr = _capture_verify([missing_path, good_path])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("missing fields", stderr)
 
 
 class MainDispatchTests(unittest.TestCase):
     def test_main_dispatches_to_verify(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = write_ledger(Path(temp), minimal_ledger())
-            self.assertEqual(dashboard.main(["verify", str(path)]), 0)
+            stdout_buf = io.StringIO()
+            stderr_buf = io.StringIO()
+            with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+                exit_code = dashboard.main(["verify", str(path)])
+            self.assertEqual(exit_code, 0)
+            self.assertIn("1 ledger(s) validated", stdout_buf.getvalue())
 
 
 class ProvisionalIdSchemaAlignmentTests(unittest.TestCase):
