@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.1 - 2026-07-30
+
+- corrects `.agents/plugins/marketplace.json`, the OpenAI Codex marketplace manifest, whose
+  `ref` still pinned `v0.1.3`; because a pinned ref never advances and `codex plugin marketplace
+  upgrade` refreshes the catalog rather than an installed plugin, every new Codex install
+  resolved 0.1.3 and 0.2.0 was unreachable through that path;
+- corrects the Codex install command and the Skill asset name in `README.md`, and the listing
+  version and evaluation-suite case count in `docs/SUBMISSION.md`;
+- adds `packaging/tests/test_version_consistency.py`, which elects `.claude-plugin/plugin.json`
+  as the single source of truth for the version and fails when any of the six other pins drifts
+  from it, naming the file that drifted;
+- documents that test in `packaging/README.md` as the authoritative list of version pins,
+  replacing per-release checklists that named four files while seven carry the version;
+- adds the release documents for 0.2.0 and 0.2.1.
+
 ## 0.2.0 - 2026-07-30
 
 - adds a local governance ledger recording every material audit, proposal, run, decision, and
