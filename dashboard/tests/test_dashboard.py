@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import tempfile
 import unittest
@@ -1235,6 +1237,300 @@ class KnownProjectSchemaAlignmentTests(unittest.TestCase):
         self.assertEqual(
             self.project_schema["properties"]["last_seen"]["pattern"],
             dashboard.DATE.pattern,
+        )
+
+
+class CrossLedgerIntegrityTests(unittest.TestCase):
+    def project_ledger(self) -> dict:
+        data = minimal_ledger()
+        data["scope"] = "project"
+        data["id_authority"] = False
+        return data
+
+    def test_duplicate_id_across_ledgers_is_reported(self) -> None:
+        first = self.project_ledger()
+        second = self.project_ledger()
+        first["records"] = [minimal_record()]
+        second["records"] = [minimal_record()]
+        findings = dashboard.validate_collection(
+            [("first", first), ("second", second)]
+        )
+        self.assertTrue(any("duplicate" in finding.lower() for finding in findings))
+
+    def test_duplicate_id_within_one_ledger_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["records"] = [minimal_record(), minimal_record()]
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertTrue(any("duplicate" in finding.lower() for finding in findings))
+
+    def test_sequence_must_cover_the_highest_allocated_id(self) -> None:
+        data = minimal_ledger()
+        data["records"] = [minimal_record()]
+        data["sequences"]["PROP"] = 0
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertTrue(any("sequences.PROP" in finding for finding in findings))
+
+    def test_matching_sequence_is_accepted(self) -> None:
+        data = minimal_ledger()
+        data["records"] = [minimal_record()]
+        data["sequences"]["PROP"] = 1
+        self.assertEqual(dashboard.validate_collection([("only", data)]), [])
+
+    def test_provisional_id_requires_the_reconciliation_flag(self) -> None:
+        data = self.project_ledger()
+        record = minimal_record()
+        record["id"] = "PROP-2026-000-P"
+        data["records"] = [record]
+        data["sequences"]["PROP"] = 1
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertTrue(any("reconcil" in finding for finding in findings))
+
+    def test_flagged_provisional_id_is_accepted(self) -> None:
+        data = self.project_ledger()
+        record = minimal_record()
+        record["id"] = "PROP-2026-000-P"
+        record["pending_id_reconciliation"] = True
+        data["records"] = [record]
+        data["sequences"]["PROP"] = 1
+        self.assertEqual(dashboard.validate_collection([("only", data)]), [])
+
+    def test_dangling_link_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["records"] = [minimal_record()]
+        data["sequences"]["PROP"] = 1
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertEqual(findings, [])
+        data["records"][0]["links"]["runs"] = ["RUN-2026-009"]
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertTrue(any("RUN-2026-009" in finding for finding in findings))
+
+    def test_more_than_one_id_authority_is_reported(self) -> None:
+        findings = dashboard.validate_collection(
+            [("a", minimal_ledger()), ("b", minimal_ledger())]
+        )
+        self.assertTrue(any("authority" in finding for finding in findings))
+
+    def test_verify_reports_cross_ledger_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            first_dir = root / "one"
+            second_dir = root / "two"
+            first_dir.mkdir()
+            second_dir.mkdir()
+            first = self.project_ledger()
+            second = self.project_ledger()
+            first["records"] = [minimal_record()]
+            second["records"] = [minimal_record()]
+            first["sequences"]["PROP"] = 1
+            second["sequences"]["PROP"] = 1
+            paths = [
+                write_ledger(first_dir, first),
+                write_ledger(second_dir, second),
+            ]
+            self.assertEqual(dashboard.verify(paths), 1)
+
+
+class CrossLedgerDefensiveParsingTests(unittest.TestCase):
+    # validate_collection walks ids, sequence numbers, and link targets from
+    # untrusted content; every value it indexes, splits, or int-converts
+    # must be guarded rather than trusted to have the expected shape.
+
+    def test_non_dict_document_is_ignored_not_crashed(self) -> None:
+        findings = dashboard.validate_collection([("bad", "not-a-ledger")])
+        self.assertEqual(findings, [])
+
+    def test_non_list_records_field_is_ignored_not_crashed(self) -> None:
+        data = minimal_ledger()
+        data["records"] = "not-a-list"
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertEqual(findings, [])
+
+    def test_non_dict_record_element_is_ignored_not_crashed(self) -> None:
+        data = minimal_ledger()
+        data["records"] = ["not-a-record"]
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertEqual(findings, [])
+
+    def test_non_string_record_id_is_ignored_not_crashed(self) -> None:
+        data = minimal_ledger()
+        record = minimal_record()
+        record["id"] = ["PROP-2026-000"]
+        data["records"] = [record]
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertEqual(findings, [])
+
+    def test_non_dict_links_field_is_ignored_not_crashed(self) -> None:
+        data = minimal_ledger()
+        record = minimal_record()
+        record["links"] = ["not-a-dict"]
+        data["records"] = [record]
+        data["sequences"]["PROP"] = 1
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertEqual(findings, [])
+
+    def test_non_list_link_target_field_is_ignored_not_crashed(self) -> None:
+        # A malformed links.runs of type int is not just "no findings": if it
+        # were iterated naively (e.g. `value or []`), an int would raise
+        # TypeError. A string would silently iterate its characters. Both
+        # must be treated as "no targets" rather than crashing or reporting
+        # bogus single-character dangling links.
+        data = minimal_ledger()
+        record = minimal_record()
+        record["links"]["runs"] = 42
+        data["records"] = [record]
+        data["sequences"]["PROP"] = 1
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertEqual(findings, [])
+
+    def test_string_link_target_field_is_not_iterated_by_character(self) -> None:
+        data = minimal_ledger()
+        record = minimal_record()
+        record["links"]["runs"] = "RUN-2026-000"
+        data["records"] = [record]
+        data["sequences"]["PROP"] = 1
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertEqual(findings, [])
+
+    def test_non_dict_sequences_field_is_ignored_not_crashed(self) -> None:
+        data = minimal_ledger()
+        data["records"] = [minimal_record()]
+        data["sequences"] = "not-a-dict"
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertEqual(findings, [])
+
+    def test_non_integer_sequence_value_is_ignored_not_crashed(self) -> None:
+        data = minimal_ledger()
+        data["records"] = [minimal_record()]
+        data["sequences"]["PROP"] = "not-an-int"
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertEqual(findings, [])
+
+    def test_non_boolean_id_authority_is_ignored_not_crashed(self) -> None:
+        data = minimal_ledger()
+        data["id_authority"] = []
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertEqual(findings, [])
+
+
+class PartialSetHonestyTests(unittest.TestCase):
+    def project_ledger(self) -> dict:
+        data = minimal_ledger()
+        data["scope"] = "project"
+        data["id_authority"] = False
+        return data
+
+    def test_incomplete_collection_suppresses_dangling_link_check(self) -> None:
+        data = minimal_ledger()
+        record = minimal_record()
+        record["links"]["runs"] = ["RUN-2026-009"]
+        data["records"] = [record]
+        data["sequences"]["PROP"] = 1
+        findings = dashboard.validate_collection([("only", data)], complete=False)
+        self.assertEqual(findings, [])
+
+    def test_incomplete_collection_still_reports_duplicate_ids(self) -> None:
+        first = self.project_ledger()
+        second = self.project_ledger()
+        first["records"] = [minimal_record()]
+        second["records"] = [minimal_record()]
+        first["sequences"]["PROP"] = 1
+        second["sequences"]["PROP"] = 1
+        findings = dashboard.validate_collection(
+            [("first", first), ("second", second)], complete=False
+        )
+        self.assertTrue(any("duplicate" in finding.lower() for finding in findings))
+
+    def test_verify_partial_set_suppresses_dangling_link_finding(self) -> None:
+        # A link target declared only in an unreachable ledger must not be
+        # reported as dangling: that finding would be an artifact of the
+        # incomplete set, not a real integrity problem.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            present_dir = root / "present"
+            present_dir.mkdir()
+            data = self.project_ledger()
+            record = minimal_record()
+            record["links"]["runs"] = ["RUN-2026-009"]
+            data["records"] = [record]
+            data["sequences"]["PROP"] = 1
+            present_path = write_ledger(present_dir, data)
+            missing_path = root / "missing" / "ledger.json"
+            buffer = io.StringIO()
+            with contextlib.redirect_stderr(buffer):
+                result = dashboard.verify([present_path, missing_path])
+            self.assertEqual(result, 2)
+            self.assertNotIn("unknown record", buffer.getvalue())
+
+    def test_verify_prints_findings_from_readable_ledgers_before_failing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            good_dir = root / "good"
+            good_dir.mkdir()
+            broken_data = minimal_ledger()
+            del broken_data["records"]
+            good_path = write_ledger(good_dir, broken_data)
+            missing_path = root / "missing" / "ledger.json"
+            buffer = io.StringIO()
+            with contextlib.redirect_stderr(buffer):
+                result = dashboard.verify([good_path, missing_path])
+            self.assertEqual(result, 2)
+            self.assertIn("missing fields", buffer.getvalue())
+
+    def test_verify_continues_past_an_early_unreadable_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            missing_path = root / "missing.json"
+            good_dir = root / "good"
+            good_dir.mkdir()
+            broken_data = minimal_ledger()
+            del broken_data["records"]
+            good_path = write_ledger(good_dir, broken_data)
+            buffer = io.StringIO()
+            with contextlib.redirect_stderr(buffer):
+                result = dashboard.verify([missing_path, good_path])
+            self.assertEqual(result, 2)
+            self.assertIn("missing fields", buffer.getvalue())
+
+
+class MainDispatchTests(unittest.TestCase):
+    def test_main_dispatches_to_verify(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = write_ledger(Path(temp), minimal_ledger())
+            self.assertEqual(dashboard.main(["verify", str(path)]), 0)
+
+
+class ProvisionalIdSchemaAlignmentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        self.record_schema = schema["properties"]["records"]["items"]
+
+    def test_schema_declares_pending_id_reconciliation_property(self) -> None:
+        self.assertIn(
+            "pending_id_reconciliation", self.record_schema["properties"]
+        )
+
+    def test_schema_provisional_id_pattern_matches_runtime_validator(self) -> None:
+        clause = next(
+            item
+            for item in self.record_schema["allOf"]
+            if "pending_id_reconciliation"
+            in item.get("then", {}).get("required", [])
+        )
+        self.assertEqual(
+            clause["if"]["properties"]["id"]["pattern"],
+            dashboard.PROVISIONAL_ID.pattern,
+        )
+
+    def test_schema_requires_pending_id_reconciliation_for_provisional_ids(self) -> None:
+        clause = next(
+            item
+            for item in self.record_schema["allOf"]
+            if "pending_id_reconciliation"
+            in item.get("then", {}).get("required", [])
+        )
+        self.assertEqual(clause["then"]["required"], ["pending_id_reconciliation"])
+        self.assertIs(
+            clause["then"]["properties"]["pending_id_reconciliation"]["const"], True
         )
 
 

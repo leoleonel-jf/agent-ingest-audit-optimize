@@ -156,8 +156,22 @@
                 }
               }
             }
-          }
+          },
+          "pending_id_reconciliation": { "type": "boolean" }
         },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "id": { "pattern": "-P$" } }
+            },
+            "then": {
+              "required": ["pending_id_reconciliation"],
+              "properties": {
+                "pending_id_reconciliation": { "const": true }
+              }
+            }
+          }
+        ],
         "if": {
           "properties": { "type": { "const": "RUN" } }
         },

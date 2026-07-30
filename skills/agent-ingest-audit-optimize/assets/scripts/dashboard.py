@@ -39,6 +39,7 @@ ARRAY_FIELDS = ("known_projects", "records", "baselines", "backlog")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 RECORD_ID = re.compile(r"^(MAT|PROP|RUN|ADR|BASE)-\d{4}-\d{3}(-P)?$")
+PROVISIONAL_ID = re.compile(r"-P$")
 RECORD_TYPES = {"MATERIAL", "PROPOSAL", "RUN", "ADR", "BASELINE"}
 RECORD_STATUSES = {
     "ANALYZED",
@@ -479,17 +480,102 @@ def validate_known_project(entry: dict, index: int, *, source: str) -> list[str]
     return findings
 
 
+def _prefix_and_number(identifier: str) -> tuple[str, int]:
+    prefix, _, rest = identifier.partition("-")  # identifier is RECORD_ID-valid
+    return prefix, int(rest.split("-")[1])
+
+
+def validate_collection(
+    documents: list[tuple[str, dict]], *, complete: bool = True
+) -> list[str]:
+    # complete=False skips link checks to avoid false dangling-link findings.
+    findings: list[str] = []
+    seen: dict[str, str] = {}
+    declared: set[str] = set()
+    authorities: list[str] = []
+    all_records: list[tuple[str, dict]] = []
+    for source, data in documents:
+        if isinstance(data, dict) and data.get("id_authority") is True:
+            authorities.append(source)
+        records = data.get("records") if isinstance(data, dict) else None
+        highest: dict[str, int] = {}
+        for record in records if isinstance(records, list) else []:
+            if not isinstance(record, dict):
+                continue
+            all_records.append((source, record))
+            identifier = record.get("id")
+            if not isinstance(identifier, str) or not RECORD_ID.fullmatch(identifier):
+                continue
+            if identifier in seen:
+                findings.append(
+                    f"Duplicate record id {identifier} in {source} and {seen[identifier]}"
+                )
+            else:
+                seen[identifier] = source
+            declared.add(identifier)
+            reconciled = record.get("pending_id_reconciliation") is True
+            if PROVISIONAL_ID.search(identifier) and not reconciled:
+                findings.append(
+                    f"{source}: {identifier} is provisional and requires "
+                    "pending_id_reconciliation to be true"
+                )
+            prefix, number = _prefix_and_number(identifier)
+            highest[prefix] = max(highest.get(prefix, -1), number)
+        sequences = data.get("sequences") if isinstance(data, dict) else None
+        if isinstance(sequences, dict):
+            for prefix, number in highest.items():
+                allocated = sequences.get(prefix)
+                if type(allocated) is int and allocated < number + 1:
+                    findings.append(
+                        f"{source}: sequences.{prefix} is {allocated} but "
+                        f"{prefix}-{number:03d} is already allocated"
+                    )
+
+    if complete:
+        for source, record in all_records:
+            links = record.get("links")
+            if not isinstance(links, dict):
+                continue
+            for field in LINK_FIELDS:
+                targets = links.get(field)
+                if not isinstance(targets, list):
+                    continue
+                for target in targets:
+                    if isinstance(target, str) and target not in declared:
+                        findings.append(
+                            f"{source}: {record.get('id')} links to an "
+                            f"unknown record: {target}"
+                        )
+
+    if len(authorities) > 1:
+        findings.append(
+            f"More than one ledger claims ID authority: {sorted(authorities)}"
+        )
+
+    return findings
+
+
 def verify(paths: list[Path]) -> int:
     findings: list[str] = []
+    documents: list[tuple[str, dict]] = []
+    errors: list[str] = []
+
     for path in paths:
+        source = str(path)
         try:
             data = load_json(path)
         except LedgerError as exc:
-            print(str(exc), file=sys.stderr)
-            return 2
-        findings.extend(validate_ledger(data, source=str(path)))
-    for finding in findings:
-        print(finding, file=sys.stderr)
+            errors.append(str(exc))
+            continue
+        findings.extend(validate_ledger(data, source=source))
+        documents.append((source, data))
+
+    findings.extend(validate_collection(documents, complete=not errors))
+    for line in (*findings, *errors):
+        print(line, file=sys.stderr)
+
+    if errors:
+        return 2
     if findings:
         print(f"{len(findings)} finding(s)", file=sys.stderr)
         return 1
@@ -504,13 +590,8 @@ def main(argv: list[str] | None = None) -> int:
     verify_parser.add_argument("paths", nargs="+", type=Path)
     arguments = parser.parse_args(argv)
 
-    try:
-        if arguments.command == "verify":
-            return verify(arguments.paths)
-    except LedgerError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    return 2
+    if arguments.command == "verify":
+        return verify(arguments.paths)
 
 
 if __name__ == "__main__":
