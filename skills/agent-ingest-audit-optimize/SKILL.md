@@ -127,9 +127,11 @@ Read [references/PLATFORM_ADAPTATION.md](references/PLATFORM_ADAPTATION.md) befo
 
 Delegate independently verifiable work when the client supports subagents: material acquisition, per-claim verification, environment inventory, and alternative evaluation during deliberation. Each unit returns structured data, not prose. Keep synthesis, classification, prioritization, proposal authoring, and every user-facing decision in the main context.
 
-Never delegate implementation. Backup, apply, validate, and record form a single-writer sequence that only its own worker can halt. Never run two authorized proposals at once, and never grant a subagent authority to authorize.
+Never delegate implementation. Backup, apply, validate, and record form a single-writer sequence, and a stop condition reached by one worker cannot halt another mid-write. Never run two authorized proposals at once, never split one implementation across workers, and never grant a subagent authority to authorize.
 
-Detect subagent support; never assume it. Without it, run the same work sequentially instead.
+Detect subagent support; never assume it. Without it, run the same work sequentially instead, producing identical results.
+
+Read [references/PLATFORM_ADAPTATION.md](references/PLATFORM_ADAPTATION.md) for fuller delegation guidance.
 
 ## Enforce security boundaries
 
