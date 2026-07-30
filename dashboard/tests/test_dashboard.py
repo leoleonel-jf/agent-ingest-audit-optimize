@@ -255,15 +255,13 @@ class LedgerDocumentTests(unittest.TestCase):
         )
 
     def test_valid_empty_dicts_in_arrays_have_no_findings(self) -> None:
-        # `records` now carries its own schema (validate_record), so an empty
-        # dict is no longer a valid element there — it is exercised via
-        # RecordEntryTests / test_records_are_validated_through_the_ledger
-        # instead. known_projects/baselines/backlog have no per-item schema
-        # yet (later tasks own those), so empty dicts remain valid for them.
+        # `records` carries its own schema (validate_record), and `backlog` /
+        # `known_projects` now carry theirs too (validate_backlog_entry /
+        # validate_known_project) — an empty dict is no longer a valid
+        # element for any of them. Only `baselines` has no per-item schema
+        # yet (a later task owns that), so an empty dict remains valid there.
         data = minimal_ledger()
-        data["known_projects"] = [{}]
         data["baselines"] = [{}]
-        data["backlog"] = [{}, {}, {}]
         findings = dashboard.validate_ledger(data, source="test")
         self.assertEqual(findings, [])
 
@@ -909,6 +907,241 @@ class RunSchemaAlignmentTests(unittest.TestCase):
         actual_json = sorted(json.dumps(value, sort_keys=True) for value in enum)
         expected_json = sorted(json.dumps(value, sort_keys=True) for value in expected)
         self.assertEqual(actual_json, expected_json)
+
+
+def minimal_backlog_entry() -> dict:
+    return {
+        "id": "PROP-2026-001",
+        "classification": "NEEDS MORE EVIDENCE",
+        "reason": "The vendor has published no stable interface yet.",
+        "revisit_trigger": "The client documents a stable hook API",
+        "revisit_after": None,
+    }
+
+
+def minimal_known_project() -> dict:
+    return {
+        "project_root": "/home/user/project",
+        "ledger_path": "/home/user/project/.agent-audit/ledger.json",
+        "last_seen": "2026-07-29",
+        "last_digest": "sha256:" + "3" * 64,
+        "status": "OK",
+    }
+
+
+class BacklogTests(unittest.TestCase):
+    def check(self, entry: dict) -> list[str]:
+        return dashboard.validate_backlog_entry(entry, 0, source="test")
+
+    def test_minimal_backlog_entry_has_no_findings(self) -> None:
+        self.assertEqual(self.check(minimal_backlog_entry()), [])
+
+    def test_revisit_after_alone_is_sufficient(self) -> None:
+        entry = minimal_backlog_entry()
+        entry["revisit_trigger"] = None
+        entry["revisit_after"] = "2026-10-01"
+        self.assertEqual(self.check(entry), [])
+
+    def test_entry_without_any_revisit_condition_is_reported(self) -> None:
+        entry = minimal_backlog_entry()
+        entry["revisit_trigger"] = None
+        entry["revisit_after"] = None
+        self.assertTrue(any("revisit" in finding for finding in self.check(entry)))
+
+    def test_terminal_classification_may_not_enter_the_backlog(self) -> None:
+        entry = minimal_backlog_entry()
+        entry["classification"] = "ALREADY IMPLEMENTED"
+        self.assertTrue(any("terminal" in finding for finding in self.check(entry)))
+
+    def test_reason_must_be_present(self) -> None:
+        entry = minimal_backlog_entry()
+        entry["reason"] = ""
+        self.assertTrue(any("reason" in finding for finding in self.check(entry)))
+
+    def test_revisit_after_must_match_date_format(self) -> None:
+        # Extends the brief: revisit_after is a date field like every other
+        # date in this ledger, so a malformed (but truthy) value must be
+        # reported even though it alone satisfies the "has a revisit
+        # condition" check.
+        entry = minimal_backlog_entry()
+        entry["revisit_trigger"] = None
+        entry["revisit_after"] = "10/01/2026"
+        self.assertTrue(
+            any(
+                "revisit_after must be null or match YYYY-MM-DD" in finding
+                for finding in self.check(entry)
+            )
+        )
+
+    def test_valid_backlog_classification_is_accepted(self) -> None:
+        entry = minimal_backlog_entry()
+        entry["classification"] = "RISK EXCEEDS BENEFIT"
+        self.assertEqual(self.check(entry), [])
+
+    def test_non_backlog_non_terminal_classification_is_reported(self) -> None:
+        entry = minimal_backlog_entry()
+        entry["classification"] = "ADOPT GLOBALLY"
+        self.assertTrue(
+            any("invalid classification" in finding for finding in self.check(entry))
+        )
+
+    def test_malformed_backlog_id_is_reported(self) -> None:
+        entry = minimal_backlog_entry()
+        entry["id"] = "PROP-26-1"
+        self.assertTrue(
+            any("backlog[0] has an invalid id" in finding for finding in self.check(entry))
+        )
+
+    def test_missing_backlog_field_is_reported(self) -> None:
+        entry = minimal_backlog_entry()
+        del entry["reason"]
+        self.assertTrue(
+            any(
+                "missing fields" in finding and "'reason'" in finding
+                for finding in self.check(entry)
+            )
+        )
+
+    def test_non_dict_backlog_entry_returns_defensive_finding(self) -> None:
+        findings = dashboard.validate_backlog_entry("not-an-entry", 0, source="test")
+        self.assertEqual(findings, ["test: backlog[0] must be an object"])
+
+
+class KnownProjectTests(unittest.TestCase):
+    def check(self, entry: dict) -> list[str]:
+        return dashboard.validate_known_project(entry, 0, source="test")
+
+    def test_minimal_known_project_has_no_findings(self) -> None:
+        self.assertEqual(self.check(minimal_known_project()), [])
+
+    def test_unknown_status_is_reported(self) -> None:
+        entry = minimal_known_project()
+        entry["status"] = "GONE"
+        self.assertTrue(any("status" in finding for finding in self.check(entry)))
+
+    def test_digest_must_be_sha256(self) -> None:
+        entry = minimal_known_project()
+        entry["last_digest"] = "sha1:abc"
+        self.assertTrue(any("last_digest" in finding for finding in self.check(entry)))
+
+    def test_last_seen_must_match_date_format(self) -> None:
+        # Extends the brief: last_seen is a date field like every other date
+        # in this ledger (created/updated/verified_on/recorded_on), so it
+        # must follow the same YYYY-MM-DD pattern rather than only being
+        # checked for non-blankness.
+        entry = minimal_known_project()
+        entry["last_seen"] = "07/29/2026"
+        self.assertTrue(
+            any(
+                "last_seen must match YYYY-MM-DD" in finding
+                for finding in self.check(entry)
+            )
+        )
+
+    def test_empty_project_root_is_reported(self) -> None:
+        entry = minimal_known_project()
+        entry["project_root"] = "   "
+        self.assertTrue(any("project_root" in finding for finding in self.check(entry)))
+
+    def test_empty_ledger_path_is_reported(self) -> None:
+        entry = minimal_known_project()
+        entry["ledger_path"] = ""
+        self.assertTrue(any("ledger_path" in finding for finding in self.check(entry)))
+
+    def test_missing_known_project_field_is_reported(self) -> None:
+        entry = minimal_known_project()
+        del entry["status"]
+        self.assertTrue(
+            any(
+                "missing fields" in finding and "'status'" in finding
+                for finding in self.check(entry)
+            )
+        )
+
+    def test_non_dict_known_project_returns_defensive_finding(self) -> None:
+        findings = dashboard.validate_known_project(123, 0, source="test")
+        self.assertEqual(findings, ["test: known_projects[0] must be an object"])
+
+    def test_backlog_and_projects_are_validated_through_the_ledger(self) -> None:
+        data = minimal_ledger()
+        entry = minimal_backlog_entry()
+        entry["revisit_trigger"] = None
+        entry["revisit_after"] = None
+        data["backlog"] = [entry]
+        data["known_projects"] = [minimal_known_project()]
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("revisit" in finding for finding in findings))
+
+
+class BacklogSchemaAlignmentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        self.backlog_schema = schema["properties"]["backlog"]["items"]
+
+    def test_schema_backlog_required_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.backlog_schema["required"]), dashboard.REQUIRED_BACKLOG_FIELDS
+        )
+
+    def test_schema_backlog_classification_enum_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.backlog_schema["properties"]["classification"]["enum"]),
+            dashboard.BACKLOG_CLASSIFICATIONS,
+        )
+
+    def test_schema_backlog_id_pattern_matches_record_id_pattern(self) -> None:
+        self.assertEqual(
+            self.backlog_schema["properties"]["id"]["pattern"],
+            dashboard.RECORD_ID.pattern,
+        )
+
+    def test_schema_backlog_revisit_after_pattern_matches_date_regex(self) -> None:
+        self.assertEqual(
+            self.backlog_schema["properties"]["revisit_after"]["pattern"],
+            dashboard.DATE.pattern,
+        )
+
+    def test_schema_backlog_revisit_falsy_enum_matches_expected_literals(self) -> None:
+        # Same reasoning as the RUN target's residual_effect enum: compare
+        # JSON text rather than a Python set/`in` check, since Python
+        # conflates 0/False and 1/True.
+        not_clause = self.backlog_schema["not"]["properties"]
+        expected = [None, "", False, 0, [], {}]
+        expected_json = sorted(json.dumps(value, sort_keys=True) for value in expected)
+        for field in ("revisit_trigger", "revisit_after"):
+            actual_json = sorted(
+                json.dumps(value, sort_keys=True) for value in not_clause[field]["enum"]
+            )
+            self.assertEqual(actual_json, expected_json)
+
+
+class KnownProjectSchemaAlignmentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        self.project_schema = schema["properties"]["known_projects"]["items"]
+
+    def test_schema_known_project_required_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.project_schema["required"]), dashboard.REQUIRED_PROJECT_FIELDS
+        )
+
+    def test_schema_known_project_status_enum_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.project_schema["properties"]["status"]["enum"]),
+            dashboard.PROJECT_STATUSES,
+        )
+
+    def test_schema_known_project_last_digest_pattern_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            self.project_schema["properties"]["last_digest"]["pattern"],
+            dashboard.DIGEST.pattern,
+        )
+
+    def test_schema_known_project_last_seen_pattern_matches_date_regex(self) -> None:
+        self.assertEqual(
+            self.project_schema["properties"]["last_seen"]["pattern"],
+            dashboard.DATE.pattern,
+        )
 
 
 if __name__ == "__main__":

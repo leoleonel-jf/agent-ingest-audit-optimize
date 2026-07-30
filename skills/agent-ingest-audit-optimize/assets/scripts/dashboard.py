@@ -119,6 +119,30 @@ REQUIRED_TARGET_FIELDS = {
     "residual_effect",
 }
 
+BACKLOG_CLASSIFICATIONS = {
+    "REJECT",
+    "NEEDS MORE EVIDENCE",
+    "RISK EXCEEDS BENEFIT",
+    "MONITOR",
+    "TEST IN ISOLATION",
+}
+TERMINAL_CLASSIFICATIONS = {"OBSOLETE", "NOT APPLICABLE", "ALREADY IMPLEMENTED"}
+REQUIRED_BACKLOG_FIELDS = {
+    "id",
+    "classification",
+    "reason",
+    "revisit_trigger",
+    "revisit_after",
+}
+PROJECT_STATUSES = {"OK", "UNREACHABLE", "CHANGED_EXTERNALLY"}
+REQUIRED_PROJECT_FIELDS = {
+    "project_root",
+    "ledger_path",
+    "last_seen",
+    "last_digest",
+    "status",
+}
+
 
 class LedgerError(RuntimeError):
     """Raised when a ledger cannot be read at all."""
@@ -194,6 +218,12 @@ def validate_ledger(data: dict, *, source: str) -> list[str]:
         elif field == "records":
             for index, record in enumerate(data[field]):
                 findings.extend(validate_record(record, index, source=source))
+        elif field == "backlog":
+            for index, entry in enumerate(data[field]):
+                findings.extend(validate_backlog_entry(entry, index, source=source))
+        elif field == "known_projects":
+            for index, entry in enumerate(data[field]):
+                findings.extend(validate_known_project(entry, index, source=source))
         else:
             for index, element in enumerate(data[field]):
                 if not isinstance(element, dict):
@@ -357,6 +387,77 @@ def validate_record(record: dict, index: int, *, source: str) -> list[str]:
     if record["type"] == "RUN":
         findings.extend(validate_run(record, label=label))
 
+    return findings
+
+
+def validate_backlog_entry(entry: dict, index: int, *, source: str) -> list[str]:
+    label = f"{source}: backlog[{index}]"
+    if not isinstance(entry, dict):
+        return [f"{label} must be an object"]
+    missing = REQUIRED_BACKLOG_FIELDS - set(entry)
+    if missing:
+        return [f"{label} missing fields: {sorted(missing)}"]
+
+    findings: list[str] = []
+    identifier = entry["id"]
+    if not isinstance(identifier, str) or not RECORD_ID.fullmatch(identifier):
+        findings.append(f"{label} has an invalid id: {identifier!r}")
+    else:
+        label = f"{source}: backlog {identifier}"
+
+    classification = entry["classification"]
+    if classification in TERMINAL_CLASSIFICATIONS:
+        findings.append(
+            f"{label} uses the terminal classification {classification!r}, "
+            "which never enters the backlog"
+        )
+    elif classification not in BACKLOG_CLASSIFICATIONS:
+        findings.append(f"{label} has an invalid classification: {classification!r}")
+
+    if not isinstance(entry["reason"], str) or not entry["reason"].strip():
+        findings.append(f"{label} reason must be a non-empty string")
+
+    # revisit_after is a date field like every other date in this ledger
+    # (created, updated, verified_on, recorded_on): when present it must
+    # match YYYY-MM-DD. Unlike those fields it is nullable — null means
+    # "no date condition", which is legitimate as long as revisit_trigger
+    # supplies the revisit condition instead.
+    revisit_after = entry["revisit_after"]
+    if revisit_after is not None and (
+        not isinstance(revisit_after, str) or not DATE.fullmatch(revisit_after)
+    ):
+        findings.append(f"{label} revisit_after must be null or match YYYY-MM-DD")
+
+    if not entry["revisit_trigger"] and not entry["revisit_after"]:
+        findings.append(f"{label} requires a revisit_trigger or a revisit_after date")
+
+    return findings
+
+
+def validate_known_project(entry: dict, index: int, *, source: str) -> list[str]:
+    label = f"{source}: known_projects[{index}]"
+    if not isinstance(entry, dict):
+        return [f"{label} must be an object"]
+    missing = REQUIRED_PROJECT_FIELDS - set(entry)
+    if missing:
+        return [f"{label} missing fields: {sorted(missing)}"]
+
+    findings: list[str] = []
+    for field in ("project_root", "ledger_path"):
+        if not isinstance(entry[field], str) or not entry[field].strip():
+            findings.append(f"{label} {field} must be a non-empty string")
+
+    # last_seen is a date field like created/updated/verified_on/recorded_on
+    # elsewhere in this ledger, and unlike revisit_after it is not nullable.
+    last_seen = entry["last_seen"]
+    if type(last_seen) is not str or not DATE.fullmatch(last_seen):
+        findings.append(f"{label} last_seen must match YYYY-MM-DD")
+
+    digest = entry["last_digest"]
+    if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
+        findings.append(f"{label} last_digest must be a sha256 digest")
+    if entry["status"] not in PROJECT_STATUSES:
+        findings.append(f"{label} has an invalid status: {entry['status']!r}")
     return findings
 
 
