@@ -180,6 +180,11 @@ def _path_key(value: str) -> str:
     This normalizes textually -- never resolving, never opening -- so comparing
     a ledger's stored path against the paths the user named cannot be steered
     into reading somewhere else.
+
+    `normpath`'s textual `..` collapse is correct on Windows, whose own path
+    normalization is likewise textual, but it is unsound across POSIX
+    symlinks. `resolve()` is deliberately not used here: the whole point is
+    to never touch the filesystem for a ledger-supplied value.
     """
     return os.path.normcase(os.path.normpath(value))
 
@@ -596,16 +601,16 @@ def validate_collection(
                 if not isinstance(entry, dict):
                     continue
                 ledger_path = entry.get("ledger_path")
-                declared = entry.get("last_digest")
-                if not isinstance(ledger_path, str) or not isinstance(declared, str):
+                recorded = entry.get("last_digest")
+                if not isinstance(ledger_path, str) or not isinstance(recorded, str):
                     continue
                 # A path that was not passed on the command line is not
                 # comparable. Silence here means "not checked", never "correct".
                 actual = digests.get(_path_key(ledger_path))
-                if actual is None or actual == declared:
+                if actual is None or actual == recorded:
                     continue
                 findings.append(
-                    f"{source}: known_projects[{index}] last_digest {declared!r} "
+                    f"{source}: known_projects[{index}] last_digest {recorded!r} "
                     f"does not match {ledger_path!r}, which hashes to {actual!r}"
                 )
 
@@ -626,6 +631,13 @@ def verify(paths: list[Path]) -> int:
     for path in paths:
         source = str(path)
         try:
+            # load_json and file_digest each open the file independently, so
+            # in principle the digest could describe different bytes than
+            # the parsed document if the file changes between the two reads.
+            # Accepted: a local validator run by the ledger's owner over
+            # their own files has no privilege boundary to defend, and the
+            # realistic outcome of that microsecond window is a spurious
+            # finding that a re-run clears.
             data = load_json(path)
             digest = file_digest(path)
         except LedgerError as exc:

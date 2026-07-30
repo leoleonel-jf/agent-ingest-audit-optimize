@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import re
 import tempfile
 import unittest
@@ -1511,6 +1512,48 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
             )
 
             self.assertFalse(any("last_digest" in finding for finding in findings))
+
+    def test_verify_matches_relative_invocation_against_absolute_ledger_path(
+        self,
+    ) -> None:
+        # verify() itself must exercise the digest wiring end to end: it
+        # populates `digests`, passes it into validate_collection, and
+        # registers each path under two keys (the path as given, and its
+        # resolved form) so a ledger's stored absolute ledger_path still
+        # matches an invocation that names the same file differently. Here
+        # the project ledger is invoked via a relative path while the
+        # global ledger's known_projects[0] records it by absolute path --
+        # the match can only happen through the `path.resolve()` key.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project_dir = root / "project"
+            project_dir.mkdir()
+            project_data = self.project_ledger()
+            project_data["records"] = [minimal_record()]
+            project_data["sequences"]["PROP"] = 1
+            project_path = write_ledger(project_dir, project_data)
+
+            global_data = minimal_ledger()
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(project_dir),
+                    "ledger_path": str(project_path.resolve()),
+                    "last_seen": "2026-07-30",
+                    # Wrong but well-formed: the real digest is whatever
+                    # write_ledger actually produced, never all-nines.
+                    "last_digest": "sha256:" + "9" * 64,
+                    "status": "OK",
+                }
+            ]
+            global_path = write_ledger(root, global_data)
+
+            relative_project_path = Path(os.path.relpath(project_path, Path.cwd()))
+            exit_code, stdout, stderr = _capture_verify(
+                [relative_project_path, global_path]
+            )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("last_digest", stderr)
 
 
 class CrossLedgerDefensiveParsingTests(unittest.TestCase):
