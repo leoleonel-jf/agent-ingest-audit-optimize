@@ -2304,6 +2304,18 @@ class AnchorPathTests(unittest.TestCase):
                     dashboard.anchor_path(root / "file.txt", {bad_name: root})
                 self.assertIn(repr(bad_name), str(ctx.exception))
 
+    def test_tie_break_between_equal_depth_roots_is_deterministic_by_name(self) -> None:
+        # M13: two different names for the identical root (so both match at
+        # the same depth) must not pick a winner based on dict insertion
+        # order. Sorting on the anchor name makes the result the same
+        # regardless of which order the mapping was built in.
+        root = ANCHOR_BASE / "project"
+        path = root / "file.txt"
+        stored_zzz_first, _ = dashboard.anchor_path(path, {"ZZZ": root, "AAA": root})
+        stored_aaa_first, _ = dashboard.anchor_path(path, {"AAA": root, "ZZZ": root})
+        self.assertEqual(stored_zzz_first, stored_aaa_first)
+        self.assertEqual(stored_zzz_first, "$AAA/file.txt")
+
 
 class ResolveAnchoredTests(unittest.TestCase):
     def test_unknown_anchor_is_refused(self) -> None:
@@ -2331,18 +2343,20 @@ class ResolveAnchoredTests(unittest.TestCase):
 
     def test_posix_absolute_path_is_refused(self) -> None:
         # Refusal 3, POSIX form: an absolute path where an anchored form was
-        # required.
+        # required. M7/M8: this has its own message, distinct from a
+        # malformed-or-missing anchor reference, so a caller can tell rule 3
+        # apart from a string that merely fails to parse as $NAME/....
         root = ANCHOR_BASE / "project"
         with self.assertRaises(dashboard.PathSafetyError) as ctx:
             dashboard.resolve_anchored("/etc/passwd", {"PROJECT": root})
-        self.assertIn("not anchored", str(ctx.exception))
+        self.assertIn("is absolute", str(ctx.exception))
 
     def test_windows_drive_absolute_path_is_refused(self) -> None:
         # Refusal 3, Windows drive form.
         root = ANCHOR_BASE / "project"
         with self.assertRaises(dashboard.PathSafetyError) as ctx:
             dashboard.resolve_anchored("C:/Windows/System32", {"PROJECT": root})
-        self.assertIn("not anchored", str(ctx.exception))
+        self.assertIn("is absolute", str(ctx.exception))
 
     def test_resolved_result_outside_root_is_refused(self) -> None:
         # Refusal 4 is the final backstop: after every prefix has been
@@ -2638,6 +2652,68 @@ class ResolveAnchoredTests(unittest.TestCase):
             resolved = dashboard.resolve_anchored("$R/solo.txt", {"R": root})
             self.assertEqual(resolved, target.resolve())
 
+    def test_malformed_anchor_reference_gets_its_own_message(self) -> None:
+        # M7/M8: a string that is not absolute but still fails to parse as
+        # $NAME/... must not share rule 3's "is absolute" message, nor the
+        # old undifferentiated "not anchored" wording -- it is a different
+        # problem (a malformed or missing anchor reference) and must be
+        # distinguishable from both.
+        root = ANCHOR_BASE / "project"
+        roots = {"R": root, "PROJECT": root}
+        forms = ["$r/x", "$R2/x", "${R}/x", "$", "relative/path.txt"]
+        for form in forms:
+            with self.subTest(form=form):
+                with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                    dashboard.resolve_anchored(form, roots)
+                message = str(ctx.exception)
+                self.assertIn("valid anchor reference", message)
+                self.assertNotIn("is absolute", message)
+                self.assertNotIn("crosses a link", message)
+
+    def test_trailing_dot_space_forms_never_report_the_link_rule(self) -> None:
+        # M7/M8: whatever resolve_anchored decides about a trailing
+        # dot/space segment -- accept it, or refuse it for some other
+        # reason -- it must never claim a link was crossed, since none is
+        # involved in any of these forms.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            (root / "f.txt").write_text("x", encoding="utf-8")
+            forms = ["$R/...", "$R/. .", "$R/f.txt/...", "$R/f.txt/. ."]
+            for form in forms:
+                with self.subTest(form=form):
+                    try:
+                        dashboard.resolve_anchored(form, {"R": root})
+                    except dashboard.PathSafetyError as exc:
+                        self.assertNotIn("crosses a link", str(exc))
+
+    def test_drive_component_mid_path_no_longer_reports_the_link_rule(self) -> None:
+        # M7/M8's "$R/D:/x" case: before M12's colon check, joining a
+        # component that looks like a drive letter reset pathlib's join and
+        # the result resolved outside the anchor, misreported as "crosses a
+        # link". The colon check now refuses this earlier and by its own
+        # rule, so the link message must never appear here.
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("$R/D:/x", {"R": root})
+        self.assertNotIn("crosses a link", str(ctx.exception))
+        self.assertIn("':'", str(ctx.exception))
+
+    def test_trailing_newline_no_longer_aliases_the_anchor_reference(self) -> None:
+        # M10: ANCHOR_REFERENCE used '$', which matches just before a
+        # trailing newline as well as at the true end of string, so
+        # "$R/f.txt\n" parsed identically to "$R/f.txt" -- two different
+        # stored strings resolving to the same anchor reference. '\Z'
+        # requires the true end of the string, so the newline form must now
+        # be refused instead of silently aliasing.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            target = root / "f.txt"
+            target.write_text("x", encoding="utf-8")
+            resolved = dashboard.resolve_anchored("$R/f.txt", {"R": root})
+            self.assertEqual(resolved, target.resolve())
+            with self.assertRaises(dashboard.PathSafetyError):
+                dashboard.resolve_anchored("$R/f.txt\n", {"R": root})
+
 
 class RefuseIfHardlinkedTests(unittest.TestCase):
     def test_directory_is_never_refused_regardless_of_link_count(self) -> None:
@@ -2701,6 +2777,27 @@ class CheckGlobTests(unittest.TestCase):
 
     def test_ordinary_relative_glob_is_accepted(self) -> None:
         dashboard.check_glob("src/**/*.py")  # must not raise
+
+    def test_dot_and_space_variants_of_dotdot_are_refused(self) -> None:
+        # M9: ntpath.realpath collapses a segment made entirely of dots
+        # and/or spaces the same way it collapses "..", even though it
+        # didn't traverse via this glob library on this build -- the two
+        # normalizers disagreeing is exactly the wrong place to be relaxed.
+        for pattern in ("...", ".. ", ". .", "a/.../b", "a/.. /b", "a/. ./b"):
+            with self.subTest(pattern=pattern):
+                with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                    dashboard.check_glob(pattern)
+                self.assertIn("'..' segment", str(ctx.exception))
+
+    def test_bare_dot_segment_is_accepted(self) -> None:
+        # A lone "." is an ordinary no-op segment, not an escape -- it must
+        # not be swept up by the generalized dot/space check.
+        dashboard.check_glob("./src/*.py")
+
+    def test_nul_byte_is_refused(self) -> None:
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.check_glob("src/*.py\0evil")
+        self.assertIn("NUL byte", str(ctx.exception))
 
 
 if __name__ == "__main__":

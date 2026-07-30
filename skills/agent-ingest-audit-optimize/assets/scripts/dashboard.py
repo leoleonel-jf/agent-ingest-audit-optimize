@@ -147,7 +147,7 @@ REQUIRED_PROJECT_FIELDS = {
     "status",
 }
 
-ANCHOR_REFERENCE = re.compile(r"^\$([A-Z_]+)(?:/(.*))?$")
+ANCHOR_REFERENCE = re.compile(r"^\$([A-Z_]+)(?:/(.*))?\Z")
 ANCHOR_NAME = re.compile(r"^[A-Z_]+$")
 # CON, PRN, AUX, NUL, COM1-9, LPT1-9, with or without an extension. Reserved
 # on Windows regardless of extension or case; refused on every platform
@@ -240,6 +240,12 @@ def anchor_path(path: Path, roots: dict[str, Path]) -> tuple[str, bool]:
     literal prefix of it. Resolving first collapses `..` (and any symlink)
     to where the path actually points, so a path that truly lands outside
     every anchor is matched -- and stored -- honestly, per design spec 7.1.
+
+    M13: when two different names map to roots of the same depth (most
+    concretely, two names for the identical root), the winner is the one
+    that sorts first by anchor name -- not whichever happened to be inserted
+    into `roots` first. `dict` iteration order is insertion order, and a tie
+    broken by "first seen" is not a property of the anchors at all.
     """
     _validate_anchor_names(roots)
     absolute = path.resolve()
@@ -250,7 +256,7 @@ def anchor_path(path: Path, roots: dict[str, Path]) -> tuple[str, bool]:
         except ValueError:
             continue  # not under this root; relative_to compares components
         depth = len(root.parts)
-        if best is None or depth > best[0]:
+        if best is None or depth > best[0] or (depth == best[0] and name < best[1]):
             best = (depth, name, relative)
     if best is None:
         return str(absolute), False
@@ -264,12 +270,29 @@ def check_glob(pattern: str) -> None:
 
     Design spec section 9: no probe field may contain a glob that escapes its
     anchor; `scan` rejects `..` segments and absolute globs.
+
+    This validates the PATTERN only. Nothing here expands it: every path a
+    glob later expands to must still be passed through `resolve_anchored`,
+    because a glob hit can itself be a link that leaves the anchor -- a
+    clean pattern says nothing about what it might match once there is a
+    directory to expand it against.
     """
     if not isinstance(pattern, str) or not pattern.strip():
         raise PathSafetyError(f"glob must be a non-empty string: {pattern!r}")
+    if "\0" in pattern:
+        raise PathSafetyError(f"glob contains a NUL byte: {pattern!r}")
     normalized = pattern.replace("\\", "/")
-    if any(part == ".." for part in normalized.split("/")):
-        raise PathSafetyError(f"glob contains a '..' segment: {pattern!r}")
+    for part in normalized.split("/"):
+        # A segment made up entirely of dots and/or spaces -- ".." itself,
+        # but also "...", ".. ", ". .", and similar -- collapses to nothing
+        # once Windows strips trailing dots and spaces from it, exactly the
+        # way ntpath.realpath does when a path built from this glob is later
+        # resolved. Stripping trailing dots/spaces here before testing is
+        # what keeps this normalizer from being more relaxed than that one.
+        # "" and "." are excluded: an empty segment (from a repeated "/")
+        # and a literal single-dot segment are ordinary no-ops, not escapes.
+        if part not in ("", ".") and part.rstrip(" .") == "":
+            raise PathSafetyError(f"glob contains a '..' segment: {pattern!r}")
     if normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
         raise PathSafetyError(f"glob is absolute: {pattern!r}")
 
@@ -310,9 +333,17 @@ def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
     normalized = stored.replace("\\", "/")
     if any(part == ".." for part in normalized.split("/")):
         raise PathSafetyError(f"path contains a '..' segment: {stored!r}")
+    # Rule 3 gets its own message, distinct from a malformed-or-missing
+    # anchor reference below: an absolute path is a different problem from a
+    # string that merely fails to parse as $NAME/..., and a caller cannot
+    # tell them apart from one shared "not anchored" message.
+    if normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
+        raise PathSafetyError(
+            f"path is absolute; an anchor reference was required: {stored!r}"
+        )
     match = ANCHOR_REFERENCE.match(normalized)
     if match is None:
-        raise PathSafetyError(f"path is not anchored: {stored!r}")
+        raise PathSafetyError(f"path does not match a valid anchor reference: {stored!r}")
     name, tail = match.group(1), match.group(2) or ""
     root = roots.get(name)
     if root is None:
