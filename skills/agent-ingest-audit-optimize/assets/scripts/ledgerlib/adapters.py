@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from pathlib import Path
+from typing import NamedTuple
 
 from ledgerlib.constants import (
     ANCHOR_NAME,
@@ -50,6 +51,26 @@ PROBE_FIELDS = {"kind", "scope", "glob", "path", "parse", "pointer"}
 PARSE_FORMATS = {"json", "toml"}
 
 ENV_CANDIDATE_PREFIX = "$env:"
+
+# The client selected when detection finds no single answer. Looked up in the
+# candidate index by this name rather than opened as `generic.json` directly,
+# so a user adapter declaring `generic` overrides the bundled one the same way
+# every other client does.
+GENERIC_CLIENT = "generic"
+
+# The anchor detection reads. Bare, because that is the key space
+# `resolve_anchor_roots` returns.
+USER_CONFIG_ANCHOR = "USER_CONFIG"
+
+# Where a user adapter lives beneath the directory `--user-config` names.
+# Design spec section 9 fixes this path and `SKILL.md` writes `local.json`
+# into it; the tuple is joined rather than written as a string so it is one
+# path on every platform.
+USER_ADAPTER_DIRECTORY = ("agent-ingest-audit-optimize", "adapters")
+
+USER_ADAPTERS_SKIPPED_NOTE = (
+    "user adapters were not read: no --user-config was given"
+)
 
 
 def validate_adapter(data: dict, *, source: str) -> list[str]:
@@ -326,3 +347,202 @@ def _safe_resolve(path: Path) -> Path | None:
         # "this candidate does not qualify", so it is swallowed rather than
         # raised -- resolving an anchor root is a survey, not an access.
         return None
+
+
+class _Candidate(NamedTuple):
+    """One adapter the selector may choose, and where it came from."""
+
+    client: str
+    path: Path
+    data: dict
+    origin: str  # "bundled" or "user"
+
+
+def select_adapter(
+    *,
+    client: str | None,
+    adapter: Path | None,
+    user_config: Path | None,
+    bundled: Path,
+    environ: Mapping[str, str],
+    project: Path,
+) -> tuple[dict, list[str]]:
+    """Choose an adapter and explain the choice.
+
+    Returns the chosen adapter document and a list of plain-string notes. The
+    caller prints the notes and the baseline records them: a scan whose
+    coverage depends on which adapter ran must say which one ran and why, or
+    a baseline of nothing is indistinguishable from a baseline of a clean
+    machine.
+
+    Precedence, highest first:
+
+    1. `adapter` -- an explicit `--adapter FILE`. It wins over everything,
+       and neither adapter directory is read at all.
+    2. `client` -- an explicit `--client NAME`, resolved against the
+       candidate index. A name that is not in the index raises: an explicit
+       wrong name is a typo, and answering a typo with `generic.json` scans
+       nothing under a name the user never sees.
+    3. Detection -- an adapter matches when its `$USER_CONFIG` anchor
+       resolves. Exactly one match selects it; two or more, or none, selects
+       `generic.json` with a note naming the candidates and the reason.
+       Detection never guesses between two plausible clients silently.
+
+    The index is keyed by each document's `client` value, not by its file
+    name, and a user adapter beats a bundled one with the same key. `client`
+    is the identity the ledger, the notes, and `--client` all use; a file
+    name is a place the document happens to sit.
+
+    `user_config=None` means the user-adapter directory is never read -- not
+    defaulted to the home directory. The tool cannot know which client's
+    configuration root is meant on a machine that may have several, and
+    reading a directory the user did not name is exactly what design spec
+    section 13.6 exists to prevent.
+    """
+    if adapter is not None:
+        data = load_adapter(adapter)
+        return data, [_selected(adapter, data["client"], "named by --adapter")]
+
+    notes: list[str] = []
+    index = _index_adapters(bundled=bundled, user_config=user_config, notes=notes)
+
+    if client is not None:
+        chosen = index.get(client)
+        if chosen is None:
+            raise LedgerError(
+                f"unknown client {client!r}: the clients available are "
+                f"{sorted(index)}; a client that is not one of them needs a "
+                "user adapter at <user-config>/"
+                + "/".join(USER_ADAPTER_DIRECTORY)
+                + "/local.json"
+            )
+        notes.append(_selected(chosen.path, chosen.client, "named by --client"))
+        return chosen.data, notes
+
+    detectable = sorted(
+        candidate.client
+        for candidate in index.values()
+        if USER_CONFIG_ANCHOR in _anchor_names(candidate.data)
+    )
+    matched = sorted(
+        name
+        for name in detectable
+        if _user_config_resolves(index[name].data, project=project, environ=environ)
+    )
+    if len(matched) == 1:
+        chosen = index[matched[0]]
+        notes.append(
+            _selected(chosen.path, chosen.client, "detected: its $USER_CONFIG resolved")
+        )
+        return chosen.data, notes
+
+    generic = index.get(GENERIC_CLIENT)
+    if generic is None:
+        raise LedgerError(
+            f"no adapter for client {GENERIC_CLIENT!r} in {bundled}: it is what "
+            "detection falls back to, so the bundle cannot run without it"
+        )
+    if matched:
+        why = (
+            f"detection is ambiguous: $USER_CONFIG resolved for {matched}, and "
+            "detection never guesses between two plausible clients"
+        )
+    else:
+        why = f"no client detected: $USER_CONFIG resolved for none of {detectable}"
+    notes.append(_selected(generic.path, generic.client, why))
+    return generic.data, notes
+
+
+def _selected(path: Path, client: str, why: str) -> str:
+    return f"selected adapter {path} for client {client!r}: {why}"
+
+
+def _index_adapters(
+    *, bundled: Path, user_config: Path | None, notes: list[str]
+) -> dict[str, _Candidate]:
+    """Key every available adapter by its `client`, user beating bundled.
+
+    Every candidate is loaded and validated here, not lazily when it is
+    chosen. A file in either directory that cannot be read, cannot be parsed,
+    or does not validate is a refusal, because the alternative is to skip it
+    -- and a user adapter that is silently skipped is precisely the broken
+    override the user wrote to fix something, routed around instead of
+    reported.
+    """
+    index: dict[str, _Candidate] = {}
+
+    files = _adapter_files(bundled)
+    if not files:
+        raise LedgerError(f"no adapters found in {bundled}")
+    for path in files:
+        _add_candidate(index, _read_candidate(path, origin="bundled"), notes=notes)
+
+    if user_config is None:
+        notes.append(USER_ADAPTERS_SKIPPED_NOTE)
+        return index
+
+    # A `--user-config` that has no adapters directory is the ordinary case
+    # on a machine where the user has never written one, so an absent
+    # directory yields nothing rather than raising.
+    for path in _adapter_files(user_config.joinpath(*USER_ADAPTER_DIRECTORY)):
+        _add_candidate(index, _read_candidate(path, origin="user"), notes=notes)
+    return index
+
+
+def _add_candidate(
+    index: dict[str, _Candidate], candidate: _Candidate, *, notes: list[str]
+) -> None:
+    existing = index.get(candidate.client)
+    if existing is not None:
+        if existing.origin == candidate.origin:
+            # Two files in one directory claiming one client. Whichever won
+            # would be decided by sort order, and the loser would be invisible
+            # -- including to the user who edited it and saw no change.
+            raise LedgerError(
+                f"two adapters declare client {candidate.client!r}: "
+                f"{existing.path} and {candidate.path}"
+            )
+        notes.append(
+            f"user adapter {candidate.path} overrides the bundled adapter for "
+            f"client {candidate.client!r} ({existing.path})"
+        )
+    index[candidate.client] = candidate
+
+
+def _read_candidate(path: Path, *, origin: str) -> _Candidate:
+    data = load_adapter(path)
+    # `load_adapter` has already refused anything whose `client` is not a
+    # non-empty `[a-z0-9-]+` string, so the key below is always usable.
+    return _Candidate(client=data["client"], path=path, data=data, origin=origin)
+
+
+def _adapter_files(directory: Path) -> list[Path]:
+    try:
+        return sorted(path for path in directory.glob("*.json") if path.is_file())
+    except OSError:
+        return []
+
+
+def _anchor_names(adapter: dict) -> set[str]:
+    """The bare anchor names an adapter declares, `$` stripped."""
+    anchors = adapter.get("anchors")
+    if not isinstance(anchors, dict):
+        return set()
+    return {
+        name[1:] if isinstance(name, str) and name.startswith("$") else name
+        for name in anchors
+    }
+
+
+def _user_config_resolves(
+    adapter: dict, *, project: Path, environ: Mapping[str, str]
+) -> bool:
+    """Whether at least one `$USER_CONFIG` candidate is an existing directory.
+
+    Detection reuses `resolve_anchor_roots` rather than re-implementing the
+    candidate rules, so an adapter is detected under exactly the conditions
+    its probes would later run under -- `$env:` first, `~` expanded, the first
+    existing directory wins.
+    """
+    roots, _ = resolve_anchor_roots(adapter, project=project, environ=environ)
+    return USER_CONFIG_ANCHOR in roots

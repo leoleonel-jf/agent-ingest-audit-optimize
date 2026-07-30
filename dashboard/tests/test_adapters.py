@@ -707,5 +707,447 @@ class BundledAdapterTests(unittest.TestCase):
                 self.assertIn("env", patterns)
 
 
+class SelectAdapterTests(unittest.TestCase):
+    """`select_adapter`: precedence, detection, and the unknown-client flow.
+
+    The bundled directory is built in a temporary tree rather than pointed at
+    `assets/adapters/`, so these tests state the selection rules and not the
+    current contents of the three shipped files.
+    `RealBundledSelectionTests` below is the one that runs against the shipped
+    directory, so a shipped adapter that stops being selectable is still
+    caught.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.bundled = self.root / "bundled"
+        self.bundled.mkdir()
+        self.user_config = self.root / "user-config"
+        self.user_adapters = (
+            self.user_config / "agent-ingest-audit-optimize" / "adapters"
+        )
+        self.project = self.root / "project"
+        self.project.mkdir()
+        self.write_adapter(self.bundled, "generic.json", self.document("generic"))
+
+    # -- fixtures ---------------------------------------------------------
+
+    def document(self, client: str, *, user_config: list[str] | None = None) -> dict:
+        data = {
+            "adapter_version": 1,
+            "client": client,
+            "expires_on": "2026-10-28",
+            "anchors": {"$PROJECT": ["."]},
+            "probes": [],
+            "sensitive_key_patterns": [],
+        }
+        if user_config is not None:
+            data["anchors"] = {"$USER_CONFIG": user_config, "$PROJECT": ["."]}
+        return data
+
+    def write_adapter(self, directory: Path, name: str, data: dict) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / name
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return path
+
+    def existing_root(self, name: str) -> Path:
+        path = self.root / name
+        path.mkdir(exist_ok=True)
+        return path
+
+    def select(self, **overrides):
+        arguments = {
+            "client": None,
+            "adapter": None,
+            "user_config": None,
+            "bundled": self.bundled,
+            "environ": {},
+            "project": self.project,
+        }
+        arguments.update(overrides)
+        return adapters.select_adapter(**arguments)
+
+    def globbed_directories(self) -> list[Path]:
+        """Record every directory `Path.glob` is called on, delegating through.
+
+        Used to prove a directory was never *read*, which no assertion about
+        the returned adapter can establish on its own: an implementation that
+        reads the user directory and then discards it would pass a
+        behavioural test and still have opened a directory the user did not
+        name.
+        """
+        calls: list[Path] = []
+        original = Path.glob
+
+        def recording(inner_self, pattern, *args, **kwargs):
+            calls.append(inner_self)
+            return original(inner_self, pattern, *args, **kwargs)
+
+        patcher = mock.patch.object(Path, "glob", recording)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return calls
+
+    # -- rule 1: `--adapter` wins over everything --------------------------
+
+    def test_an_explicit_adapter_wins_over_client_and_over_detection(self) -> None:
+        detectable = self.existing_root("alpha-home")
+        self.write_adapter(
+            self.bundled, "alpha.json", self.document("alpha", user_config=[str(detectable)])
+        )
+        named = self.write_adapter(
+            self.root, "explicit.json", self.document("zeta")
+        )
+        data, notes = self.select(client="alpha", adapter=named)
+        self.assertEqual(data["client"], "zeta")
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn(str(named), notes[0])
+        self.assertIn("--adapter", notes[0])
+
+    def test_an_explicit_adapter_is_validated_like_a_bundled_one(self) -> None:
+        broken = self.document("zeta")
+        broken["expires_on"] = "nope"
+        broken["probes"] = [{"kind": "skill", "glob": "$USER_CONFIG/../x"}]
+        named = self.write_adapter(self.root, "explicit.json", broken)
+        with self.assertRaises(LedgerError) as caught:
+            self.select(adapter=named)
+        message = str(caught.exception)
+        self.assertEqual(
+            message, "\n".join(adapters.validate_adapter(broken, source=str(named)))
+        )
+        self.assertIn("expires_on must match YYYY-MM-DD", message)
+        self.assertIn("glob_dotdot_segment", message)
+
+    def test_an_explicit_adapter_reads_no_adapter_directory(self) -> None:
+        named = self.write_adapter(self.root, "explicit.json", self.document("zeta"))
+        calls = self.globbed_directories()
+        self.select(adapter=named, user_config=self.user_config)
+        self.assertNotIn(self.bundled, calls)
+        self.assertNotIn(self.user_adapters, calls)
+        # Proves the recorder observes what it claims to: the same call
+        # without `--adapter` does glob the bundled directory.
+        self.select()
+        self.assertIn(self.bundled, calls)
+
+    # -- rule 2: `--client` names one -------------------------------------
+
+    def test_client_selects_the_bundled_adapter_of_that_name(self) -> None:
+        path = self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        data, notes = self.select(client="alpha")
+        self.assertEqual(data["client"], "alpha")
+        self.assertTrue(
+            any(str(path) in note and "--client" in note for note in notes), notes
+        )
+
+    def test_the_adapter_file_name_is_not_the_key_its_client_value_is(self) -> None:
+        """Keyed by the document's `client`, not by the file's stem."""
+        self.write_adapter(self.bundled, "misnamed.json", self.document("alpha"))
+        data, _ = self.select(client="alpha")
+        self.assertEqual(data["client"], "alpha")
+        with self.assertRaises(LedgerError):
+            self.select(client="misnamed")
+
+    def test_an_unknown_client_is_a_tool_error_naming_the_clients_available(
+        self,
+    ) -> None:
+        """An explicit wrong name is a typo, not an unknown client.
+
+        Falling back to `generic.json` here would answer a question the user
+        did not ask, and the baseline would record a scan of nothing under a
+        name they never see.
+        """
+        self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        self.write_adapter(self.bundled, "beta.json", self.document("beta"))
+        with self.assertRaises(LedgerError) as caught:
+            self.select(client="clod-code")
+        message = str(caught.exception)
+        self.assertIn(repr("clod-code"), message)
+        for available in ("alpha", "beta", "generic"):
+            self.assertIn(repr(available), message)
+
+    def test_an_unknown_client_never_falls_back_to_generic(self) -> None:
+        with self.assertRaises(LedgerError):
+            self.select(client="nope")
+
+    def test_a_user_adapter_overrides_a_bundled_one_with_the_same_client(self) -> None:
+        self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        override = self.document("alpha")
+        override["sensitive_key_patterns"] = ["*token*"]
+        path = self.write_adapter(self.user_adapters, "local.json", override)
+        data, notes = self.select(client="alpha", user_config=self.user_config)
+        self.assertEqual(data["sensitive_key_patterns"], ["*token*"])
+        self.assertTrue(
+            any(str(path) in note and "override" in note for note in notes), notes
+        )
+
+    def test_the_override_note_names_the_client_and_the_user_file(self) -> None:
+        self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        path = self.write_adapter(self.user_adapters, "local.json", self.document("alpha"))
+        _, notes = self.select(client="alpha", user_config=self.user_config)
+        overrides = [note for note in notes if "override" in note]
+        self.assertEqual(len(overrides), 1, notes)
+        self.assertIn(str(path), overrides[0])
+        self.assertIn(repr("alpha"), overrides[0])
+
+    def test_a_user_adapter_introduces_a_client_the_bundle_does_not_ship(self) -> None:
+        path = self.write_adapter(self.user_adapters, "local.json", self.document("zeta"))
+        data, notes = self.select(client="zeta", user_config=self.user_config)
+        self.assertEqual(data["client"], "zeta")
+        self.assertTrue(any(str(path) in note for note in notes), notes)
+        self.assertFalse([note for note in notes if "override" in note], notes)
+
+    # -- rule 3: detection -------------------------------------------------
+
+    def test_detection_selects_the_only_adapter_whose_user_config_resolves(self) -> None:
+        present = self.existing_root("alpha-home")
+        path = self.write_adapter(
+            self.bundled, "alpha.json", self.document("alpha", user_config=[str(present)])
+        )
+        self.write_adapter(
+            self.bundled,
+            "beta.json",
+            self.document("beta", user_config=[str(self.root / "absent")]),
+        )
+        data, notes = self.select()
+        self.assertEqual(data["client"], "alpha")
+        self.assertTrue(any(str(path) in note for note in notes), notes)
+
+    def test_detection_reads_the_environ_argument_not_the_process_environment(
+        self,
+    ) -> None:
+        present = self.existing_root("alpha-home")
+        self.write_adapter(
+            self.bundled,
+            "alpha.json",
+            self.document("alpha", user_config=["$env:ALPHA_HOME"]),
+        )
+        with mock.patch.dict(os.environ, {"ALPHA_HOME": str(present)}):
+            data, _ = self.select()
+        self.assertEqual(data["client"], "generic")
+        data, _ = self.select(environ={"ALPHA_HOME": str(present)})
+        self.assertEqual(data["client"], "alpha")
+
+    def test_detection_resolves_relative_candidates_against_the_project(self) -> None:
+        (self.project / ".alpha").mkdir()
+        self.write_adapter(
+            self.bundled, "alpha.json", self.document("alpha", user_config=[".alpha"])
+        )
+        data, _ = self.select()
+        self.assertEqual(data["client"], "alpha")
+
+    def test_two_matches_select_generic_and_the_note_names_both(self) -> None:
+        """Detection never guesses between two plausible clients silently."""
+        for name in ("alpha", "beta"):
+            self.write_adapter(
+                self.bundled,
+                f"{name}.json",
+                self.document(name, user_config=[str(self.existing_root(f"{name}-home"))]),
+            )
+        data, notes = self.select()
+        self.assertEqual(data["client"], "generic")
+        ambiguous = [note for note in notes if repr("alpha") in note]
+        self.assertEqual(len(ambiguous), 1, notes)
+        self.assertIn(repr("beta"), ambiguous[0])
+
+    def test_no_match_selects_generic_and_the_note_says_why(self) -> None:
+        self.write_adapter(
+            self.bundled,
+            "alpha.json",
+            self.document("alpha", user_config=[str(self.root / "absent")]),
+        )
+        data, notes = self.select()
+        self.assertEqual(data["client"], "generic")
+        self.assertTrue(any("$USER_CONFIG" in note for note in notes), notes)
+        self.assertTrue(any(repr("alpha") in note for note in notes), notes)
+
+    def test_a_user_adapter_participates_in_detection(self) -> None:
+        present = self.existing_root("zeta-home")
+        self.write_adapter(
+            self.user_adapters,
+            "local.json",
+            self.document("zeta", user_config=[str(present)]),
+        )
+        data, _ = self.select(user_config=self.user_config)
+        self.assertEqual(data["client"], "zeta")
+
+    def test_an_overridden_bundled_adapter_does_not_detect_on_its_own(self) -> None:
+        """One client, one candidate: the override replaces, it does not add."""
+        present = self.existing_root("alpha-home")
+        self.write_adapter(
+            self.bundled, "alpha.json", self.document("alpha", user_config=[str(present)])
+        )
+        self.write_adapter(
+            self.user_adapters,
+            "local.json",
+            self.document("alpha", user_config=[str(present)]),
+        )
+        data, _ = self.select(user_config=self.user_config)
+        self.assertEqual(data["client"], "alpha")
+
+    # -- rule 4: an invalid user adapter is refused -----------------------
+
+    def test_an_invalid_user_adapter_is_refused_with_the_same_findings(self) -> None:
+        self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        broken = self.document("alpha")
+        broken["expires_on"] = "nope"
+        broken["probes"] = [{"kind": "skill", "glob": "$USER_CONFIG/../x"}]
+        path = self.write_adapter(self.user_adapters, "local.json", broken)
+        with self.assertRaises(LedgerError) as caught:
+            self.select(client="alpha", user_config=self.user_config)
+        message = str(caught.exception)
+        self.assertEqual(
+            message, "\n".join(adapters.validate_adapter(broken, source=str(path)))
+        )
+        self.assertIn("expires_on must match YYYY-MM-DD", message)
+        self.assertIn("glob_dotdot_segment", message)
+        self.assertIn(str(path), message)
+
+    def test_an_invalid_user_adapter_does_not_fall_back_to_the_bundled_file(
+        self,
+    ) -> None:
+        self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        broken = self.document("alpha")
+        broken["expires_on"] = "nope"
+        self.write_adapter(self.user_adapters, "local.json", broken)
+        with self.assertRaises(LedgerError):
+            self.select(client="alpha", user_config=self.user_config)
+        with self.assertRaises(LedgerError):
+            self.select(user_config=self.user_config)
+
+    def test_an_unparsable_user_adapter_is_refused(self) -> None:
+        self.user_adapters.mkdir(parents=True)
+        (self.user_adapters / "local.json").write_text("{not json", encoding="utf-8")
+        with self.assertRaises(LedgerError):
+            self.select(client="generic", user_config=self.user_config)
+
+    # -- rule 5: `user_config=None` never reads the directory --------------
+
+    def test_user_config_none_never_reads_the_user_adapter_directory(self) -> None:
+        """Proved by the directory not being opened, not by the result alone.
+
+        The user adapter written here *would* win if it were read: it
+        declares the same client as the bundled file and differs from it in a
+        field the assertion can see.
+        """
+        self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        would_win = self.document("alpha")
+        would_win["sensitive_key_patterns"] = ["*token*"]
+        path = self.write_adapter(self.user_adapters, "local.json", would_win)
+
+        calls = self.globbed_directories()
+        data, notes = self.select(client="alpha")
+
+        self.assertEqual(data["sensitive_key_patterns"], [])
+        for note in notes:
+            self.assertNotIn(str(path), note)
+            self.assertNotIn(str(self.user_adapters), note)
+            self.assertNotIn("override", note)
+        self.assertNotIn(self.user_adapters, calls)
+        self.assertNotIn(self.user_config, calls)
+        # Asserted as equality rather than as two absences, so that a
+        # `user_config=None` defaulted to *any* other directory -- the home
+        # directory being the tempting one -- fails here too. Not vacuous
+        # either way: the recorder did see the directory that was read.
+        self.assertEqual(calls, [self.bundled])
+
+    def test_user_config_none_is_recorded_as_a_note(self) -> None:
+        data, notes = self.select(client="generic")
+        self.assertEqual(data["client"], "generic")
+        self.assertTrue(any("user adapters" in note for note in notes), notes)
+
+    def test_a_missing_user_adapter_directory_is_not_an_error(self) -> None:
+        """`--user-config` may name a root that has no adapters directory."""
+        self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        self.user_config.mkdir()
+        data, _ = self.select(client="alpha", user_config=self.user_config)
+        self.assertEqual(data["client"], "alpha")
+
+    # -- shape and tool errors --------------------------------------------
+
+    def test_notes_are_plain_strings(self) -> None:
+        _, notes = self.select()
+        self.assertTrue(notes)
+        for note in notes:
+            self.assertIsInstance(note, str)
+
+    def test_an_empty_bundled_directory_is_a_tool_error(self) -> None:
+        empty = self.root / "empty"
+        empty.mkdir()
+        with self.assertRaises(LedgerError) as caught:
+            self.select(bundled=empty)
+        self.assertIn(str(empty), str(caught.exception))
+
+    def test_a_bundle_without_generic_is_a_tool_error_when_detection_falls_back(
+        self,
+    ) -> None:
+        (self.bundled / "generic.json").unlink()
+        self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        with self.assertRaises(LedgerError) as caught:
+            self.select()
+        self.assertIn(repr("generic"), str(caught.exception))
+
+    def test_two_adapters_declaring_the_same_client_is_a_tool_error(self) -> None:
+        self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        self.write_adapter(self.bundled, "alpha-copy.json", self.document("alpha"))
+        with self.assertRaises(LedgerError) as caught:
+            self.select(client="alpha")
+        self.assertIn(repr("alpha"), str(caught.exception))
+
+
+class RealBundledSelectionTests(unittest.TestCase):
+    """Selection against the directory the bundle actually ships.
+
+    `SelectAdapterTests` builds its own bundled tree so the rules are stated
+    independently of the shipped files. This class exists so a shipped
+    adapter that stops being selectable -- renamed, given a `client` that no
+    longer matches, or made invalid -- fails here rather than on a user's
+    machine.
+    """
+
+    def select(self, **overrides):
+        arguments = {
+            "client": None,
+            "adapter": None,
+            "user_config": None,
+            "bundled": ADAPTERS_DIR,
+            "environ": {},
+            "project": REPO_ROOT,
+        }
+        arguments.update(overrides)
+        return adapters.select_adapter(**arguments)
+
+    def test_every_shipped_adapter_is_selectable_by_its_client_name(self) -> None:
+        paths = sorted(ADAPTERS_DIR.glob("*.json"))
+        self.assertTrue(paths, f"no adapters found in {ADAPTERS_DIR}")
+        for path in paths:
+            client = json.loads(path.read_text(encoding="utf-8"))["client"]
+            with self.subTest(adapter=path.name):
+                data, notes = self.select(client=client)
+                self.assertEqual(data["client"], client)
+                self.assertTrue(any(str(path) in note for note in notes), notes)
+
+    def test_an_unknown_client_names_every_shipped_client(self) -> None:
+        with self.assertRaises(LedgerError) as caught:
+            self.select(client="not-a-client")
+        message = str(caught.exception)
+        for path in sorted(ADAPTERS_DIR.glob("*.json")):
+            client = json.loads(path.read_text(encoding="utf-8"))["client"]
+            self.assertIn(repr(client), message)
+
+    def test_detection_against_an_empty_machine_selects_generic(self) -> None:
+        """No anchor candidate resolves under a tree with nothing in it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp).resolve()
+            with mock.patch.dict(
+                os.environ, {"HOME": str(empty), "USERPROFILE": str(empty)}
+            ):
+                data, notes = self.select(project=empty)
+        self.assertEqual(data["client"], "generic")
+        self.assertTrue(notes)
+
+
 if __name__ == "__main__":
     unittest.main()

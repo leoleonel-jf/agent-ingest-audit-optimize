@@ -21,7 +21,33 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+import os
+import stat
 from collections.abc import Sequence
+from pathlib import Path
+
+from ledgerlib.constants import ANCHOR_REFERENCE
+from ledgerlib.errors import PathSafetyError
+from ledgerlib.paths import anchor_path, file_digest, resolve_anchored
+
+
+# The reasons `scan` itself puts in `attributes.reason`, as opposed to the
+# `PathSafetyError.reason` keys `errors.PATH_SAFETY_REASONS` owns. The two
+# sets share one attribute because they answer one question -- why this item
+# is not a plain digested file -- and a caller that wants to know whether the
+# path layer refused the path can test membership in `PATH_SAFETY_REASONS`.
+SCAN_REASONS = frozenset(
+    {
+        "malformed_probe",
+        "unresolved_anchor",
+        "glob_failed",
+        "no_match",
+        "missing",
+        "inaccessible",
+        "directory",
+        "unreadable",
+    }
+)
 
 
 def _value_digest(value: object) -> str:
@@ -117,3 +143,226 @@ def redact(value: object, patterns: Sequence[str]) -> object:
     if isinstance(value, list):
         return [redact(item, patterns) for item in value]
     return value
+
+
+def run_probe(
+    probe: dict, roots: dict[str, Path], patterns: Sequence[str]
+) -> list[dict]:
+    """The baseline items one probe yields.
+
+    Always at least one item, never an empty list, and never an exception for
+    anything reachable from probe data or from the filesystem. Spec section
+    3.4: a probe that matches nothing is recorded as exactly one item with
+    `state: "not_present"` and a `null` digest -- never an error, never
+    silence. A baseline that omits what it failed to find is a baseline that
+    looks clean, which is the worst output this tool can produce.
+
+    The security rule this function exists to enforce: **every** path, whether
+    expanded from a glob or named literally, is re-checked with
+    `resolve_anchored` on its anchored form before it is opened. `check_glob`
+    ran at load time against the pattern and says nothing about what the
+    filesystem holds now -- a symlinked or junctioned directory inside
+    `$USER_CONFIG/skills/` can carry a match clean out of the anchor between
+    the adapter being validated and this walk running. A refusal becomes one
+    item with `state: "not_present"` and the `PathSafetyError` reason in
+    `attributes`, and the scan continues: refusing to look at one path is not
+    a reason to abandon the baseline.
+
+    The stored form always comes from `anchor_path`, never from string
+    concatenation. That function owns the longest-anchor rule -- a project
+    nested inside a user configuration root anchors to `$PROJECT` -- and it
+    resolves before matching, so a match that truly lands outside every anchor
+    comes back absolute and `portable: false`. Feeding that absolute form to
+    `resolve_anchored` is what turns the escape into a refusal: an anchored
+    form that is not anchored is exactly the thing rule 3 rejects.
+
+    Glob results are sorted by their anchored path. `Path.glob` yields
+    whatever order the directory index hands back, which differs by filesystem
+    and by insertion history; an unordered baseline diffs against itself.
+
+    `patterns` is accepted and unused here on purpose. Parsing arrives in the
+    next task and is where redaction is wired in; a probe carrying `parse` or
+    `pointer` yields the whole-file item for now.
+    """
+    spec, is_glob = _probe_target(probe)
+    if spec is None:
+        return [_item(probe, name=_probe_label(probe), anchor=_probe_label(probe),
+                      state="not_present", reason="malformed_probe")]
+
+    reference = ANCHOR_REFERENCE.match(spec.replace("\\", "/"))
+    if reference is None:
+        return [_item(probe, name=spec, anchor=spec, state="not_present",
+                      reason="path_malformed_anchor_reference")]
+
+    root = roots.get(reference.group(1))
+    if root is None:
+        # An unresolved anchor is not an error. `resolve_anchor_roots` returns
+        # the names it could not resolve rather than guessing a vendor default,
+        # and every probe beneath one is recorded absent rather than silently
+        # skipped.
+        return [_item(probe, name=spec, anchor=spec, state="not_present",
+                      reason="unresolved_anchor")]
+
+    if not is_glob:
+        return [_probe_one(probe, spec, roots)]
+
+    tail = reference.group(2) or ""
+    try:
+        matches = [root] if not tail else list(root.glob(tail))
+    except (OSError, ValueError, IndexError, RecursionError) as exc:
+        # `Path.glob` raises ValueError for a pattern it will not accept and
+        # OSError for a tree it cannot walk. Neither is a reason to abandon
+        # the whole scan, and neither may escape this function.
+        del exc
+        return [_item(probe, name=spec, anchor=spec, state="not_present",
+                      reason="glob_failed")]
+
+    items: list[dict] = []
+    for match in matches:
+        try:
+            stored, portable = anchor_path(match, roots)
+        except PathSafetyError as exc:
+            items.append(_item(probe, name=_leaf(str(match)), anchor=str(match),
+                               state="not_present", reason=exc.reason))
+            continue
+        items.append(_probe_one(probe, stored, roots, portable=portable))
+
+    if not items:
+        # The probe's own pattern is the name, so the baseline records *what*
+        # was absent rather than merely that something was.
+        return [_item(probe, name=spec, anchor=spec, state="not_present",
+                      reason="no_match")]
+
+    items.sort(key=lambda item: item["anchor"])
+    return items
+
+
+def _probe_one(
+    probe: dict, stored: str, roots: dict[str, Path], *, portable: bool | None = None
+) -> dict:
+    """One item for one anchored path, re-checking it before opening it.
+
+    `portable` is what `anchor_path` already reported for a glob match, kept
+    only so a refusal can still record it: design spec 7.1 stores a path
+    outside every anchor absolute and flagged `portable: false`, and that flag
+    is the difference between "a path I refused" and "a path that was never
+    anchored at all".
+    """
+    try:
+        resolved = resolve_anchored(stored, roots)
+        anchor, portable = anchor_path(resolved, roots)
+    except PathSafetyError as exc:
+        return _item(probe, name=_leaf(stored), anchor=stored,
+                     state="not_present", reason=exc.reason, portable=portable)
+
+    name = resolved.name or anchor
+    try:
+        info = os.stat(resolved)
+    except (FileNotFoundError, NotADirectoryError):
+        return _item(probe, name=name, anchor=anchor, state="not_present",
+                     reason="missing", portable=portable)
+    except (OSError, ValueError):
+        return _item(probe, name=name, anchor=anchor, state="not_present",
+                     reason="inaccessible", portable=portable)
+
+    if stat.S_ISDIR(info.st_mode):
+        # A directory is present and has no bytes to hash. Recording it with a
+        # null digest and the reason is the honest answer; omitting it would
+        # lose a skill directory that exists but holds no SKILL.md.
+        return _item(probe, name=name, anchor=anchor, state="present",
+                     reason="directory", portable=portable)
+
+    try:
+        digest = file_digest(resolved)
+    except (OSError, ValueError, MemoryError):
+        return _item(probe, name=name, anchor=anchor, state="present",
+                     reason="unreadable", portable=portable)
+
+    return _item(probe, name=name, anchor=anchor, state="present",
+                 digest=digest, portable=portable)
+
+
+def _probe_target(probe: object) -> tuple[str | None, bool]:
+    """The probe's `glob` or `path`, and which of the two it was.
+
+    A probe with neither, with both, or with a non-string value is malformed:
+    `validate_adapter` refuses all three at load time, so reaching here means
+    a caller built a probe by hand. It still yields an item rather than an
+    exception -- this function's contract is that nothing reachable from probe
+    data raises.
+    """
+    if not isinstance(probe, dict):
+        return None, False
+    for field, is_glob in (("glob", True), ("path", False)):
+        if field in probe:
+            value = probe[field]
+            if isinstance(value, str) and value.strip():
+                return value, is_glob
+            return None, is_glob
+    return None, False
+
+
+def _probe_label(probe: object) -> str:
+    """A non-empty name for a probe whose target is unusable.
+
+    `name` is required to be a non-empty string, so a malformed probe still
+    needs one. The kind is the only field left worth naming; `"probe"` is the
+    floor.
+    """
+    if isinstance(probe, dict):
+        kind = probe.get("kind")
+        if isinstance(kind, str) and kind.strip():
+            return f"probe:{kind}"
+    return "probe"
+
+
+def _leaf(stored: str) -> str:
+    """The last component of a stored path, falling back to the whole form."""
+    tail = stored.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    return tail or stored
+
+
+def _item(
+    probe: object,
+    *,
+    name: str,
+    anchor: str,
+    state: str,
+    digest: str | None = None,
+    reason: str | None = None,
+    portable: bool | None = None,
+) -> dict:
+    """Assemble one baseline item.
+
+    `origin` is `pre-existing` for every item `scan` produces. Design spec
+    section 7.5 determines origin by matching against run targets, and that
+    match needs a ledger, which `scan` does not read.
+
+    `scope` is copied from the probe when it has one and computed from nothing:
+    the research found precedence in both clients is per-subsystem, so any
+    single "which layer wins" answer computed here would be wrong for half the
+    kinds. `scan` records the layer and leaves the winner to `drift`.
+
+    No file content ever reaches an item. The only thing derived from bytes is
+    the digest.
+    """
+    attributes: dict = {}
+    if isinstance(probe, dict):
+        scope = probe.get("scope")
+        if isinstance(scope, str) and scope.strip():
+            attributes["scope"] = scope
+    if reason is not None:
+        attributes["reason"] = reason
+
+    item = {
+        "kind": probe.get("kind") if isinstance(probe, dict) else None,
+        "name": name,
+        "anchor": anchor,
+        "digest": digest,
+        "attributes": attributes,
+        "origin": "pre-existing",
+        "state": state,
+    }
+    if portable is not None:
+        item["portable"] = portable
+    return item
