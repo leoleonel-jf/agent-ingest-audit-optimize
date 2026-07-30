@@ -123,6 +123,18 @@ Keep the core recommendation independent of any one model vendor or agent client
 
 Read [references/PLATFORM_ADAPTATION.md](references/PLATFORM_ADAPTATION.md) before making product-specific recommendations or packaging changes.
 
+## Delegate to preserve context
+
+Delegate independently verifiable work when the client supports subagents: material acquisition, per-claim verification, environment inventory, and alternative evaluation during deliberation. Each unit returns structured data, not prose. Keep synthesis, classification, prioritization, proposal authoring, and every user-facing decision in the main context.
+
+Never delegate implementation. Backup, apply, validate, and record form a single-writer sequence, and a stop condition reached by one worker cannot halt another mid-write. Never run two authorized proposals at once, never split one implementation across workers, and never grant a subagent authority to authorize.
+
+Ledger writes follow the writer: a subagent returns data, and the main context records it.
+
+Detect subagent support; never assume it. Without it, run the same work sequentially instead, producing identical results.
+
+Read [references/PLATFORM_ADAPTATION.md](references/PLATFORM_ADAPTATION.md) for fuller delegation guidance.
+
 ## Enforce security boundaries
 
 Read [references/SECURITY.md](references/SECURITY.md) before executing commands from material, handling unknown Skill bundles or plugins, changing permissions, accessing secrets, installing dependencies, or making networked changes.
@@ -163,6 +175,28 @@ Use IDs consistently:
 When creating persistent records from the templates, write the free-text fields in the user's working language; keep headings, IDs, states, and status labels in canonical English.
 
 Check existing records before assigning an ID. ID sequences are local to each installation: when no records of a type exist yet in the environment, start numbering at `000` (for example, `PROP-YYYY-000`). Never continue a sequence from records that exist only in external material or in this repository's own history.
+
+## Keep the ledger
+
+Record every material audit, proposal, run, decision, and rollback in this plugin's ledger.
+
+Writing to the plugin's own ledger and its records is audit bookkeeping, not a change to the
+user's environment. It is permitted in every operating state, never requires authorization, and
+never counts as implementing a proposal. Never describe a ledger write as an implemented change.
+Creating a backup is not bookkeeping: it belongs to IMPLEMENTATION, which already requires a
+recoverable backup before the first change.
+
+The global ledger is the only authority for record identifiers. A project ledger requests the
+next identifier from it, and mints a provisional identifier with a `-P` suffix only when the
+global ledger is unreachable, marking it for reconciliation.
+
+Every finding classified `REJECT`, `NEEDS MORE EVIDENCE`, `RISK EXCEEDS BENEFIT`, `MONITOR`, or
+`TEST IN ISOLATION` becomes a backlog entry with a revisit trigger or a revisit date.
+`OBSOLETE`, `NOT APPLICABLE`, and `ALREADY IMPLEMENTED` are terminal and never enter the
+backlog.
+
+Read [references/LEDGER.md](references/LEDGER.md) for the storage layout, scope routing,
+identifier rules, evidence expiry, and the validation command.
 
 ## Report clearly
 

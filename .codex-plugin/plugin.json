@@ -1,6 +1,6 @@
 {
   "name": "agent-ingest-audit-optimize",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Audit external material and turn verified findings into safe, reversible agent improvements.",
   "author": {
     "name": "Leonardo Leonel Sobral",

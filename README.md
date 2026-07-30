@@ -117,6 +117,31 @@ Implement proposal PROP-YYYY-NNN.
 
 Analysis and deliberation are read-only. Persistent changes require an unambiguous implementation instruction tied to a specific proposal or plan. Authorization covers only that proposal, and implementation stops if it encounters material data-loss risk, irreversible scope, failed backups, critical validation failure, unapproved cost, public exposure, or required scope expansion.
 
+## Ledger
+
+Every material audit, proposal, run, and decision is recorded in a local ledger: a global one
+at the client's user configuration root, and a git-versionable one per project at
+`.agent-audit/`. The ledger is local and is never transmitted.
+
+Validate every reachable ledger in one invocation so cross-ledger checks run:
+
+```text
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify <path-to-ledger.json> [more...]
+```
+
+Exit codes: `0` clean, `1` findings, `2` the ledger could not be read. The tool requires
+Python 3.9 or later and uses the standard library only.
+
+See [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md) for the
+record model, and [assets/schemas/ledger.schema.json](skills/agent-ingest-audit-optimize/assets/schemas/ledger.schema.json)
+for the contract the validator enforces.
+
+Run the validator's own test suite with:
+
+```text
+python -m unittest discover -s dashboard/tests -v
+```
+
 ## Compatibility
 
 The canonical Skill targets clients compatible with the open Agent Skills format. The repository includes native plugin manifests for Codex and Claude Code plus a single-directory archive suitable for portable Skill import. Client-specific behavioral support should be claimed only after structural, explicit-trigger, implicit-trigger, negative-trigger, and resource-resolution tests in that client.

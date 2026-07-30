@@ -65,6 +65,26 @@ class PackagePluginTests(unittest.TestCase):
             self.assertIn("agent-ingest-audit-optimize/LICENSE", names)
             self.assertFalse(any("/evals/" in name or "/packaging/" in name for name in names))
 
+    def test_archives_include_the_ledger_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp)
+            plugin_archive, skill_archive, _ = package_plugin.build(output)
+            with zipfile.ZipFile(plugin_archive) as archive:
+                plugin_names = archive.namelist()
+            with zipfile.ZipFile(skill_archive) as archive:
+                skill_names = archive.namelist()
+
+            for suffix in (
+                "references/LEDGER.md",
+                "assets/schemas/ledger.schema.json",
+                "assets/scripts/dashboard.py",
+            ):
+                self.assertIn(f"skills/agent-ingest-audit-optimize/{suffix}", plugin_names)
+                self.assertIn(f"agent-ingest-audit-optimize/{suffix}", skill_names)
+
+            self.assertFalse(any("dashboard/tests" in name for name in plugin_names))
+            self.assertFalse(any("dashboard/tests" in name for name in skill_names))
+
 
 if __name__ == "__main__":
     unittest.main()

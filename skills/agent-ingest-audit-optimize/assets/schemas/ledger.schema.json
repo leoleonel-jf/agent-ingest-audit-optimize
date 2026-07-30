@@ -1,0 +1,306 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize/ledger.schema.json",
+  "title": "Agent Ingest, Audit and Optimize ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ledger_id",
+    "scope",
+    "language",
+    "client",
+    "adapter_version",
+    "created",
+    "updated",
+    "id_authority",
+    "sequences",
+    "known_projects",
+    "records",
+    "baselines",
+    "backlog"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "ledger_id": { "type": "string", "minLength": 1 },
+    "scope": { "enum": ["global", "project"] },
+    "language": { "type": "string", "minLength": 2 },
+    "client": { "type": "string", "minLength": 1 },
+    "adapter_version": { "type": "integer", "minimum": 1 },
+    "created": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "updated": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "id_authority": { "type": "boolean" },
+    "sequences": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["MAT", "PROP", "RUN", "ADR", "BASE"],
+      "properties": {
+        "MAT": { "type": "integer", "minimum": 0 },
+        "PROP": { "type": "integer", "minimum": 0 },
+        "RUN": { "type": "integer", "minimum": 0 },
+        "ADR": { "type": "integer", "minimum": 0 },
+        "BASE": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "known_projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["project_root", "ledger_path", "last_seen", "last_digest", "status"],
+        "properties": {
+          "project_root": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "ledger_path": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "last_seen": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "last_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "status": { "enum": ["OK", "UNREACHABLE", "CHANGED_EXTERNALLY"] }
+        }
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "title",
+          "status",
+          "classification",
+          "scope",
+          "created",
+          "updated",
+          "file",
+          "links",
+          "evidence"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^(MAT|PROP|RUN|ADR|BASE)-\\d{4}-\\d{3}(-P)?$" },
+          "type": { "enum": ["MATERIAL", "PROPOSAL", "RUN", "ADR", "BASELINE"] },
+          "title": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "status": {
+            "enum": [
+              "ANALYZED",
+              "PROPOSED",
+              "DECIDED",
+              "IMPLEMENTED",
+              "VALIDATED",
+              "VALIDATED WITH CAVEATS",
+              "NOT IMPLEMENTED",
+              "PENDING",
+              "ROLLBACK",
+              "SUPERSEDED"
+            ]
+          },
+          "classification": {
+            "enum": [
+              "ADOPT GLOBALLY",
+              "ADOPT AS A DEFAULT FOR NEW PROJECTS",
+              "MIGRATE EXISTING PROJECTS",
+              "ADOPT LOCALLY",
+              "TEST IN ISOLATION",
+              "ADAPT",
+              "MONITOR",
+              "REJECT",
+              "OBSOLETE",
+              "ALREADY IMPLEMENTED",
+              "NOT APPLICABLE",
+              "NEEDS MORE EVIDENCE",
+              "RISK EXCEEDS BENEFIT"
+            ]
+          },
+          "scope": {
+            "enum": [
+              "session",
+              "project",
+              "workspace",
+              "user-global",
+              "organization",
+              "fleet"
+            ]
+          },
+          "created": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "updated": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "file": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "links": {
+            "type": "object",
+            "properties": {
+              "materials": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^(MAT|PROP|RUN|ADR|BASE)-\\d{4}-\\d{3}(-P)?$" }
+              },
+              "runs": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^(MAT|PROP|RUN|ADR|BASE)-\\d{4}-\\d{3}(-P)?$" }
+              },
+              "adrs": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^(MAT|PROP|RUN|ADR|BASE)-\\d{4}-\\d{3}(-P)?$" }
+              }
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["source", "kind", "verified_on", "time_sensitive"],
+              "properties": {
+                "time_sensitive": { "type": "boolean" }
+              },
+              "if": {
+                "properties": { "time_sensitive": { "const": true } }
+              },
+              "then": {
+                "required": ["expires_on"],
+                "properties": {
+                  "expires_on": { "type": "string", "minLength": 1, "pattern": "\\S" }
+                }
+              }
+            }
+          },
+          "pending_id_reconciliation": { "type": "boolean" }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "id": { "pattern": "-P$" } }
+            },
+            "then": {
+              "required": ["pending_id_reconciliation"],
+              "properties": {
+                "pending_id_reconciliation": { "const": true }
+              }
+            }
+          }
+        ],
+        "if": {
+          "properties": { "type": { "const": "RUN" } }
+        },
+        "then": {
+          "required": [
+            "proposal",
+            "authorization",
+            "result",
+            "targets",
+            "backup",
+            "rollback",
+            "self_reported"
+          ],
+          "properties": {
+            "proposal": {
+              "type": "string",
+              "pattern": "^(MAT|PROP|RUN|ADR|BASE)-\\d{4}-\\d{3}(-P)?$"
+            },
+            "authorization": {
+              "type": "object",
+              "required": ["quote", "recorded_on"],
+              "properties": {
+                "quote": { "type": "string", "minLength": 1, "pattern": "\\S" },
+                "recorded_on": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+              }
+            },
+            "result": {
+              "enum": [
+                "VALIDATED",
+                "VALIDATED WITH CAVEATS",
+                "PARTIALLY VALIDATED",
+                "NOT VALIDATED",
+                "FAILED",
+                "ROLLBACK COMPLETED"
+              ]
+            },
+            "targets": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "anchor",
+                  "kind",
+                  "before_digest",
+                  "after_digest",
+                  "reversible",
+                  "residual_effect"
+                ],
+                "properties": {
+                  "before_digest": {
+                    "type": ["string", "null"],
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  },
+                  "after_digest": {
+                    "type": ["string", "null"],
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  },
+                  "reversible": { "type": "boolean" }
+                },
+                "if": {
+                  "properties": { "reversible": { "const": false } }
+                },
+                "then": {
+                  "not": {
+                    "properties": {
+                      "residual_effect": { "enum": [null, "", false, 0, [], {}] }
+                    }
+                  }
+                }
+              }
+            },
+            "backup": {
+              "type": ["object", "null"],
+              "required": ["digest", "verified"],
+              "properties": {
+                "digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "verified": { "type": "boolean" }
+              }
+            },
+            "rollback": {
+              "type": "object",
+              "required": ["tested"],
+              "properties": {
+                "tested": { "enum": ["NOT_TESTED", "PARTIAL", "PASSED", "FAILED"] }
+              }
+            },
+            "self_reported": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "baselines": { "type": "array", "items": { "type": "object" } },
+    "backlog": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "classification", "reason", "revisit_trigger", "revisit_after"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^(MAT|PROP|RUN|ADR|BASE)-\\d{4}-\\d{3}(-P)?$" },
+          "classification": {
+            "enum": [
+              "REJECT",
+              "NEEDS MORE EVIDENCE",
+              "RISK EXCEEDS BENEFIT",
+              "MONITOR",
+              "TEST IN ISOLATION"
+            ]
+          },
+          "reason": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "revisit_trigger": { "type": ["string", "null"] },
+          "revisit_after": {
+            "type": ["string", "null"],
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          }
+        },
+        "not": {
+          "properties": {
+            "revisit_trigger": { "enum": [null, "", false, 0, [], {}] },
+            "revisit_after": { "enum": [null, "", false, 0, [], {}] }
+          }
+        }
+      }
+    }
+  }
+}

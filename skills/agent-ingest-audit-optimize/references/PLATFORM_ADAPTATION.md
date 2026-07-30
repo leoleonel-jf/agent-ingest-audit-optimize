@@ -34,8 +34,28 @@ Translate the portable intent to the platform's supported mechanism:
 | Authorization | Approval policy, permissions, or explicit user confirmation |
 | Isolation | Sandbox, container, worktree, or restricted tool set |
 | Discovery metadata | Client manifest, UI metadata, or marketplace entry |
+| Delegation | Subagents, background tasks, or sequential execution when unsupported |
 
 Examples are conceptual. Verify actual names and paths before implementation.
+
+## Delegate to subagents
+
+Auditing substantial material produces far more intermediate text than the conclusions it yields. Where the client supports subagents, that intermediate text belongs in a subagent's context rather than the main one.
+
+Delegate, one unit per subagent, each returning structured data rather than prose:
+
+- material acquisition, one source per subagent;
+- claim verification, one claim or small batch per subagent;
+- environment inventory, one configuration area per subagent;
+- alternative evaluation during deliberation, one alternative per subagent.
+
+Keep synthesis, classification, prioritization, proposal authoring, and every user-facing decision in the main context.
+
+Never delegate implementation. Backup, apply, validate, and record form a single-writer sequence, and a stop condition reached by one worker cannot halt another mid-write. Do not run two authorized proposals concurrently, do not split the steps of one implementation across workers, do not move backup creation or verification away from the context applying the change, and never grant a subagent authority to authorize or to interpret an authorization.
+
+Ledger writes follow the writer: a subagent returns data, and the main context records it.
+
+Detect subagent support; never assume it. Without support, run the same work sequentially in the main context. Delegation is an optimization of context budget, never a change to the workflow, the evidence standard, or the result.
 
 ## Compatibility rules
 
