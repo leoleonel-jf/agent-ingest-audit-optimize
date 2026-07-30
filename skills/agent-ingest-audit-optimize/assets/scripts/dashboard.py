@@ -481,8 +481,12 @@ def validate_known_project(entry: dict, index: int, *, source: str) -> list[str]
 
 
 def _prefix_and_number(identifier: str) -> tuple[str, int]:
-    prefix, _, rest = identifier.partition("-")  # identifier is RECORD_ID-valid
-    return prefix, int(rest.split("-")[1])
+    # identifier is RECORD_ID-valid and has already passed RECORD_ID.fullmatch(),
+    # e.g., "PROP-2026-001" or "PROP-2026-001-P"
+    parts = identifier.split("-")
+    prefix = parts[0]
+    number = int(parts[2])  # Skip year (parts[1]), use number (parts[2])
+    return prefix, number
 
 
 def validate_collection(
@@ -499,7 +503,8 @@ def validate_collection(
             authorities.append(source)
         records = data.get("records") if isinstance(data, dict) else None
         highest: dict[str, int] = {}
-        for record in records if isinstance(records, list) else []:
+        records = records if isinstance(records, list) else []
+        for record in records:
             if not isinstance(record, dict):
                 continue
             all_records.append((source, record))
@@ -528,7 +533,7 @@ def validate_collection(
                 if type(allocated) is int and allocated < number + 1:
                     findings.append(
                         f"{source}: sequences.{prefix} is {allocated} but "
-                        f"{prefix}-{number:03d} is already allocated"
+                        f"{identifier} is already allocated"
                     )
 
     if complete:
