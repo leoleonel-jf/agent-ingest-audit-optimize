@@ -146,9 +146,15 @@ REQUIRED_PROJECT_FIELDS = {
     "status",
 }
 
+ANCHOR_REFERENCE = re.compile(r"^\$([A-Z_]+)(?:/(.*))?$")
+
 
 class LedgerError(RuntimeError):
     """Raised when a ledger cannot be read at all."""
+
+
+class PathSafetyError(RuntimeError):
+    """Raised when a path may not be resolved under its anchor."""
 
 
 def load_json(path: Path) -> dict:
@@ -216,6 +222,72 @@ def anchor_path(path: Path, roots: dict[str, Path]) -> tuple[str, bool]:
     _, name, relative = best
     tail = relative.as_posix()
     return (f"${name}" if tail == "." else f"${name}/{tail}"), True
+
+
+def check_glob(pattern: str) -> None:
+    """Refuse a probe glob that could escape its anchor.
+
+    Design spec section 9: no probe field may contain a glob that escapes its
+    anchor; `scan` rejects `..` segments and absolute globs.
+    """
+    if not isinstance(pattern, str) or not pattern.strip():
+        raise PathSafetyError(f"glob must be a non-empty string: {pattern!r}")
+    normalized = pattern.replace("\\", "/")
+    if any(part == ".." for part in normalized.split("/")):
+        raise PathSafetyError(f"glob contains a '..' segment: {pattern!r}")
+    if normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
+        raise PathSafetyError(f"glob is absolute: {pattern!r}")
+
+
+def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
+    """Resolve an anchored path, refusing anything that escapes its anchor.
+
+    Design spec section 13.6: refuse to read or write outside resolved anchors,
+    and reject symlinks that escape an anchor. The `..` check is textual and
+    runs before any normalization, so a path that normalizes back inside the
+    root is still refused -- the form is the problem, not just the destination.
+    """
+    if not isinstance(stored, str) or not stored.strip():
+        raise PathSafetyError(f"path must be a non-empty string: {stored!r}")
+    normalized = stored.replace("\\", "/")
+    if any(part == ".." for part in normalized.split("/")):
+        raise PathSafetyError(f"path contains a '..' segment: {stored!r}")
+    match = ANCHOR_REFERENCE.match(normalized)
+    if match is None:
+        raise PathSafetyError(f"path is not anchored: {stored!r}")
+    name, tail = match.group(1), match.group(2) or ""
+    root = roots.get(name)
+    if root is None:
+        raise PathSafetyError(f"path names an unknown anchor ${name}: {stored!r}")
+
+    base = root.resolve()
+    candidate = base if not tail else base.joinpath(*tail.split("/"))
+
+    # Rule 5 before rule 4: a symlink whose target leaves the anchor is refused
+    # even when the final path lands back inside, because a link that leaves the
+    # anchor is one an attacker can re-point later.
+    walked = base
+    for part in (tail.split("/") if tail else []):
+        walked = walked / part
+        if walked.is_symlink():
+            target = walked.resolve()
+            if not _is_within(target, base):
+                raise PathSafetyError(
+                    f"path crosses a symlink that leaves its anchor: {stored!r}"
+                )
+
+    final = candidate.resolve()
+    if not _is_within(final, base):
+        raise PathSafetyError(f"path resolves outside its anchor: {stored!r}")
+    return final
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def validate_ledger(data: dict, *, source: str) -> list[str]:

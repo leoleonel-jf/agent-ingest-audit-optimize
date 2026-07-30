@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -2273,6 +2274,149 @@ class AnchorPathTests(unittest.TestCase):
         stored, portable = dashboard.anchor_path(path_bc, {"ROOT": root_b})
         self.assertEqual(stored, str(path_bc))
         self.assertFalse(portable)
+
+
+class ResolveAnchoredTests(unittest.TestCase):
+    def test_unknown_anchor_is_refused(self) -> None:
+        # Refusal 1: the anchor name is not in the roots mapping at all.
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("$UNKNOWN/file.txt", {"PROJECT": root})
+        self.assertIn("unknown anchor", str(ctx.exception))
+
+    def test_dotdot_segment_is_refused_even_though_it_normalizes_back_inside(self) -> None:
+        # Refusal 2: the '..' check is textual and runs before normalization,
+        # so $PROJECT/a/../b -- which lands back inside the root -- is still
+        # refused. The form is the problem, not just the destination.
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("$PROJECT/a/../b", {"PROJECT": root})
+        self.assertIn("'..' segment", str(ctx.exception))
+
+    def test_dotdot_segment_climbing_above_the_anchor_is_refused(self) -> None:
+        # Refusal 2, second form: '..' segments that climb above the anchor.
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("$PROJECT/../../etc", {"PROJECT": root})
+        self.assertIn("'..' segment", str(ctx.exception))
+
+    def test_posix_absolute_path_is_refused(self) -> None:
+        # Refusal 3, POSIX form: an absolute path where an anchored form was
+        # required.
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("/etc/passwd", {"PROJECT": root})
+        self.assertIn("not anchored", str(ctx.exception))
+
+    def test_windows_drive_absolute_path_is_refused(self) -> None:
+        # Refusal 3, Windows drive form.
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("C:/Windows/System32", {"PROJECT": root})
+        self.assertIn("not anchored", str(ctx.exception))
+
+    def test_resolved_result_outside_root_is_refused(self) -> None:
+        # Refusal 4: the final resolved location lands outside the anchor.
+        #
+        # A Windows directory junction is the construction that isolates this
+        # rule from refusal 5: unlike a symlink, a junction is not reported by
+        # Path.is_symlink() (the per-component check refusal 5 uses), but it
+        # is still followed by Path.resolve() (the check this rule uses), so
+        # only refusal 4 fires here. On Windows, junctions -- unlike symlinks
+        # -- do not require developer mode or elevation to create.
+        #
+        # On a non-Windows platform an ordinary symlink is always detected by
+        # is_symlink(), so this specific escape collapses into refusal 5
+        # there; refusal 4 is exercised as a backstop rather than
+        # independently. Skip rather than assert the wrong rule's message.
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve()
+            root = base / "r"
+            outside = base / "outside"
+            root.mkdir()
+            outside.mkdir()
+            (outside / "secret.txt").write_text("x", encoding="utf-8")
+            link = root / "escape"
+            if os.name != "nt":
+                self.skipTest(
+                    "refusal 4 is isolated from refusal 5 via a Windows "
+                    "junction; on this platform an escaping symlink is "
+                    "always caught by refusal 5 instead"
+                )
+            result = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                self.skipTest(
+                    f"cannot create a junction on this platform: {result.stderr.strip()}"
+                )
+            with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                dashboard.resolve_anchored("$R/escape/secret.txt", {"R": root})
+            self.assertIn("resolves outside its anchor", str(ctx.exception))
+
+    def test_symlink_leaving_anchor_is_refused_even_if_final_path_returns_inside(
+        self,
+    ) -> None:
+        # Refusal 5, deliberately stricter than refusal 4: a symlink whose
+        # own target leaves the anchor is refused even when the path it is
+        # part of resolves back inside, because a link that leaves the
+        # anchor is one an attacker can re-point later.
+        #
+        # root r, a directory outside, a symlink r/link -> outside, and
+        # outside/back -> r; resolving $R/link/back/file must still refuse,
+        # even though the final destination is back inside r.
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve()
+            root = base / "r"
+            outside = base / "outside"
+            root.mkdir()
+            outside.mkdir()
+            (root / "file.txt").write_text("x", encoding="utf-8")
+            link = root / "link"
+            back = outside / "back"
+            try:
+                os.symlink(outside, link, target_is_directory=True)
+                os.symlink(root, back, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(
+                    f"cannot create a symlink on this platform (needs developer "
+                    f"mode or elevation on Windows): {exc}"
+                )
+            with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                dashboard.resolve_anchored("$R/link/back/file.txt", {"R": root})
+            self.assertIn("crosses a symlink that leaves its anchor", str(ctx.exception))
+
+    def test_ordinary_path_under_root_resolves_to_expected_absolute_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            sub = root / "src"
+            sub.mkdir()
+            target = sub / "main.py"
+            target.write_text("x", encoding="utf-8")
+            resolved = dashboard.resolve_anchored("$PROJECT/src/main.py", {"PROJECT": root})
+            self.assertEqual(resolved, target.resolve())
+
+
+class CheckGlobTests(unittest.TestCase):
+    def test_dotdot_segment_is_refused(self) -> None:
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.check_glob("a/../b/*.py")
+        self.assertIn("'..' segment", str(ctx.exception))
+
+    def test_posix_absolute_glob_is_refused(self) -> None:
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.check_glob("/etc/*.conf")
+        self.assertIn("absolute", str(ctx.exception))
+
+    def test_drive_letter_absolute_glob_is_refused(self) -> None:
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.check_glob("C:/Windows/*.dll")
+        self.assertIn("absolute", str(ctx.exception))
+
+    def test_ordinary_relative_glob_is_accepted(self) -> None:
+        dashboard.check_glob("src/**/*.py")  # must not raise
 
 
 if __name__ == "__main__":
