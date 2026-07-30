@@ -129,6 +129,75 @@ class LedgerDocumentTests(unittest.TestCase):
         findings = dashboard.validate_ledger(data, source="test")
         self.assertTrue(any("FOO" in finding for finding in findings))
 
+    def test_unknown_top_level_field_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["unexpected_field"] = "value"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("unexpected_field" in finding for finding in findings))
+
+    def test_invalid_scope_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["scope"] = "invalid"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("scope" in finding for finding in findings))
+
+    def test_non_boolean_id_authority_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["id_authority"] = "yes"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("id_authority" in finding for finding in findings))
+
+    def test_non_object_sequences_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["sequences"] = [0, 0, 0, 0, 0]
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("sequences" in finding for finding in findings))
+
+    def test_non_integer_sequence_value_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["sequences"]["MAT"] = "not-an-int"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("sequences.MAT" in finding for finding in findings))
+
+    def test_negative_sequence_value_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["sequences"]["PROP"] = -1
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("sequences.PROP" in finding for finding in findings))
+
+    def test_non_array_known_projects_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["known_projects"] = "not-an-array"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("known_projects" in finding for finding in findings))
+
+    def test_project_ledger_with_id_authority_true_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["scope"] = "project"
+        data["id_authority"] = True
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("authority" in finding for finding in findings))
+
+    def test_global_ledger_with_id_authority_false_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["scope"] = "global"
+        data["id_authority"] = False
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("authority" in finding for finding in findings))
+
+    def test_valid_project_ledger_has_no_findings(self) -> None:
+        data = minimal_ledger()
+        data["scope"] = "project"
+        data["id_authority"] = False
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertEqual(findings, [])
+
+    def test_date_with_trailing_newline_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["created"] = "2026-07-29\n"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("created" in finding for finding in findings))
+
     def test_verify_returns_zero_for_a_valid_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = write_ledger(Path(temp), minimal_ledger())

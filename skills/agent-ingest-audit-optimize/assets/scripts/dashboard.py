@@ -82,7 +82,7 @@ def validate_ledger(data: dict, *, source: str) -> list[str]:
         findings.append(f"{source}: adapter_version must be an integer of at least 1")
     for field in ("created", "updated"):
         value = data[field]
-        if type(value) is not str or not DATE.match(value):
+        if type(value) is not str or not DATE.fullmatch(value):
             findings.append(f"{source}: {field} must match YYYY-MM-DD")
     if type(data["id_authority"]) is not bool:
         findings.append(f"{source}: id_authority must be a boolean")
