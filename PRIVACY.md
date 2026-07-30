@@ -14,6 +14,13 @@ The bundled packaging and evaluation scripts operate locally. They do not includ
 
 The workflow may recommend consulting websites, documentation, repositories, files, or connected services. Access occurs only through the capabilities and permissions available in the user's agent environment. The plugin does not receive a separate copy of credentials or connected-service data.
 
+## Ledger data
+
+The ledger, its records, and its backups are local files created in the user's own
+environment. The plugin never transmits them. Backups may contain configuration values and are
+always written to the global scope, never inside a project directory, so they are not
+committed by accident.
+
 ## Data retention
 
 The publisher does not maintain plugin-specific user accounts or a plugin-specific data store. Local files, host conversation history, logs, and connected-service records remain subject to the user's environment and the applicable service provider.
