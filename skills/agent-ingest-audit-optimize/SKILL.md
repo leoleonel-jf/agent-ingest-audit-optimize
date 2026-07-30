@@ -164,6 +164,27 @@ When creating persistent records from the templates, write the free-text fields 
 
 Check existing records before assigning an ID. ID sequences are local to each installation: when no records of a type exist yet in the environment, start numbering at `000` (for example, `PROP-YYYY-000`). Never continue a sequence from records that exist only in external material or in this repository's own history.
 
+## Keep the ledger
+
+Record every material audit, proposal, run, decision, and rollback in this plugin's ledger.
+
+Writing to the plugin's own ledger, records, and backups is audit bookkeeping, not a change to
+the user's environment. It is permitted in every operating state, never requires authorization,
+and never counts as implementing a proposal. Never describe a ledger write as an implemented
+change.
+
+The global ledger is the only authority for record identifiers. A project ledger requests the
+next identifier from it, and mints a provisional identifier with a `-P` suffix only when the
+global ledger is unreachable, marking it for reconciliation.
+
+Every finding classified `REJECT`, `NEEDS MORE EVIDENCE`, `RISK EXCEEDS BENEFIT`, `MONITOR`, or
+`TEST IN ISOLATION` becomes a backlog entry with a revisit trigger or a revisit date.
+`OBSOLETE`, `NOT APPLICABLE`, and `ALREADY IMPLEMENTED` are terminal and never enter the
+backlog.
+
+Read [references/LEDGER.md](references/LEDGER.md) for the storage layout, scope routing,
+identifier rules, evidence expiry, and the validation command.
+
 ## Report clearly
 
 Communicate with the user in the user's language: match the language of the user's request in all prose, summaries, questions, and reports, unless the user asks otherwise. Keep operating states, status labels, classification labels, and record IDs in their canonical English form regardless of the conversation language.

@@ -1644,5 +1644,28 @@ class ReferenceTests(unittest.TestCase):
         self.assertIn("dashboard.py verify", text)
 
 
+SKILL = REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "SKILL.md"
+
+
+class SkillDocumentTests(unittest.TestCase):
+    def test_skill_links_to_the_ledger_reference(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("references/LEDGER.md", text)
+
+    def test_skill_states_the_analysis_carve_out(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("never counts as implementing a proposal", text)
+
+    def test_ledger_section_stays_within_the_context_budget(self) -> None:
+        lines = SKILL.read_text(encoding="utf-8").splitlines()
+        start = lines.index("## Keep the ledger")
+        end = next(
+            index
+            for index in range(start + 1, len(lines))
+            if lines[index].startswith("## ")
+        )
+        self.assertLessEqual(end - start, 40)
+
+
 if __name__ == "__main__":
     unittest.main()

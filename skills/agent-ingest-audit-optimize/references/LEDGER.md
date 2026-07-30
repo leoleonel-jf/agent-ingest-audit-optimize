@@ -105,6 +105,10 @@ Every record requires `id`, `type`, `title`, `status`, `classification`, `scope`
 | `created`, `updated` | `YYYY-MM-DD` |
 | `links.materials`, `links.runs`, `links.adrs` | optional arrays of record ids; a missing key means empty |
 
+A record's `status` reuses every reporting label from `SKILL.md` and adds two record-only
+values: `PROPOSED` for a proposal awaiting decision, and `SUPERSEDED` for an ADR replaced by a
+newer one.
+
 `ADOPT GLOBALLY`, `ADOPT AS A DEFAULT FOR NEW PROJECTS`, `MIGRATE EXISTING PROJECTS`,
 `ADOPT LOCALLY`, and `ADAPT` are neither backlog nor terminal classifications: they carry
 through to a PROPOSAL and, once authorized, a RUN. See Backlog for the other eight
