@@ -29,6 +29,23 @@ def read_text(path: Path) -> str:
 
 
 def single_match(pattern: str, text: str, path: Path) -> str:
+    """Return the one match for pattern, raising if the count is not exactly 1."""
+    matches = re.findall(pattern, text, flags=re.MULTILINE)
+    if not matches:
+        raise AssertionError(f"{path.name}: no line matched {pattern!r}")
+    if len(matches) > 1:
+        raise AssertionError(
+            f"{path.name}: expected exactly 1 match for {pattern!r}, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def first_match(pattern: str, text: str, path: Path) -> str:
+    """Return the first match for pattern.
+
+    Used only for CHANGELOG.md, which lists entries newest-first by
+    convention -- so the first `## x.y.z` heading IS the current version.
+    """
     matches = re.findall(pattern, text, flags=re.MULTILINE)
     if not matches:
         raise AssertionError(f"{path.name}: no line matched {pattern!r}")
@@ -78,7 +95,7 @@ class VersionConsistencyTests(unittest.TestCase):
         self.assertEqual(found, self.version)
 
     def test_changelog_newest_entry_matches(self) -> None:
-        found = single_match(rf"^## ({SEMVER})", read_text(CHANGELOG), CHANGELOG)
+        found = first_match(rf"^## ({SEMVER})", read_text(CHANGELOG), CHANGELOG)
         self.assertEqual(found, self.version)
 
 
