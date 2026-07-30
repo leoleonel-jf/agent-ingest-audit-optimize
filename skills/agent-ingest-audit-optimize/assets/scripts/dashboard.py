@@ -221,8 +221,9 @@ def validate_run(record: dict, *, label: str) -> list[str]:
         quote = authorization.get("quote")
         if not isinstance(quote, str) or not quote.strip():
             findings.append(f"{label} authorization quote must be a non-empty string")
-        if not authorization.get("recorded_on"):
-            findings.append(f"{label} authorization requires recorded_on")
+        recorded_on = authorization.get("recorded_on")
+        if type(recorded_on) is not str or not DATE.fullmatch(recorded_on):
+            findings.append(f"{label} authorization.recorded_on must match YYYY-MM-DD")
 
     if record["result"] not in RUN_RESULTS:
         findings.append(f"{label} has an invalid result: {record['result']!r}")

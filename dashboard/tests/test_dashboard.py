@@ -720,6 +720,21 @@ class RunEntryTests(unittest.TestCase):
         del record["authorization"]["recorded_on"]
         self.assertTrue(any("recorded_on" in finding for finding in self.check(record)))
 
+    def test_authorization_recorded_on_must_be_a_string(self) -> None:
+        record = minimal_run()
+        record["authorization"]["recorded_on"] = True
+        self.assertTrue(any("recorded_on" in finding for finding in self.check(record)))
+
+    def test_authorization_recorded_on_must_match_date_format(self) -> None:
+        record = minimal_run()
+        record["authorization"]["recorded_on"] = "07/29/2026"
+        self.assertTrue(any("recorded_on" in finding for finding in self.check(record)))
+
+    def test_non_run_record_with_run_only_field_produces_no_finding(self) -> None:
+        record = minimal_record()
+        record["backup"] = "not-an-object"
+        self.assertEqual(dashboard.validate_record(record, 0, source="test"), [])
+
     def test_invalid_result_is_reported(self) -> None:
         record = minimal_run()
         record["result"] = "MAYBE"
@@ -838,41 +853,62 @@ class RunSchemaAlignmentTests(unittest.TestCase):
 
     def test_schema_run_result_enum_matches_runtime_validator(self) -> None:
         self.assertEqual(
-            set(self.record_schema["properties"]["result"]["enum"]),
+            set(self.record_schema["then"]["properties"]["result"]["enum"]),
             dashboard.RUN_RESULTS,
         )
 
     def test_schema_rollback_tested_enum_matches_runtime_validator(self) -> None:
-        rollback_schema = self.record_schema["properties"]["rollback"]
+        rollback_schema = self.record_schema["then"]["properties"]["rollback"]
         self.assertEqual(
             set(rollback_schema["properties"]["tested"]["enum"]),
             dashboard.ROLLBACK_TEST_STATES,
         )
 
     def test_schema_target_required_matches_runtime_validator(self) -> None:
-        target_schema = self.record_schema["properties"]["targets"]["items"]
+        target_schema = self.record_schema["then"]["properties"]["targets"]["items"]
         self.assertEqual(
             set(target_schema["required"]), dashboard.REQUIRED_TARGET_FIELDS
         )
 
     def test_schema_proposal_pattern_matches_record_id_pattern(self) -> None:
         self.assertEqual(
-            self.record_schema["properties"]["proposal"]["pattern"],
+            self.record_schema["then"]["properties"]["proposal"]["pattern"],
             dashboard.RECORD_ID.pattern,
         )
 
     def test_schema_digest_pattern_matches_runtime_validator(self) -> None:
-        target_schema = self.record_schema["properties"]["targets"]["items"]
+        target_schema = self.record_schema["then"]["properties"]["targets"]["items"]
         for field in ("before_digest", "after_digest"):
             self.assertEqual(
                 target_schema["properties"][field]["pattern"], dashboard.DIGEST.pattern
             )
         self.assertEqual(
-            self.record_schema["properties"]["backup"]["properties"]["digest"][
-                "pattern"
-            ],
+            self.record_schema["then"]["properties"]["backup"]["properties"][
+                "digest"
+            ]["pattern"],
             dashboard.DIGEST.pattern,
         )
+
+    def test_schema_recorded_on_pattern_matches_date_regex(self) -> None:
+        authorization_schema = self.record_schema["then"]["properties"]["authorization"]
+        self.assertEqual(
+            authorization_schema["properties"]["recorded_on"]["pattern"],
+            dashboard.DATE.pattern,
+        )
+
+    def test_schema_residual_effect_falsy_enum_matches_expected_literals(self) -> None:
+        target_schema = self.record_schema["then"]["properties"]["targets"]["items"]
+        enum = target_schema["then"]["not"]["properties"]["residual_effect"]["enum"]
+        expected = [None, "", False, 0, [], {}]
+        # Python treats 0 == False and 1 == True, so a naive set()/`in`
+        # comparison would not notice e.g. a duplicated `false` standing in
+        # for the missing `0`. Comparing JSON text (via json.dumps with
+        # sort_keys) instead gives each literal a distinct representation
+        # ("false" vs "0" vs "null" vs '""' vs "[]" vs "{}"), so a schema
+        # edit that drops or duplicates one of the six literals is caught.
+        actual_json = sorted(json.dumps(value, sort_keys=True) for value in enum)
+        expected_json = sorted(json.dumps(value, sort_keys=True) for value in expected)
+        self.assertEqual(actual_json, expected_json)
 
 
 if __name__ == "__main__":
