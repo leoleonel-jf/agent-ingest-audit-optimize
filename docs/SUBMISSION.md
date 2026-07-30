@@ -16,7 +16,7 @@ This file is the review-ready source of truth for public directory submissions: 
 
 - **Submission type:** Skills only
 - **Plugin name:** Agent Ingest, Audit & Optimize
-- **Version:** 0.1.3
+- **Version:** 0.2.1
 - **Developer identity:** Leonardo Leonel Sobral
 - **Category:** Productivity
 - **Short description:** Audit & optimize agent systems
@@ -90,6 +90,6 @@ This file is the review-ready source of truth for public directory submissions: 
 
 The publisher must select countries or regions in the submission portal after confirming applicable support and legal obligations. Policy attestations must be reviewed and completed by the verified developer identity; they are not delegated to the plugin or its automation.
 
-## Initial release notes
+## Release notes
 
-Initial skills-only release. The plugin ingests external material, verifies recommendations against current primary evidence, creates scoped proposals, and applies only explicitly authorized improvements. It includes security boundaries, rollback procedures, portability guidance, deterministic packaging, and a 24-case evaluation suite.
+Skills-only submission. The plugin ingests external material, verifies recommendations against current primary evidence, creates scoped proposals, and applies only explicitly authorized improvements. It includes security boundaries, rollback procedures, portability guidance, deterministic packaging, a local governance ledger with a standard-library validator, and a 28-case evaluation suite.

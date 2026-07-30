@@ -85,6 +85,19 @@ class PackagePluginTests(unittest.TestCase):
             self.assertFalse(any("dashboard/tests" in name for name in plugin_names))
             self.assertFalse(any("dashboard/tests" in name for name in skill_names))
 
+    def test_archives_exclude_compiled_bytecode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp)
+            plugin_archive, skill_archive, _ = package_plugin.build(output)
+            with zipfile.ZipFile(plugin_archive) as archive:
+                plugin_names = archive.namelist()
+            with zipfile.ZipFile(skill_archive) as archive:
+                skill_names = archive.namelist()
+
+            for names in (plugin_names, skill_names):
+                self.assertFalse(any("__pycache__" in name for name in names))
+                self.assertFalse(any(name.endswith((".pyc", ".pyo", ".pyd")) for name in names))
+
 
 if __name__ == "__main__":
     unittest.main()
