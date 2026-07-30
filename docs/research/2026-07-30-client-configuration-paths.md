@@ -1,8 +1,8 @@
-# Client Configuration Paths — Research for the 0.2.4 Adapters
+# Client Configuration Paths — Research for the 0.2.5 Adapters
 
 Verified: 2026-07-30
 Expires: 2026-10-28 (90-day house convention for time-sensitive evidence)
-Purpose: the input `adapter.schema.json` and the three client adapters are written against in 0.2.4.
+Purpose: the input `adapter.schema.json` and the three client adapters are written against in 0.2.5.
 
 Design spec §9 says "Codex adapter paths are researched and verified against current first-party
 documentation during phase 0.3.0 and are not asserted by this document", and §18 routes that

@@ -1,0 +1,10 @@
+{
+  "adapter_version": 1,
+  "client": "generic",
+  "expires_on": "2026-10-28",
+  "anchors": {
+    "$PROJECT": ["."]
+  },
+  "probes": [],
+  "sensitive_key_patterns": []
+}

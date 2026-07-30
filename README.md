@@ -64,7 +64,7 @@ See [packaging/README.md](packaging/README.md) for the package contract, support
 Add this repository as a marketplace and install the plugin:
 
 ```text
-codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.2.4
+codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.2.5
 codex plugin add agent-ingest-audit-optimize@agent-ingest-audit-optimize
 ```
 
@@ -87,7 +87,7 @@ claude --plugin-dir <path-to-agent-ingest-audit-optimize>
 
 ### Other Agent Skills clients
 
-Download the `agent-ingest-audit-optimize-0.2.4-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
+Download the `agent-ingest-audit-optimize-0.2.5-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
 
 ## Use
 
@@ -131,6 +131,18 @@ python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify <pa
 
 Exit codes: `0` clean, `1` findings, `2` the ledger could not be read. The tool requires
 Python 3.9 or later and uses the standard library only.
+
+Capture what a client currently has configured with `scan`, which reads that client's
+configuration and prints one baseline entry on standard output for the agent to place in a
+ledger:
+
+```text
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py scan --id BASE-YYYY-NNN [--client NAME]
+```
+
+`scan` is read-only: it writes no file and runs nothing a configuration file names. Exit codes:
+`0` clean, `1` findings, `2` a tool error. See
+[PRIVACY.md](PRIVACY.md) for what it reads and what a baseline can contain.
 
 See [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md) for the
 record model, and [assets/schemas/ledger.schema.json](skills/agent-ingest-audit-optimize/assets/schemas/ledger.schema.json)

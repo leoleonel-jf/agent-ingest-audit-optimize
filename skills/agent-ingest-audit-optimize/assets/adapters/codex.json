@@ -1,0 +1,29 @@
+{
+  "adapter_version": 1,
+  "client": "codex",
+  "expires_on": "2026-10-28",
+  "anchors": {
+    "$USER_CONFIG": ["$env:CODEX_HOME", "~/.codex"],
+    "$HOME": ["~"],
+    "$PROJECT": ["."],
+    "$SYSTEM_CONFIG": ["/etc/codex"]
+  },
+  "probes": [
+    { "kind": "model-setting", "scope": "user", "path": "$USER_CONFIG/config.toml",
+      "parse": "toml" },
+    { "kind": "model-setting", "scope": "user", "glob": "$USER_CONFIG/*.config.toml" },
+    { "kind": "instruction-file", "scope": "user", "glob": "$USER_CONFIG/AGENTS.md" },
+    { "kind": "instruction-file", "scope": "user", "glob": "$USER_CONFIG/AGENTS.override.md" },
+    { "kind": "skill", "scope": "user", "glob": "$HOME/.agents/skills/*/SKILL.md" },
+    { "kind": "skill", "scope": "user", "glob": "$USER_CONFIG/skills/*/SKILL.md" },
+    { "kind": "model-setting", "scope": "project", "path": "$PROJECT/.codex/config.toml",
+      "parse": "toml" },
+    { "kind": "instruction-file", "scope": "project", "glob": "$PROJECT/AGENTS.md" },
+    { "kind": "instruction-file", "scope": "project", "glob": "$PROJECT/AGENTS.override.md" },
+    { "kind": "skill", "scope": "project", "glob": "$PROJECT/.agents/skills/*/SKILL.md" },
+    { "kind": "model-setting", "scope": "system", "path": "$SYSTEM_CONFIG/config.toml",
+      "parse": "toml" },
+    { "kind": "skill", "scope": "system", "glob": "$SYSTEM_CONFIG/skills/*/SKILL.md" }
+  ],
+  "sensitive_key_patterns": ["*token*", "*key*", "*secret*", "*password*", "*credential*", "*auth*", "env", "headers", "set", "projects", "args", "*url*"]
+}

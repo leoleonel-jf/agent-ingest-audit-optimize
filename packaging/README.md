@@ -73,13 +73,21 @@ A release that adds a new pin extends that test in the same commit. Do not maint
 per-release checklist; the omission of `.agents/`, `README.md`, and `docs/SUBMISSION.md` from
 the 0.2.0 checklist is what left the four stale pins that 0.2.1 corrected.
 
-`packaging/tests/test_release_checksums.py` rebuilds the archives for the current version and
-compares the result against `docs/releases/v<version>.md`. That comparison is only meaningful
-once such a document exists, since it describes a build that was actually published; the version
-is bumped at the start of a development cycle, before that document is written, and packaged
-content (`dashboard.py`, `references/LEDGER.md`, etc.) keeps changing for the rest of the cycle.
-So the check skips explicitly, by design, until the release document for the current version is
-written -- it does not run against a version still in development.
+`packaging/tests/test_release_checksums.py` checks every `docs/releases/v<version>.md` against
+archives rebuilt from the export of tag `v<version>`, using the packager committed at that tag --
+that packager is part of what produced those checksums, so the current one is not substituted for
+it. It does not build the working tree: this repository bumps the version at the end of a cycle,
+in the release task, so the pinned version's document already exists while packaged content
+(`dashboard.py`, `references/LEDGER.md`, etc.) legitimately keeps changing. Comparing the working
+tree against it would go red on the first commit after every release and stay red for the whole
+cycle. A release document written but not yet tagged skips, with that reason, and is covered as
+soon as its tag is pushed.
+
+`v0.2.0` is skipped for a different, permanent reason: its packager predates the
+`__pycache__`/`.pyc` exclusion added in `v0.2.1`, so its published archives absorbed bytecode
+from the release builder's working tree -- untracked, interpreter- and mtime-dependent state that
+is not in the tag. It cannot be rebuilt from its own tree by construction. The test derives that
+condition from the exported packager rather than hardcoding the version.
 
 `.agents/plugins/marketplace.json` is the OpenAI Codex marketplace manifest
 (<https://developers.openai.com/plugins/build/plugins>). Its `ref` is a git ref that does not
