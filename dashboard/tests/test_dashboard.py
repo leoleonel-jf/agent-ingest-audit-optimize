@@ -171,6 +171,24 @@ class LedgerDocumentTests(unittest.TestCase):
         findings = dashboard.validate_ledger(data, source="test")
         self.assertTrue(any("known_projects" in finding for finding in findings))
 
+    def test_non_array_records_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["records"] = "not-an-array"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("records" in finding for finding in findings))
+
+    def test_non_array_baselines_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["baselines"] = "not-an-array"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("baselines" in finding for finding in findings))
+
+    def test_non_array_backlog_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["backlog"] = "not-an-array"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("backlog" in finding for finding in findings))
+
     def test_project_ledger_with_id_authority_true_is_reported(self) -> None:
         data = minimal_ledger()
         data["scope"] = "project"
@@ -209,7 +227,7 @@ class LedgerDocumentTests(unittest.TestCase):
         data["records"] = ["oops"]
         findings = dashboard.validate_ledger(data, source="test")
         self.assertTrue(
-            any("records" in finding and "0" in finding for finding in findings)
+            any("records[0]" in finding for finding in findings)
         )
 
     def test_non_dict_element_in_known_projects_is_reported(self) -> None:
@@ -217,7 +235,7 @@ class LedgerDocumentTests(unittest.TestCase):
         data["known_projects"] = [123]
         findings = dashboard.validate_ledger(data, source="test")
         self.assertTrue(
-            any("known_projects" in finding and "0" in finding for finding in findings)
+            any("known_projects[0]" in finding for finding in findings)
         )
 
     def test_non_dict_element_in_baselines_is_reported(self) -> None:
@@ -225,7 +243,7 @@ class LedgerDocumentTests(unittest.TestCase):
         data["baselines"] = [True]
         findings = dashboard.validate_ledger(data, source="test")
         self.assertTrue(
-            any("baselines" in finding and "0" in finding for finding in findings)
+            any("baselines[0]" in finding for finding in findings)
         )
 
     def test_non_dict_element_in_backlog_is_reported(self) -> None:
@@ -233,7 +251,7 @@ class LedgerDocumentTests(unittest.TestCase):
         data["backlog"] = [None]
         findings = dashboard.validate_ledger(data, source="test")
         self.assertTrue(
-            any("backlog" in finding and "0" in finding for finding in findings)
+            any("backlog[0]" in finding for finding in findings)
         )
 
     def test_valid_empty_dicts_in_arrays_have_no_findings(self) -> None:
@@ -270,6 +288,18 @@ class LedgerDocumentTests(unittest.TestCase):
         data["client"] = 999
         findings = dashboard.validate_ledger(data, source="test")
         self.assertTrue(any("client" in finding for finding in findings))
+
+    def test_verify_returns_two_for_array_at_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "ledger.json"
+            path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+            self.assertEqual(dashboard.verify([path]), 2)
+
+    def test_verify_returns_two_for_string_at_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "ledger.json"
+            path.write_text(json.dumps("nope"), encoding="utf-8")
+            self.assertEqual(dashboard.verify([path]), 2)
 
     def test_verify_returns_zero_for_a_valid_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
