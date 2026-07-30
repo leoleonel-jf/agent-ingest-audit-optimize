@@ -9,7 +9,7 @@
       "name": "agent-ingest-audit-optimize",
       "source": "./",
       "description": "Audit external material and turn verified findings into safe, reversible agent improvements.",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "author": { "name": "Leonardo Leonel Sobral" },
       "homepage": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
       "repository": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
