@@ -329,6 +329,20 @@ class LedgerDocumentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             self.assertEqual(dashboard.verify([Path(temp)]), 2)
 
+    def test_list_scope_produces_finding_not_crash(self) -> None:
+        # scope is checked with a set-membership test; an unhashable value
+        # (a list, straight from untrusted ledger content) must not raise.
+        data = minimal_ledger()
+        data["scope"] = []
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("invalid scope" in finding for finding in findings))
+
+    def test_boolean_sequence_value_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["sequences"]["MAT"] = True
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("sequences.MAT" in finding for finding in findings))
+
 
 def minimal_record() -> dict:
     return {
@@ -562,6 +576,30 @@ class RecordEntryTests(unittest.TestCase):
     def test_non_dict_record_returns_defensive_finding(self) -> None:
         findings = dashboard.validate_record("not-a-record", 0, source="test")
         self.assertEqual(findings, ["test: records[0] must be an object"])
+
+    def test_list_type_produces_finding_not_crash(self) -> None:
+        # type/status/classification/scope are each checked with a set-
+        # membership test; an unhashable value (a list) must not raise.
+        record = minimal_record()
+        record["type"] = []
+        self.assertTrue(any("invalid type" in finding for finding in self.check(record)))
+
+    def test_list_status_produces_finding_not_crash(self) -> None:
+        record = minimal_record()
+        record["status"] = []
+        self.assertTrue(any("invalid status" in finding for finding in self.check(record)))
+
+    def test_list_classification_produces_finding_not_crash(self) -> None:
+        record = minimal_record()
+        record["classification"] = []
+        self.assertTrue(
+            any("invalid classification" in finding for finding in self.check(record))
+        )
+
+    def test_list_scope_produces_finding_not_crash(self) -> None:
+        record = minimal_record()
+        record["scope"] = []
+        self.assertTrue(any("invalid scope" in finding for finding in self.check(record)))
 
     def test_records_are_validated_through_the_ledger(self) -> None:
         data = minimal_ledger()
@@ -837,6 +875,25 @@ class RunEntryTests(unittest.TestCase):
             any("self_reported" in finding for finding in self.check(record))
         )
 
+    def test_list_result_produces_finding_not_crash(self) -> None:
+        # result is checked with a set-membership test; an unhashable value
+        # (a list) must not raise.
+        record = minimal_run()
+        record["result"] = []
+        self.assertTrue(any("invalid result" in finding for finding in self.check(record)))
+
+    def test_list_rollback_tested_produces_finding_not_crash(self) -> None:
+        # rollback.tested is checked with a set-membership test; an
+        # unhashable value (a list) must not raise.
+        record = minimal_run()
+        record["rollback"]["tested"] = []
+        self.assertTrue(
+            any(
+                "rollback tested must be one of" in finding
+                for finding in self.check(record)
+            )
+        )
+
 
 class RunSchemaAlignmentTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -1006,6 +1063,36 @@ class BacklogTests(unittest.TestCase):
         findings = dashboard.validate_backlog_entry("not-an-entry", 0, source="test")
         self.assertEqual(findings, ["test: backlog[0] must be an object"])
 
+    def test_list_classification_produces_finding_not_crash(self) -> None:
+        # classification is checked with two set-membership tests
+        # (terminal, then backlog-eligible); an unhashable value (a list)
+        # must not raise.
+        entry = minimal_backlog_entry()
+        entry["classification"] = []
+        self.assertTrue(
+            any("invalid classification" in finding for finding in self.check(entry))
+        )
+
+    def test_non_string_revisit_trigger_is_reported(self) -> None:
+        entry = minimal_backlog_entry()
+        entry["revisit_trigger"] = 5
+        self.assertTrue(
+            any(
+                "revisit_trigger must be null or a string" in finding
+                for finding in self.check(entry)
+            )
+        )
+
+    def test_list_revisit_trigger_is_reported(self) -> None:
+        entry = minimal_backlog_entry()
+        entry["revisit_trigger"] = ["x"]
+        self.assertTrue(
+            any(
+                "revisit_trigger must be null or a string" in finding
+                for finding in self.check(entry)
+            )
+        )
+
 
 class KnownProjectTests(unittest.TestCase):
     def check(self, entry: dict) -> list[str]:
@@ -1061,6 +1148,13 @@ class KnownProjectTests(unittest.TestCase):
     def test_non_dict_known_project_returns_defensive_finding(self) -> None:
         findings = dashboard.validate_known_project(123, 0, source="test")
         self.assertEqual(findings, ["test: known_projects[0] must be an object"])
+
+    def test_list_status_produces_finding_not_crash(self) -> None:
+        # status is checked with a set-membership test; an unhashable value
+        # (a list) must not raise.
+        entry = minimal_known_project()
+        entry["status"] = []
+        self.assertTrue(any("invalid status" in finding for finding in self.check(entry)))
 
     def test_backlog_and_projects_are_validated_through_the_ledger(self) -> None:
         data = minimal_ledger()

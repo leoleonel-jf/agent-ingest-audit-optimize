@@ -175,19 +175,22 @@ def validate_ledger(data: dict, *, source: str) -> list[str]:
         findings.append(
             f"{source}: unsupported schema_version: {data['schema_version']!r}"
         )
-    if type(data["ledger_id"]) is not str or len(data["ledger_id"]) < 1:
+    if not isinstance(data["ledger_id"], str) or len(data["ledger_id"]) < 1:
         findings.append(f"{source}: ledger_id must be a non-empty string")
-    if data["scope"] not in LEDGER_SCOPES:
+    if not isinstance(data["scope"], str) or data["scope"] not in LEDGER_SCOPES:
         findings.append(f"{source}: invalid scope: {data['scope']!r}")
-    if type(data["language"]) is not str or len(data["language"]) < 2:
+    if not isinstance(data["language"], str) or len(data["language"]) < 2:
         findings.append(f"{source}: language must be a string of at least 2 characters")
-    if type(data["client"]) is not str or len(data["client"]) < 1:
+    if not isinstance(data["client"], str) or len(data["client"]) < 1:
         findings.append(f"{source}: client must be a non-empty string")
+    # adapter_version deliberately uses `type(x) is not int` rather than
+    # isinstance: bool is a subclass of int, so isinstance(True, int) is
+    # True, which would let a boolean silently pass as a valid count.
     if type(data["adapter_version"]) is not int or data["adapter_version"] < 1:
         findings.append(f"{source}: adapter_version must be an integer of at least 1")
     for field in ("created", "updated"):
         value = data[field]
-        if type(value) is not str or not DATE.fullmatch(value):
+        if not isinstance(value, str) or not DATE.fullmatch(value):
             findings.append(f"{source}: {field} must match YYYY-MM-DD")
     if type(data["id_authority"]) is not bool:
         findings.append(f"{source}: id_authority must be a boolean")
@@ -252,10 +255,10 @@ def validate_run(record: dict, *, label: str) -> list[str]:
         if not isinstance(quote, str) or not quote.strip():
             findings.append(f"{label} authorization quote must be a non-empty string")
         recorded_on = authorization.get("recorded_on")
-        if type(recorded_on) is not str or not DATE.fullmatch(recorded_on):
+        if not isinstance(recorded_on, str) or not DATE.fullmatch(recorded_on):
             findings.append(f"{label} authorization.recorded_on must match YYYY-MM-DD")
 
-    if record["result"] not in RUN_RESULTS:
+    if not isinstance(record["result"], str) or record["result"] not in RUN_RESULTS:
         findings.append(f"{label} has an invalid result: {record['result']!r}")
 
     targets = record["targets"]
@@ -298,7 +301,10 @@ def validate_run(record: dict, *, label: str) -> list[str]:
     rollback = record["rollback"]
     if not isinstance(rollback, dict):
         findings.append(f"{label} rollback must be an object")
-    elif rollback.get("tested") not in ROLLBACK_TEST_STATES:
+    elif (
+        not isinstance(rollback.get("tested"), str)
+        or rollback.get("tested") not in ROLLBACK_TEST_STATES
+    ):
         findings.append(
             f"{label} rollback tested must be one of {sorted(ROLLBACK_TEST_STATES)}"
         )
@@ -328,22 +334,25 @@ def validate_record(record: dict, index: int, *, source: str) -> list[str]:
     else:
         label = f"{source}: {identifier}"
 
-    if record["type"] not in RECORD_TYPES:
+    if not isinstance(record["type"], str) or record["type"] not in RECORD_TYPES:
         findings.append(f"{label} has an invalid type: {record['type']!r}")
-    if record["status"] not in RECORD_STATUSES:
+    if not isinstance(record["status"], str) or record["status"] not in RECORD_STATUSES:
         findings.append(f"{label} has an invalid status: {record['status']!r}")
-    if record["classification"] not in CLASSIFICATIONS:
+    if (
+        not isinstance(record["classification"], str)
+        or record["classification"] not in CLASSIFICATIONS
+    ):
         findings.append(
             f"{label} has an invalid classification: {record['classification']!r}"
         )
-    if record["scope"] not in RECORD_SCOPES:
+    if not isinstance(record["scope"], str) or record["scope"] not in RECORD_SCOPES:
         findings.append(f"{label} has an invalid scope: {record['scope']!r}")
     for field in ("title", "file"):
         if not isinstance(record[field], str) or not record[field].strip():
             findings.append(f"{label} {field} must be a non-empty string")
     for field in ("created", "updated"):
         value = record[field]
-        if type(value) is not str or not DATE.fullmatch(value):
+        if not isinstance(value, str) or not DATE.fullmatch(value):
             findings.append(f"{label} {field} must match YYYY-MM-DD")
 
     links = record["links"]
@@ -406,7 +415,9 @@ def validate_backlog_entry(entry: dict, index: int, *, source: str) -> list[str]
         label = f"{source}: backlog {identifier}"
 
     classification = entry["classification"]
-    if classification in TERMINAL_CLASSIFICATIONS:
+    if not isinstance(classification, str):
+        findings.append(f"{label} has an invalid classification: {classification!r}")
+    elif classification in TERMINAL_CLASSIFICATIONS:
         findings.append(
             f"{label} uses the terminal classification {classification!r}, "
             "which never enters the backlog"
@@ -416,6 +427,13 @@ def validate_backlog_entry(entry: dict, index: int, *, source: str) -> list[str]
 
     if not isinstance(entry["reason"], str) or not entry["reason"].strip():
         findings.append(f"{label} reason must be a non-empty string")
+
+    # revisit_trigger mirrors the schema's `"type": ["string", "null"]`:
+    # any other type (int, list, dict, ...) is a finding, independent of
+    # the "at least one of trigger/date" rule below.
+    revisit_trigger = entry["revisit_trigger"]
+    if revisit_trigger is not None and not isinstance(revisit_trigger, str):
+        findings.append(f"{label} revisit_trigger must be null or a string")
 
     # revisit_after is a date field like every other date in this ledger
     # (created, updated, verified_on, recorded_on): when present it must
@@ -450,13 +468,13 @@ def validate_known_project(entry: dict, index: int, *, source: str) -> list[str]
     # last_seen is a date field like created/updated/verified_on/recorded_on
     # elsewhere in this ledger, and unlike revisit_after it is not nullable.
     last_seen = entry["last_seen"]
-    if type(last_seen) is not str or not DATE.fullmatch(last_seen):
+    if not isinstance(last_seen, str) or not DATE.fullmatch(last_seen):
         findings.append(f"{label} last_seen must match YYYY-MM-DD")
 
     digest = entry["last_digest"]
     if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
         findings.append(f"{label} last_digest must be a sha256 digest")
-    if entry["status"] not in PROJECT_STATUSES:
+    if not isinstance(entry["status"], str) or entry["status"] not in PROJECT_STATUSES:
         findings.append(f"{label} has an invalid status: {entry['status']!r}")
     return findings
 
