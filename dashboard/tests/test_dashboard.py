@@ -1521,6 +1521,30 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
 
         self.assertFalse(any("sequences" in finding for finding in findings))
 
+    def test_authority_holding_the_highest_record_produces_one_finding_not_two(
+        self,
+    ) -> None:
+        # Deleting `if holder == source: continue` from the authority check
+        # would double-count this exact case: the per-document rule (the
+        # first loop over `highest`) already reports a ledger's sequences
+        # trailing its own highest record, and without the skip the
+        # authority-scoped rule (the second loop over `spent`) reports the
+        # same drift again under a second message, because here the
+        # authority is also the ledger that holds the record.
+        authority = minimal_ledger()
+        record = minimal_record()
+        record["id"] = "MAT-2026-005"
+        record["type"] = "MATERIAL"
+        authority["records"] = [record]
+        authority["sequences"]["MAT"] = 0
+
+        findings = dashboard.validate_collection([("global.json", authority)])
+
+        matching = [finding for finding in findings if "MAT-2026-005" in finding]
+        self.assertEqual(
+            len(matching), 1, f"expected exactly one finding, got: {matching}"
+        )
+
     def test_more_than_one_id_authority_is_reported(self) -> None:
         findings = dashboard.validate_collection(
             [("a", minimal_ledger()), ("b", minimal_ledger())]
@@ -1669,10 +1693,111 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
             ]
             global_path = write_ledger(root, global_data)
 
-            relative_project_path = Path(os.path.relpath(project_path, Path.cwd()))
+            try:
+                relative_project_path = Path(
+                    os.path.relpath(project_path, Path.cwd())
+                )
+            except ValueError:
+                # On Windows, os.path.relpath raises ValueError when the two
+                # paths are on different drives -- e.g. a checkout on C:\
+                # with TEMP redirected to D:\. There is no relative path to
+                # form in that case, so there is nothing this test can
+                # exercise; skip rather than error.
+                self.skipTest(
+                    "no relative path exists between the checkout and TEMP "
+                    "(different drives)"
+                )
             exit_code, stdout, stderr = _capture_verify(
                 [relative_project_path, global_path]
             )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("last_digest", stderr)
+
+    def test_path_key_normalizes_separator_and_case(self) -> None:
+        # _path_key's normalization is what lets a stored ledger_path
+        # compare equal to an invocation path that names the same file with
+        # different slashes or case. Replacing _path_key's body with
+        # `return value` leaves every other digest test in this class
+        # green, because each one passes str(path) verbatim on both sides;
+        # none of them differs the two strings in spelling. This one does:
+        # the stored ledger_path uses forward slashes and upper case, the
+        # invocation path is exactly what write_ledger returned.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            sub = root / "sub"
+            sub.mkdir()
+            project_data = self.project_ledger()
+            project_path = write_ledger(sub, project_data)
+
+            mixed_path = str(project_path).replace(os.sep, "/").upper()
+            self.assertNotEqual(mixed_path, str(project_path))
+
+            global_data = minimal_ledger()
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(sub),
+                    "ledger_path": mixed_path,
+                    "last_seen": "2026-07-30",
+                    # Wrong but well-formed, same as the other digest tests
+                    # in this class: the point is that the comparison
+                    # happens at all, which a mismatch finding proves.
+                    "last_digest": "sha256:" + "9" * 64,
+                    "status": "OK",
+                }
+            ]
+            global_path = write_ledger(root, global_data)
+
+            exit_code, stdout, stderr = _capture_verify([project_path, global_path])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("last_digest", stderr)
+
+    def test_verify_matches_relative_ledger_path_against_relative_invocation(
+        self,
+    ) -> None:
+        # Deleting `digests[_path_key(source)] = digest` from verify()
+        # leaves every existing digest test in this class green: they all
+        # either use identical strings on both sides or depend on the
+        # resolved-path key covered by
+        # test_verify_matches_relative_invocation_against_absolute_ledger_path
+        # above. Only the as-given key covers this case: a ledger_path
+        # stored relative, matched by a relative invocation path, where the
+        # resolved (absolute) key would never match the stored value.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project_dir = root / "project"
+            project_dir.mkdir()
+            project_data = self.project_ledger()
+            project_data["records"] = [minimal_record()]
+            project_data["sequences"]["PROP"] = 1
+            write_ledger(project_dir, project_data)
+
+            relative_ledger_path = os.path.join("project", "ledger.json")
+            global_data = minimal_ledger()
+            # Matches the project ledger's PROP-2026-000 so the authority
+            # sequence check stays quiet and stderr carries only the
+            # last_digest finding this test is about.
+            global_data["sequences"]["PROP"] = 1
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(project_dir),
+                    "ledger_path": relative_ledger_path,
+                    "last_seen": "2026-07-30",
+                    "last_digest": "sha256:" + "9" * 64,
+                    "status": "OK",
+                }
+            ]
+            write_ledger(root, global_data)
+
+            previous_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                exit_code, stdout, stderr = _capture_verify(
+                    [Path(relative_ledger_path), Path("ledger.json")]
+                )
+            finally:
+                os.chdir(previous_cwd)
 
             self.assertEqual(exit_code, 1)
             self.assertIn("last_digest", stderr)
@@ -1832,6 +1957,34 @@ class PartialSetHonestyTests(unittest.TestCase):
             exit_code, stdout, stderr = _capture_verify([present_path, missing_path])
             self.assertEqual(exit_code, 2)
             self.assertNotIn("unknown record", stderr)
+
+    def test_verify_partial_set_suppresses_backlog_back_reference_finding(self) -> None:
+        # The unit-level test above
+        # (test_backlog_back_references_are_suppressed_for_a_partial_set)
+        # covers validate_collection(complete=False) directly. The plan's
+        # acceptance criterion is end to end: verify() itself, with one
+        # ledger genuinely unreadable, must both exit 2 and not report a
+        # backlog id that resolves to no record in the readable set --
+        # that record may live in the ledger that could not be read.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            present_dir = root / "present"
+            present_dir.mkdir()
+            data = self.project_ledger()
+            data["backlog"] = [
+                {
+                    "id": "MAT-2026-777",
+                    "classification": "MONITOR",
+                    "reason": "the record may live in the ledger that could not be read",
+                    "revisit_trigger": "never",
+                    "revisit_after": None,
+                }
+            ]
+            present_path = write_ledger(present_dir, data)
+            missing_path = root / "missing" / "ledger.json"
+            exit_code, stdout, stderr = _capture_verify([present_path, missing_path])
+            self.assertEqual(exit_code, 2)
+            self.assertNotIn("MAT-2026-777", stderr)
 
     def test_verify_prints_findings_from_readable_ledgers_before_failing(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1997,6 +2150,16 @@ class ReferenceTests(unittest.TestCase):
             "does not make coverage verifiable",
         ):
             self.assertIn(phrase, text)
+
+    def test_reference_states_the_sequences_floor_rule_not_its_negation(self) -> None:
+        # test_reference_documents_the_new_checks above asserts "a floor"
+        # as a bare substring, which the *negation* of the rule also
+        # contains ("It is an equality, not a floor" still matches "a
+        # floor"). Rewriting the documented rule into its opposite would
+        # keep that test green. Pin the exact phrase order, both ways.
+        text = REFERENCE.read_text(encoding="utf-8")
+        self.assertIn("a floor, not an equality", text)
+        self.assertNotIn("an equality, not a floor", text)
 
 
 SKILL = REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "SKILL.md"
