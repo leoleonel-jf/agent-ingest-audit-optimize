@@ -140,7 +140,7 @@ during a security review but never previously brought into this document:
     makes non-strict `Path.resolve()` raise `RuntimeError("Symlink loop from ...")` rather than an
     `OSError`, a POSIX-only case invisible to a Windows-only test run. Both are wrapped rather than
     allowed to escape, so a caller need only ever catch `PathSafetyError`, never a raw `OSError` or
-    `RuntimeError`, and `scan` (0.2.4) can report a finding and keep walking instead of aborting;
+    `RuntimeError`, and `scan` (0.2.5) can report a finding and keep walking instead of aborting;
 13. **path resolves to a hardlinked file** — the resolved path names an existing regular file with
     more than one hard link. A hardlink needs no elevation to create (`mklink /H` on Windows, `ln`
     on POSIX) and has no symlink target for rules 4/5 to follow, so it defeats every rule above by
