@@ -21,8 +21,15 @@ All notable changes to this project are documented in this file.
   `docs/SUBMISSION.md`, neither of which had a check.
 
 **Compatibility:** a ledger that validated clean under 0.2.1 may now produce findings. The new
-checks describe conditions that were always wrong and merely unobserved. One is a hard requirement
-rather than a detection: add `"targets"` to every RUN record's `self_reported` array.
+checks describe conditions that were always wrong and merely unobserved. Two are hard requirements
+rather than detections: add `"targets"` to every RUN record's `self_reported` array; and, for
+whichever ledger holds `id_authority: true`, raise `sequences[prefix]` to cover every identifier
+of that prefix anywhere in the verified set, not only that ledger's own records — bump the
+authority's counters. A user who followed the previous `references/LEDGER.md`, which said a
+ledger's sequences must cover "its own records", can land here: a global ledger with
+`id_authority: true`, no records of its own, and `sequences.MAT: 0` validated clean against a
+project ledger holding `MAT-2026-000` with `sequences.MAT: 1` under 0.2.1, and now reports
+`sequences.MAT is 0 but the ID authority must cover MAT-2026-000, allocated in project.json`.
 
 ## 0.2.1 - 2026-07-30
 
