@@ -263,18 +263,28 @@ def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
     base = root.resolve()
     candidate = base if not tail else base.joinpath(*tail.split("/"))
 
-    # Rule 5 before rule 4: a symlink whose target leaves the anchor is refused
-    # even when the final path lands back inside, because a link that leaves the
-    # anchor is one an attacker can re-point later.
+    # Rule 5 before rule 4: this does not ask whether a component IS a link --
+    # Path.is_symlink() returns False for a Windows directory junction even
+    # though Path.resolve() follows one, so an is_symlink() test misses
+    # exactly the redirection a junction performs. Instead this asks where
+    # each PREFIX of the path resolves: for every component walked so far,
+    # resolve that prefix and require the result to still be within the
+    # anchor. A symlink or junction whose target leaves the anchor makes some
+    # prefix resolve outside, so both are caught identically, even when the
+    # full path later leads back inside -- because a link that leaves the
+    # anchor is one an attacker can re-point later. This is what makes the
+    # rule work for any redirection mechanism the platform offers, not only
+    # the ones Path.is_symlink() happens to recognize. A prefix that does not
+    # exist yet resolves normally (Path.resolve() is non-strict by default)
+    # and simply is not yet outside anything.
     walked = base
     for part in (tail.split("/") if tail else []):
         walked = walked / part
-        if walked.is_symlink():
-            target = walked.resolve()
-            if not _is_within(target, base):
-                raise PathSafetyError(
-                    f"path crosses a symlink that leaves its anchor: {stored!r}"
-                )
+        resolved_prefix = walked.resolve()
+        if not _is_within(resolved_prefix, base):
+            raise PathSafetyError(
+                f"path crosses a link that leaves its anchor: {stored!r}"
+            )
 
     final = candidate.resolve()
     if not _is_within(final, base):

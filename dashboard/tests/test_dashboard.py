@@ -2316,19 +2316,22 @@ class ResolveAnchoredTests(unittest.TestCase):
         self.assertIn("not anchored", str(ctx.exception))
 
     def test_resolved_result_outside_root_is_refused(self) -> None:
-        # Refusal 4: the final resolved location lands outside the anchor.
-        #
-        # A Windows directory junction is the construction that isolates this
-        # rule from refusal 5: unlike a symlink, a junction is not reported by
-        # Path.is_symlink() (the per-component check refusal 5 uses), but it
-        # is still followed by Path.resolve() (the check this rule uses), so
-        # only refusal 4 fires here. On Windows, junctions -- unlike symlinks
-        # -- do not require developer mode or elevation to create.
-        #
-        # On a non-Windows platform an ordinary symlink is always detected by
-        # is_symlink(), so this specific escape collapses into refusal 5
-        # there; refusal 4 is exercised as a backstop rather than
-        # independently. Skip rather than assert the wrong rule's message.
+        # Refusal 4 is the final backstop: after every prefix has been
+        # resolved and found within the anchor, the fully resolved path is
+        # checked once more. In practice that backstop is now unreachable
+        # whenever `tail` is non-empty, because refusal 5 (below) resolves
+        # that very same last prefix -- identical to `candidate` -- on its
+        # final loop iteration and raises first. This test's junction
+        # (root/escape -> outside, holding secret.txt, with no path back
+        # into the anchor) used to isolate refusal 4 from refusal 5, back
+        # when refusal 5 asked whether a component IS a symlink:
+        # Path.is_symlink() returns False for a junction, so refusal 5 used
+        # to miss it and only refusal 4 fired. Refusal 5 now asks where each
+        # prefix RESOLVES instead, so it catches this junction just as
+        # readily as a symlink -- this is exactly the fix. What is still
+        # verified here is that escaping through a junction (Windows,
+        # elevation-free) is refused at all, and with the generalized
+        # "crosses a link" message rather than refusal 4's message.
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp).resolve()
             root = base / "r"
@@ -2339,9 +2342,10 @@ class ResolveAnchoredTests(unittest.TestCase):
             link = root / "escape"
             if os.name != "nt":
                 self.skipTest(
-                    "refusal 4 is isolated from refusal 5 via a Windows "
-                    "junction; on this platform an escaping symlink is "
-                    "always caught by refusal 5 instead"
+                    "this scenario is exercised on Windows via a junction; "
+                    "on other platforms an escaping symlink is created and "
+                    "checked in test_symlink_leaving_anchor_is_refused_"
+                    "even_if_final_path_returns_inside instead"
                 )
             result = subprocess.run(
                 ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
@@ -2354,7 +2358,7 @@ class ResolveAnchoredTests(unittest.TestCase):
                 )
             with self.assertRaises(dashboard.PathSafetyError) as ctx:
                 dashboard.resolve_anchored("$R/escape/secret.txt", {"R": root})
-            self.assertIn("resolves outside its anchor", str(ctx.exception))
+            self.assertIn("crosses a link that leaves its anchor", str(ctx.exception))
 
     def test_symlink_leaving_anchor_is_refused_even_if_final_path_returns_inside(
         self,
@@ -2386,7 +2390,76 @@ class ResolveAnchoredTests(unittest.TestCase):
                 )
             with self.assertRaises(dashboard.PathSafetyError) as ctx:
                 dashboard.resolve_anchored("$R/link/back/file.txt", {"R": root})
-            self.assertIn("crosses a symlink that leaves its anchor", str(ctx.exception))
+            self.assertIn("crosses a link that leaves its anchor", str(ctx.exception))
+
+    def test_junction_leaving_anchor_and_looping_back_is_refused(self) -> None:
+        # The exact gap this fix closes, using a Windows junction instead of
+        # a symlink so it runs without developer mode or elevation on this
+        # machine: root r, a directory outside beside it, a junction
+        # r/link -> outside, and a junction outside/back -> r. Resolving
+        # $R/link/back/file must still refuse, even though the final
+        # destination is back inside r.
+        #
+        # Before this fix neither rule caught this: refusal 5 asked whether
+        # "link" IS a symlink (Path.is_symlink() says no for a junction), and
+        # refusal 4 only looked at where the *whole* path ends up, which is
+        # back inside r. Asking where each prefix resolves closes both holes
+        # at once: the "link" prefix alone resolves to outside, which is
+        # already outside the anchor, so it is refused before the "back"
+        # segment is ever considered.
+        if os.name != "nt":
+            self.skipTest(
+                "this test exercises the junction-specific escape; on other "
+                "platforms the equivalent symlink escape is covered by "
+                "test_symlink_leaving_anchor_is_refused_even_if_final_path_"
+                "returns_inside"
+            )
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve()
+            root = base / "root"
+            outside = base / "outside"
+            root.mkdir()
+            outside.mkdir()
+            (root / "file.txt").write_text("x", encoding="utf-8")
+            link = root / "link"
+            back = outside / "back"
+            result_link = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                capture_output=True,
+                text=True,
+            )
+            if result_link.returncode != 0:
+                self.skipTest(
+                    f"cannot create a junction on this platform: "
+                    f"{result_link.stderr.strip()}"
+                )
+            result_back = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(back), str(root)],
+                capture_output=True,
+                text=True,
+            )
+            if result_back.returncode != 0:
+                self.skipTest(
+                    f"cannot create a junction on this platform: "
+                    f"{result_back.stderr.strip()}"
+                )
+            with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                dashboard.resolve_anchored("$R/link/back/file.txt", {"R": root})
+            self.assertIn("crosses a link that leaves its anchor", str(ctx.exception))
+
+    def test_nonexistent_final_component_resolves_without_raising(self) -> None:
+        # Path.resolve() is non-strict by default (Python 3.6+): a prefix
+        # that does not exist yet must not be treated as an escape. Only
+        # "src" exists on disk here; "new_file.py" does not, and that must
+        # not raise -- it simply is not yet outside anything.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            sub = root / "src"
+            sub.mkdir()
+            resolved = dashboard.resolve_anchored(
+                "$PROJECT/src/new_file.py", {"PROJECT": root}
+            )
+            self.assertEqual(resolved, (sub / "new_file.py").resolve())
 
     def test_ordinary_path_under_root_resolves_to_expected_absolute_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
