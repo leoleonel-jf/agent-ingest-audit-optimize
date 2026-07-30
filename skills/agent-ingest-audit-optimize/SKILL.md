@@ -123,6 +123,14 @@ Keep the core recommendation independent of any one model vendor or agent client
 
 Read [references/PLATFORM_ADAPTATION.md](references/PLATFORM_ADAPTATION.md) before making product-specific recommendations or packaging changes.
 
+## Delegate to preserve context
+
+Delegate independently verifiable work when the client supports subagents: material acquisition, per-claim verification, environment inventory, and alternative evaluation during deliberation. Each unit returns structured data, not prose. Keep synthesis, classification, prioritization, proposal authoring, and every user-facing decision in the main context.
+
+Never delegate implementation. Backup, apply, validate, and record form a single-writer sequence that only its own worker can halt. Never run two authorized proposals at once, and never grant a subagent authority to authorize.
+
+Detect subagent support; never assume it. Without it, run the same work sequentially instead.
+
 ## Enforce security boundaries
 
 Read [references/SECURITY.md](references/SECURITY.md) before executing commands from material, handling unknown Skill bundles or plugins, changing permissions, accessing secrets, installing dependencies, or making networked changes.

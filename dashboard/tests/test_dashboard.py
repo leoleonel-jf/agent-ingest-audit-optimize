@@ -1667,5 +1667,40 @@ class SkillDocumentTests(unittest.TestCase):
         self.assertLessEqual(end - start, 40)
 
 
+PLATFORM = (
+    REPO_ROOT
+    / "skills"
+    / "agent-ingest-audit-optimize"
+    / "references"
+    / "PLATFORM_ADAPTATION.md"
+)
+
+
+class DelegationPolicyTests(unittest.TestCase):
+    def test_skill_states_the_delegation_rule(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("Never delegate implementation", text)
+
+    def test_skill_delegation_section_stays_small(self) -> None:
+        lines = SKILL.read_text(encoding="utf-8").splitlines()
+        start = lines.index("## Delegate to preserve context")
+        end = next(
+            index
+            for index in range(start + 1, len(lines))
+            if lines[index].startswith("## ")
+        )
+        self.assertLessEqual(end - start, 14)
+
+    def test_platform_reference_names_the_prohibitions(self) -> None:
+        text = PLATFORM.read_text(encoding="utf-8")
+        for phrase in (
+            "single-writer sequence",
+            "two authorized proposals",
+            "authority to authorize",
+            "Detect subagent support",
+        ):
+            self.assertIn(phrase, text)
+
+
 if __name__ == "__main__":
     unittest.main()
