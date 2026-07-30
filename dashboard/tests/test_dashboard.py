@@ -2220,5 +2220,60 @@ class DelegationPolicyTests(unittest.TestCase):
             self.assertIn(phrase, text)
 
 
+ANCHOR_BASE = Path(tempfile.gettempdir()).resolve()
+
+
+class AnchorPathTests(unittest.TestCase):
+    def test_path_under_root_anchors_to_name_and_rest(self) -> None:
+        root = ANCHOR_BASE / "project"
+        path = root / "src" / "main.py"
+        stored, portable = dashboard.anchor_path(path, {"PROJECT": root})
+        self.assertEqual(stored, "$PROJECT/src/main.py")
+        self.assertTrue(portable)
+
+    def test_root_itself_anchors_to_bare_name(self) -> None:
+        root = ANCHOR_BASE / "project"
+        stored, portable = dashboard.anchor_path(root, {"PROJECT": root})
+        self.assertEqual(stored, "$PROJECT")
+        self.assertTrue(portable)
+
+    def test_path_under_no_root_returns_absolute_and_not_portable(self) -> None:
+        root = ANCHOR_BASE / "project"
+        outside = ANCHOR_BASE / "elsewhere" / "file.txt"
+        stored, portable = dashboard.anchor_path(outside, {"PROJECT": root})
+        self.assertEqual(stored, str(outside))
+        self.assertFalse(portable)
+
+    def test_longest_matching_root_wins(self) -> None:
+        user_config = ANCHOR_BASE / "config"
+        project = user_config / "project"
+        path = project / "file.txt"
+        roots = {"USER_CONFIG": user_config, "PROJECT": project}
+        stored, portable = dashboard.anchor_path(path, roots)
+        self.assertEqual(stored, "$PROJECT/file.txt")
+        self.assertTrue(portable)
+
+    def test_separator_style_does_not_change_the_result(self) -> None:
+        # The stored form is always forward-slash (as_posix()), regardless of
+        # the platform's native separator, so the value is stable wherever the
+        # ledger that holds it is later read.
+        root = ANCHOR_BASE / "project"
+        relative = Path("src") / "deep" / "main.py"
+        path = root / relative
+        stored, portable = dashboard.anchor_path(path, {"PROJECT": root})
+        self.assertEqual(stored, f"$PROJECT/{relative.as_posix()}")
+        self.assertTrue(portable)
+
+    def test_root_that_is_a_name_prefix_but_not_a_path_prefix_does_not_match(self) -> None:
+        # /a/bc must not match root /a/b: relative_to compares path
+        # components, not string prefixes. A str.startswith comparison would
+        # wrongly accept this.
+        root_b = ANCHOR_BASE / "a" / "b"
+        path_bc = ANCHOR_BASE / "a" / "bc" / "file.txt"
+        stored, portable = dashboard.anchor_path(path_bc, {"ROOT": root_b})
+        self.assertEqual(stored, str(path_bc))
+        self.assertFalse(portable)
+
+
 if __name__ == "__main__":
     unittest.main()

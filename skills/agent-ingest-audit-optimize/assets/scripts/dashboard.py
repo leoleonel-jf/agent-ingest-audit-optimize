@@ -189,6 +189,35 @@ def _path_key(value: str) -> str:
     return os.path.normcase(os.path.normpath(value))
 
 
+def anchor_path(path: Path, roots: dict[str, Path]) -> tuple[str, bool]:
+    """Store a path relative to the anchor that contains it.
+
+    Returns the stored form and whether it is portable. Per design spec 7.1,
+    absolute paths are never stored when an anchor applies, and anything
+    outside every anchor is stored absolute and flagged portable: false.
+
+    When more than one anchor contains the path the longest root wins, so a
+    project nested inside a user configuration root anchors to $PROJECT rather
+    than $USER_CONFIG. The design spec does not state this; the more specific
+    anchor is the only choice that keeps both meaningful.
+    """
+    absolute = path if path.is_absolute() else path.resolve()
+    best: tuple[int, str, Path] | None = None
+    for name, root in roots.items():
+        try:
+            relative = absolute.relative_to(root)
+        except ValueError:
+            continue  # not under this root; relative_to compares components
+        depth = len(root.parts)
+        if best is None or depth > best[0]:
+            best = (depth, name, relative)
+    if best is None:
+        return str(absolute), False
+    _, name, relative = best
+    tail = relative.as_posix()
+    return (f"${name}" if tail == "." else f"${name}/{tail}"), True
+
+
 def validate_ledger(data: dict, *, source: str) -> list[str]:
     findings: list[str] = []
     missing = REQUIRED_LEDGER_FIELDS - set(data)
