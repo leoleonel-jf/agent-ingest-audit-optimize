@@ -532,6 +532,10 @@ def validate_collection(
     declared: set[str] = set()
     authorities: list[str] = []
     all_records: list[tuple[str, dict]] = []
+    # Highest number seen per prefix across the whole verified set, with the
+    # identifier and the ledger that holds it, so the authority check below can
+    # name where the id was actually spent.
+    spent: dict[str, tuple[int, str, str]] = {}
     for source, data in documents:
         if isinstance(data, dict) and data.get("id_authority") is True:
             authorities.append(source)
@@ -566,6 +570,9 @@ def validate_collection(
             current = highest.get(prefix)
             if current is None or number > current[0]:
                 highest[prefix] = (number, identifier)
+            current_spent = spent.get(prefix)
+            if current_spent is None or number > current_spent[0]:
+                spent[prefix] = (number, identifier, source)
         sequences = data.get("sequences") if isinstance(data, dict) else None
         if isinstance(sequences, dict):
             for prefix, (number, highest_identifier) in highest.items():
@@ -575,6 +582,26 @@ def validate_collection(
                         f"{source}: sequences.{prefix} is {allocated} but "
                         f"{highest_identifier} is already allocated"
                     )
+
+    # The global ledger is the sole ID authority, and normally holds no records
+    # of its own: every project-scoped record routes to a project ledger. So the
+    # per-document rule above never relates the authority's allocation counter to
+    # the ids it actually issued. Fold in the whole set.
+    for source, data in documents:
+        if not isinstance(data, dict) or data.get("id_authority") is not True:
+            continue
+        sequences = data.get("sequences")
+        if not isinstance(sequences, dict):
+            continue
+        for prefix, (number, identifier, holder) in spent.items():
+            if holder == source:
+                continue  # the per-document rule already covers this one
+            allocated = sequences.get(prefix)
+            if type(allocated) is int and allocated < number + 1:
+                findings.append(
+                    f"{source}: sequences.{prefix} is {allocated} but the ID "
+                    f"authority must cover {identifier}, allocated in {holder}"
+                )
 
     if complete:
         for source, record in all_records:

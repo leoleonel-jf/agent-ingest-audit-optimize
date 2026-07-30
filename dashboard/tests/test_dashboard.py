@@ -1399,6 +1399,46 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
         self.assertTrue(any("RUN-2026-009" in finding for finding in findings))
         self.assertFalse(any("\x1b" in finding for finding in findings))
 
+    def test_authority_sequences_must_cover_a_sibling_ledgers_records(self) -> None:
+        authority = minimal_ledger()
+        authority["sequences"]["MAT"] = 0
+        project = self.project_ledger()
+        record = minimal_record()
+        record["id"] = "MAT-2026-000"
+        record["type"] = "MATERIAL"
+        project["records"] = [record]
+        project["sequences"]["MAT"] = 1
+
+        findings = dashboard.validate_collection(
+            [("global.json", authority), ("project.json", project)]
+        )
+
+        self.assertTrue(
+            any("sequences.MAT" in finding and "global.json" in finding for finding in findings)
+        )
+
+    def test_a_project_ledger_is_not_responsible_for_a_siblings_records(self) -> None:
+        authority = minimal_ledger()
+        authority["sequences"]["MAT"] = 6
+        first = self.project_ledger()
+        first_record = minimal_record()
+        first_record["id"] = "MAT-2026-005"
+        first_record["type"] = "MATERIAL"
+        first["records"] = [first_record]
+        first["sequences"]["MAT"] = 6
+        second = self.project_ledger()
+        second_record = minimal_record()
+        second_record["id"] = "MAT-2026-000"
+        second_record["type"] = "MATERIAL"
+        second["records"] = [second_record]
+        second["sequences"]["MAT"] = 1
+
+        findings = dashboard.validate_collection(
+            [("global.json", authority), ("a.json", first), ("b.json", second)]
+        )
+
+        self.assertFalse(any("sequences" in finding for finding in findings))
+
     def test_more_than_one_id_authority_is_reported(self) -> None:
         findings = dashboard.validate_collection(
             [("a", minimal_ledger()), ("b", minimal_ledger())]
