@@ -72,6 +72,46 @@ USER_ADAPTERS_SKIPPED_NOTE = (
     "user adapters were not read: no --user-config was given"
 )
 
+# Why an adapter was chosen, as data. The notes below stay the human-readable
+# record and are what reaches stderr; these are what a caller branches on.
+# `docs/validation/scan-dogfood-0.2.5.md` finding 1 is the reason they exist:
+# `scan` has to tell "generic because the operator asked for generic" from
+# "generic because detection gave up", the first being an answer and the second
+# being a scan that covered nothing, and no amount of string-matching on a note
+# is a safe way to do that.
+SELECTED_BY_ADAPTER_FILE = "adapter_file"
+SELECTED_BY_CLIENT_NAME = "client_name"
+SELECTED_BY_DETECTION = "detected"
+SELECTED_BY_AMBIGUOUS_FALLBACK = "ambiguous_detection_fallback"
+SELECTED_BY_NO_DETECTION_FALLBACK = "no_detection_fallback"
+
+SELECTION_REASONS = frozenset(
+    {
+        SELECTED_BY_ADAPTER_FILE,
+        SELECTED_BY_CLIENT_NAME,
+        SELECTED_BY_DETECTION,
+        SELECTED_BY_AMBIGUOUS_FALLBACK,
+        SELECTED_BY_NO_DETECTION_FALLBACK,
+    }
+)
+
+# The two reasons that mean nothing chose this adapter: detection declined to
+# answer and `generic` was the floor. Grouped here rather than tested for one
+# at a time so a sixth fallback added later is covered by every caller that
+# already asks this question.
+FALLBACK_SELECTION_REASONS = frozenset(
+    {SELECTED_BY_AMBIGUOUS_FALLBACK, SELECTED_BY_NO_DETECTION_FALLBACK}
+)
+
+# Which directory the chosen adapter came from. Deliberately NOT a sixth
+# reason: a user adapter can be reached by any of the five above, and folding
+# "the user overrode this one" into `reason` would make a fallback invisible
+# the moment a user adapter was in the index -- which is exactly the case the
+# fallback finding exists to catch.
+ORIGIN_ADAPTER_FILE = "file"
+ORIGIN_BUNDLED = "bundled"
+ORIGIN_USER = "user"
+
 
 def validate_adapter(data: dict, *, source: str) -> list[str]:
     """Collect every finding an adapter document produces.
@@ -355,7 +395,7 @@ class _Candidate(NamedTuple):
     client: str
     path: Path
     data: dict
-    origin: str  # "bundled" or "user"
+    origin: str  # ORIGIN_BUNDLED or ORIGIN_USER
 
 
 def select_adapter(
@@ -367,13 +407,57 @@ def select_adapter(
     environ: Mapping[str, str],
     project: Path,
 ) -> tuple[dict, list[str]]:
-    """Choose an adapter and explain the choice.
+    """The chosen adapter document and the notes explaining the choice.
 
-    Returns the chosen adapter document and a list of plain-string notes. The
-    caller prints the notes and the baseline records them: a scan whose
-    coverage depends on which adapter ran must say which one ran and why, or
-    a baseline of nothing is indistinguishable from a baseline of a clean
-    machine.
+    The original two-value shape, kept because it is what a caller that only
+    wants to run the adapter needs and because every existing caller and test
+    speaks it. It is `select_adapter_detail`'s `document` and `notes`; a
+    caller that has to *branch* on why the choice was made -- `scan` does --
+    calls that function instead, so the two can never disagree.
+    """
+    selection = select_adapter_detail(
+        client=client,
+        adapter=adapter,
+        user_config=user_config,
+        bundled=bundled,
+        environ=environ,
+        project=project,
+    )
+    return selection["document"], selection["notes"]
+
+
+def select_adapter_detail(
+    *,
+    client: str | None,
+    adapter: Path | None,
+    user_config: Path | None,
+    bundled: Path,
+    environ: Mapping[str, str],
+    project: Path,
+) -> dict:
+    """Choose an adapter and explain the choice, in prose and as data.
+
+    Returns a mapping:
+
+    - `document` -- the chosen adapter.
+    - `notes` -- plain-string notes, in order. The caller prints these: a
+      scan whose coverage depends on which adapter ran must say which one ran
+      and why, or a baseline of nothing is indistinguishable from a baseline
+      of a clean machine.
+    - `client` -- the chosen document's `client`.
+    - `path` -- the file it was read from.
+    - `reason` -- one of `SELECTION_REASONS`.
+    - `origin` -- one of `ORIGIN_ADAPTER_FILE`, `ORIGIN_BUNDLED`,
+      `ORIGIN_USER`.
+    - `candidates` -- the client names detection weighed, sorted: the ones
+      that matched when it detected or tied, the ones it considered when
+      nothing matched, and empty when detection never ran. This is what lets
+      a caller's message name the clients that tied rather than telling the
+      operator only that something did.
+
+    A mapping rather than a `NamedTuple` because it is read by key at three
+    call sites and never unpacked positionally, and because a field added
+    later must not renumber anything.
 
     Precedence, highest first:
 
@@ -401,7 +485,14 @@ def select_adapter(
     """
     if adapter is not None:
         data = load_adapter(adapter)
-        return data, [_selected(adapter, data["client"], "named by --adapter")]
+        return _selection(
+            document=data,
+            notes=[_selected(adapter, data["client"], "named by --adapter")],
+            client=data["client"],
+            path=adapter,
+            reason=SELECTED_BY_ADAPTER_FILE,
+            origin=ORIGIN_ADAPTER_FILE,
+        )
 
     notes: list[str] = []
     index = _index_adapters(bundled=bundled, user_config=user_config, notes=notes)
@@ -417,7 +508,14 @@ def select_adapter(
                 + "/local.json"
             )
         notes.append(_selected(chosen.path, chosen.client, "named by --client"))
-        return chosen.data, notes
+        return _selection(
+            document=chosen.data,
+            notes=notes,
+            client=chosen.client,
+            path=chosen.path,
+            reason=SELECTED_BY_CLIENT_NAME,
+            origin=chosen.origin,
+        )
 
     detectable = sorted(
         candidate.client
@@ -434,7 +532,15 @@ def select_adapter(
         notes.append(
             _selected(chosen.path, chosen.client, "detected: its $USER_CONFIG resolved")
         )
-        return chosen.data, notes
+        return _selection(
+            document=chosen.data,
+            notes=notes,
+            client=chosen.client,
+            path=chosen.path,
+            reason=SELECTED_BY_DETECTION,
+            origin=chosen.origin,
+            candidates=matched,
+        )
 
     generic = index.get(GENERIC_CLIENT)
     if generic is None:
@@ -443,14 +549,54 @@ def select_adapter(
             "detection falls back to, so the bundle cannot run without it"
         )
     if matched:
+        reason = SELECTED_BY_AMBIGUOUS_FALLBACK
+        candidates = matched
         why = (
             f"detection is ambiguous: $USER_CONFIG resolved for {matched}, and "
             "detection never guesses between two plausible clients"
         )
     else:
+        reason = SELECTED_BY_NO_DETECTION_FALLBACK
+        candidates = detectable
         why = f"no client detected: $USER_CONFIG resolved for none of {detectable}"
     notes.append(_selected(generic.path, generic.client, why))
-    return generic.data, notes
+    return _selection(
+        document=generic.data,
+        notes=notes,
+        client=generic.client,
+        path=generic.path,
+        reason=reason,
+        origin=generic.origin,
+        candidates=candidates,
+    )
+
+
+def _selection(
+    *,
+    document: dict,
+    notes: list[str],
+    client: str,
+    path: Path,
+    reason: str,
+    origin: str,
+    candidates: list[str] | None = None,
+) -> dict:
+    """Assemble one selection result, so every exit shares one shape.
+
+    Built here rather than written out at each `return` for the reason
+    `_item` exists in `scan`: five literals drift, and a caller reading
+    `selection["candidates"]` must never have to ask whether this particular
+    branch happened to set it.
+    """
+    return {
+        "document": document,
+        "notes": notes,
+        "client": client,
+        "path": path,
+        "reason": reason,
+        "origin": origin,
+        "candidates": list(candidates) if candidates else [],
+    }
 
 
 def _selected(path: Path, client: str, why: str) -> str:

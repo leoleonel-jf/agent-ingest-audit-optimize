@@ -770,6 +770,23 @@ class SelectAdapterTests(unittest.TestCase):
         arguments.update(overrides)
         return adapters.select_adapter(**arguments)
 
+    def detail(self, **overrides) -> dict:
+        """The same call through the structured entry point.
+
+        `select_adapter` answers "which document"; `select_adapter_detail`
+        answers "and why", which is the half `scan` has to branch on.
+        """
+        arguments = {
+            "client": None,
+            "adapter": None,
+            "user_config": None,
+            "bundled": self.bundled,
+            "environ": {},
+            "project": self.project,
+        }
+        arguments.update(overrides)
+        return adapters.select_adapter_detail(**arguments)
+
     def globbed_directories(self) -> list[Path]:
         """Record every directory `Path.glob` is called on, delegating through.
 
@@ -1095,6 +1112,113 @@ class SelectAdapterTests(unittest.TestCase):
         with self.assertRaises(LedgerError) as caught:
             self.select(client="alpha")
         self.assertIn(repr("alpha"), str(caught.exception))
+
+    # -- the structured selection -----------------------------------------
+    #
+    # docs/validation/scan-dogfood-0.2.5.md finding 1: the notes above say why
+    # `generic` was chosen, and nothing but a human can read them. A caller
+    # that has to tell "generic because the operator asked for it" from
+    # "generic because detection gave up" needs the reason as data, because
+    # only one of the two is a scan that covered nothing.
+
+    def two_detectable_clients(self) -> None:
+        for name in ("alpha", "beta"):
+            home = str(self.existing_root(f"{name}-home"))
+            self.write_adapter(
+                self.bundled,
+                f"{name}.json",
+                self.document(name, user_config=[home]),
+            )
+
+    def test_the_detail_carries_the_client_the_path_and_the_reason(self) -> None:
+        path = self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        selection = self.detail(client="alpha")
+        self.assertEqual(selection["client"], "alpha")
+        self.assertEqual(selection["path"], path)
+        self.assertEqual(selection["reason"], adapters.SELECTED_BY_CLIENT_NAME)
+
+    def test_every_reason_the_selector_can_return_is_a_named_constant(self) -> None:
+        self.two_detectable_clients()
+        named = self.write_adapter(self.root / "loose", "x.json", self.document("x"))
+        seen = {
+            self.detail(adapter=named)["reason"],
+            self.detail(client="generic")["reason"],
+            self.detail()["reason"],
+        }
+        self.assertTrue(seen <= adapters.SELECTION_REASONS, seen)
+
+    def test_an_explicit_adapter_file_is_not_a_fallback(self) -> None:
+        named = self.write_adapter(self.root / "loose", "x.json", self.document("x"))
+        selection = self.detail(adapter=named)
+        self.assertEqual(selection["reason"], adapters.SELECTED_BY_ADAPTER_FILE)
+        self.assertNotIn(selection["reason"], adapters.FALLBACK_SELECTION_REASONS)
+
+    def test_a_detected_client_is_not_a_fallback(self) -> None:
+        self.write_adapter(
+            self.bundled,
+            "alpha.json",
+            self.document("alpha", user_config=[str(self.existing_root("alpha-home"))]),
+        )
+        selection = self.detail()
+        self.assertEqual(selection["client"], "alpha")
+        self.assertEqual(selection["reason"], adapters.SELECTED_BY_DETECTION)
+        self.assertNotIn(selection["reason"], adapters.FALLBACK_SELECTION_REASONS)
+
+    def test_generic_asked_for_by_name_is_not_a_fallback(self) -> None:
+        """The one case that must stay quiet. An operator who typed
+        `--client generic` chose an adapter that probes nothing on purpose."""
+        selection = self.detail(client="generic")
+        self.assertEqual(selection["client"], "generic")
+        self.assertEqual(selection["reason"], adapters.SELECTED_BY_CLIENT_NAME)
+        self.assertNotIn(selection["reason"], adapters.FALLBACK_SELECTION_REASONS)
+
+    def test_ambiguous_detection_is_a_fallback_naming_the_tied_candidates(self) -> None:
+        self.two_detectable_clients()
+        selection = self.detail()
+        self.assertEqual(selection["client"], "generic")
+        self.assertEqual(
+            selection["reason"], adapters.SELECTED_BY_AMBIGUOUS_FALLBACK
+        )
+        self.assertIn(selection["reason"], adapters.FALLBACK_SELECTION_REASONS)
+        self.assertEqual(selection["candidates"], ["alpha", "beta"])
+
+    def test_no_detection_is_a_fallback_naming_what_was_weighed(self) -> None:
+        self.write_adapter(
+            self.bundled,
+            "alpha.json",
+            self.document("alpha", user_config=[str(self.root / "nowhere")]),
+        )
+        selection = self.detail()
+        self.assertEqual(selection["client"], "generic")
+        self.assertEqual(
+            selection["reason"], adapters.SELECTED_BY_NO_DETECTION_FALLBACK
+        )
+        self.assertIn(selection["reason"], adapters.FALLBACK_SELECTION_REASONS)
+        self.assertEqual(selection["candidates"], ["alpha"])
+
+    def test_the_detail_records_which_directory_the_adapter_came_from(self) -> None:
+        """`origin`, not a sixth reason.
+
+        A user adapter can be reached by any of the five reasons, so folding
+        "the user overrode this one" into `reason` would hide a fallback the
+        moment a user adapter was in play -- exactly the case the finding
+        exists for.
+        """
+        self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        self.write_adapter(self.user_adapters, "local.json", self.document("alpha"))
+        self.assertEqual(
+            self.detail(client="alpha", user_config=self.user_config)["origin"], "user"
+        )
+        self.assertEqual(self.detail(client="generic")["origin"], "bundled")
+
+    def test_the_detail_still_carries_the_document_and_the_notes(self) -> None:
+        """The old two-value return is the detail's `document` and `notes`."""
+        self.two_detectable_clients()
+        selection = self.detail()
+        data, notes = self.select()
+        self.assertEqual(selection["document"], data)
+        self.assertEqual(selection["notes"], notes)
+        self.assertTrue(any("ambiguous" in note for note in selection["notes"]), notes)
 
 
 class RealBundledSelectionTests(unittest.TestCase):

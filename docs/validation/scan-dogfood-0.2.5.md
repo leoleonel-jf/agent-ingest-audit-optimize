@@ -289,3 +289,58 @@ Every one of them produces a baseline that looks clean, and the two mechanisms b
 exactly that — `expires_on` and the `not_present` item — caught none of them, because a path that
 is wrong today rather than stale next quarter is a different failure than the one they guard.
 That is the thing this exercise found, and it is worth more than the passing run that surfaced it.
+
+## 2026-07-30 — findings 1 and 9 fixed, re-run
+
+Nothing above this heading has been edited. The findings stand as they were written; this section
+records what the same three commands do now.
+
+**Finding 1** — `select_adapter` grew a structured companion, `select_adapter_detail`, which
+returns the chosen client, the file it came from, and a `reason` drawn from five named constants,
+alongside the same human-readable notes as before. `scan` emits a finding when that reason is one
+of the two fallbacks — ambiguous detection, or nothing detected — naming the clients that tied and
+pointing at `--client`. `--client generic` is `client_name`, not a fallback, and stays at `0`.
+
+**Finding 9** — the unresolved-anchor finding now fires only for `$USER_CONFIG`. Every other
+unresolved anchor is still recorded on each probe beneath it as `reason: "unresolved_anchor"`,
+which is the honest record; what changed is that it no longer moves the exit code. `$USER_CONFIG`
+keeps its finding because an unresolved one makes the whole baseline vacuous, which is the risk
+dropping the finding outright would have reintroduced.
+
+Same three commands, same host, same repository root:
+
+| Command | exit before | exit now | items before | items now |
+|---|---|---|---|---|
+| `dashboard.py scan --id BASE-2026-000` | 0 | **1** | 0 | 0 |
+| `... scan --id BASE-2026-000 --client claude-code` | 0 | 0 | 110 | **114** |
+| `... scan --id BASE-2026-000 --client codex` | **1** | **0** | 12 | 12 |
+
+The bare run still emits an empty baseline, which is the correct output — this machine has two
+supported clients and the tool will not guess between them — and now exits `1` while saying so on
+stderr:
+
+```text
+no client was detected and this scan fell back to the 'generic' adapter, which probes nothing:
+$USER_CONFIG was weighed for ['claude-code', 'codex'] and produced no single answer, so this
+baseline is empty because nothing was looked at, not because the machine is clean. Name the
+client explicitly with --client to scan it.
+```
+
+`--client codex` still records two `unresolved_anchor` items for `$SYSTEM_CONFIG`, unchanged, and
+now exits `0`. Its 12 items break down 3 `present` / 9 `not_present`, reasons 6 `no_match`,
+2 `unresolved_anchor`, 1 `missing` — identical to the original run.
+
+`--client claude-code` moved from 110 items to 114, which is findings 2 and 3 being fixed in
+`claude-code.json` by a separate task and not anything in this one: 96 `present` / 18
+`not_present`, reasons 9 `missing`, 6 `no_match`, 3 `pointer_unresolved`.
+
+Findings 2, 3 and 4 were addressed in `claude-code.json` and `codex.json` by a separate task, which
+also digests Codex's `projects` table and so removes the thirteen absolute paths finding 5 names
+from this particular output. Finding 5's general point — that `attributes.value` is verbatim file
+content and `PRIVACY.md` does not say so — is open, as are 6, 7 and 8.
+
+```text
+python -m unittest discover -s dashboard/tests    Ran 621 tests    OK (skipped=2)
+python -m unittest discover -s packaging/tests    Ran 20 tests     OK (skipped=1)
+python -m unittest discover -s evals/tests        Ran 11 tests     OK
+```

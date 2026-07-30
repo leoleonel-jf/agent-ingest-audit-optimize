@@ -29,9 +29,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from ledgerlib.adapters import (
+    FALLBACK_SELECTION_REASONS,
     PARSE_FORMATS,
+    USER_CONFIG_ANCHOR,
     resolve_anchor_roots,
-    select_adapter,
+    select_adapter_detail,
 )
 from ledgerlib.constants import ANCHOR_REFERENCE, DATE, RECORD_ID
 from ledgerlib.errors import LedgerError, PathSafetyError
@@ -678,7 +680,7 @@ def scan(
     `resolve_anchor_roots` takes them: nothing about which tree gets read may
     depend on process state a caller cannot see.
 
-    Nothing here writes. The whole call graph beneath it -- `select_adapter`,
+    Nothing here writes. The whole call graph beneath it -- `select_adapter_detail`,
     `resolve_anchor_roots`, `run_probe` -- opens files for reading and hashes
     them, and `ScanWritesNothingTests` holds that by patching every write API
     in `pathlib` and `builtins` to fail loudly.
@@ -690,7 +692,7 @@ def scan(
     environ = os.environ if environ is None else environ
     bundled = BUNDLED_ADAPTERS if bundled is None else bundled
 
-    document, notes = select_adapter(
+    selection = select_adapter_detail(
         client=client,
         adapter=adapter,
         user_config=user_config,
@@ -698,12 +700,17 @@ def scan(
         environ=environ,
         project=project,
     )
+    document = selection["document"]
+    notes = selection["notes"]
 
     roots, unresolved = resolve_anchor_roots(
         document, project=project, environ=environ
     )
     findings = _coverage_findings(
-        document, unresolved=unresolved, captured_on=captured_on
+        document,
+        unresolved=unresolved,
+        captured_on=captured_on,
+        selection=selection,
     )
 
     patterns = document["sensitive_key_patterns"]
@@ -762,11 +769,15 @@ def _check_captured_on(captured_on: object) -> str:
 
 
 def _coverage_findings(
-    document: dict, *, unresolved: Sequence[str], captured_on: str
+    document: dict,
+    *,
+    unresolved: Sequence[str],
+    captured_on: str,
+    selection: Mapping[str, object],
 ) -> list[str]:
-    """The two ways a baseline can look clean because it looked at nothing.
+    """The three ways a baseline can look clean because it looked at nothing.
 
-    Both are findings and neither is an error: the scan runs, the entry is
+    All are findings and none is an error: the scan runs, the entry is
     emitted, and the exit code says the output is not to be trusted as a
     complete picture. Refusing outright would leave the operator with no
     baseline at all, which is worse than a baseline that says what it missed.
@@ -776,14 +787,32 @@ def _coverage_findings(
     document's expiry, and an adapter run past it may be naming files the
     client no longer reads.
 
-    The second -- an anchor no candidate resolved -- the spec does not name.
-    It is recorded on the same grounds: every probe beneath such an anchor is
-    `not_present` whether the client is genuinely absent or the tool merely
-    looked in the wrong tree, and those two must not come out of the command
-    looking identical.
+    The second -- an unresolved `$USER_CONFIG` -- the spec does not name. It is
+    recorded on the same grounds: every probe beneath it is `not_present`
+    whether the client is genuinely absent or the tool merely looked in the
+    wrong tree, and those two must not come out of the command looking
+    identical.
+
+    The third is a fallback to `generic`, which probes nothing. Spec section
+    3.4 treats that as a selection outcome; the first real run
+    (`docs/validation/scan-dogfood-0.2.5.md` finding 1) showed it is a coverage
+    failure, because a machine with two supported clients installed answered
+    the default invocation with `"items": []` and exit `0`.
     """
     client = document["client"]
     findings: list[str] = []
+
+    reason = selection.get("reason")
+    if reason in FALLBACK_SELECTION_REASONS:
+        candidates = selection.get("candidates") or []
+        findings.append(
+            f"no client was detected and this scan fell back to the {client!r} "
+            f"adapter, which probes nothing: $USER_CONFIG was weighed for "
+            f"{sorted(candidates)} and produced no single answer, so this "
+            "baseline is empty because nothing was looked at, not because the "
+            "machine is clean. Name the client explicitly with --client to "
+            "scan it."
+        )
 
     expires_on = document["expires_on"]
     # Both are `YYYY-MM-DD` -- `validate_adapter` and `_check_captured_on`
@@ -798,12 +827,30 @@ def _coverage_findings(
             "because it looked in the wrong place"
         )
 
-    if unresolved:
+    # Only `$USER_CONFIG`, and this narrowness is the point -- do not widen it
+    # back to `if unresolved`. Every unresolved anchor is still recorded on
+    # each probe beneath it as `reason: "unresolved_anchor"`, which is the
+    # honest record and is not being taken away here; what is narrowed is which
+    # of them moves the exit code.
+    #
+    # `$USER_CONFIG` is the one anchor the design spec makes universal and the
+    # one detection keys on. If it does not resolve, every probe comes back
+    # `not_present` and the baseline is about nothing while looking clean --
+    # the failure this whole function exists for.
+    #
+    # Any other anchor may be legitimately absent on a platform, and a finding
+    # for that is permanent and unfixable: `codex.json` declares
+    # `$SYSTEM_CONFIG` as `/etc/codex`, so before this narrowing
+    # `--client codex` exited 1 on every Windows host on every run, forever
+    # (`docs/validation/scan-dogfood-0.2.5.md` finding 9). A finding an
+    # operator can never clear teaches them to ignore the exit code, which
+    # costs every other finding its meaning.
+    if USER_CONFIG_ANCHOR in unresolved:
         findings.append(
-            f"adapter for client {client!r} has unresolved anchors "
-            f"{sorted(unresolved)}: no candidate root for them exists on this "
-            "machine, so every probe beneath them is recorded not_present "
-            "rather than looked at"
+            f"adapter for client {client!r} has an unresolved anchor "
+            f"${USER_CONFIG_ANCHOR}: no candidate root for it exists on this "
+            "machine, so every probe beneath it is recorded not_present rather "
+            "than looked at, and this baseline covers nothing under it"
         )
 
     return findings

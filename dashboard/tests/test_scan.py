@@ -40,6 +40,9 @@ SCRIPT = (
     / "scripts"
     / "dashboard.py"
 )
+ADAPTERS_DIR = (
+    REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "assets" / "adapters"
+)
 SPEC = importlib.util.spec_from_file_location("dashboard", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 dashboard = importlib.util.module_from_spec(SPEC)
@@ -1790,6 +1793,213 @@ class ScanUnresolvedAnchorTests(ScanTestCase):
         for item in under:
             self.assertEqual(item["state"], "not_present")
             self.assertEqual(item["attributes"]["reason"], "unresolved_anchor")
+
+
+class UnresolvedAnchorFindingScopeTests(ScanTestCase):
+    """Only `$USER_CONFIG` unresolved is a finding; the rest are just recorded.
+
+    docs/validation/scan-dogfood-0.2.5.md finding 9. `codex.json` declares
+    `$SYSTEM_CONFIG` as `/etc/codex`, which no Windows host can ever have, so
+    the finding fired on every run forever and taught the operator to ignore
+    the exit code. The item on each probe is the honest record; the finding is
+    reserved for the one anchor whose absence makes the whole baseline vacuous.
+    """
+
+    SYSTEM_CONFIG = Path("/etc/codex")
+
+    def with_system_config(self) -> tuple[dict, list[str], int]:
+        """`$USER_CONFIG` resolves; a second anchor does not."""
+        adapter = self.write_adapter(
+            anchors={
+                "$USER_CONFIG": [str(self.user_config)],
+                "$PROJECT": ["."],
+                "$SYSTEM_CONFIG": [str(self.tmp / "no-such-system-root")],
+            },
+            probes=[
+                {
+                    "kind": "instruction-file",
+                    "scope": "user",
+                    "path": "$USER_CONFIG/CLAUDE.md",
+                },
+                {
+                    "kind": "instruction-file",
+                    "scope": "system",
+                    "path": "$SYSTEM_CONFIG/AGENTS.md",
+                },
+            ],
+        )
+        self.populate()
+        return self.do_scan(adapter=adapter)
+
+    def test_an_unresolved_anchor_that_is_not_user_config_is_no_finding(self) -> None:
+        _, findings, code = self.with_system_config()
+        self.assertFalse(
+            [finding for finding in findings if "unresolved" in finding], findings
+        )
+        self.assertEqual(code, 0)
+
+    def test_its_probes_are_still_recorded_not_present(self) -> None:
+        """No finding is not the same as no record."""
+        entry, _, _ = self.with_system_config()
+        under = [
+            item
+            for item in entry["items"]
+            if item["anchor"].startswith("$SYSTEM_CONFIG")
+        ]
+        self.assertTrue(under)
+        for item in under:
+            self.assertEqual(item["state"], "not_present")
+            self.assertEqual(item["attributes"]["reason"], "unresolved_anchor")
+
+    def test_an_unresolved_user_config_is_still_a_finding(self) -> None:
+        adapter = self.write_adapter(
+            anchors={
+                "$USER_CONFIG": [str(self.tmp / "nowhere")],
+                "$PROJECT": ["."],
+                "$SYSTEM_CONFIG": [str(self.tmp / "no-such-system-root")],
+            }
+        )
+        _, findings, code = self.do_scan(adapter=adapter)
+        unresolved = [finding for finding in findings if "unresolved" in finding]
+        self.assertTrue(unresolved, findings)
+        self.assertEqual(code, 1)
+        self.assertIn("USER_CONFIG", unresolved[0])
+
+    def test_the_shipped_codex_adapter_does_not_fire_on_a_host_without_etc_codex(
+        self,
+    ) -> None:
+        """The case that shipped broken, asserted against the real adapter.
+
+        A fixture would have passed the whole time. What was wrong was
+        `codex.json`'s `$SYSTEM_CONFIG` meeting a host that has no `/etc`, and
+        only the bundled file states that pairing.
+        """
+        if self.SYSTEM_CONFIG.is_dir():
+            self.skipTest(f"{self.SYSTEM_CONFIG} exists on this host")
+        home = self.tmp / "home"
+        (home / ".codex").mkdir(parents=True)
+        with mock.patch.dict(
+            os.environ, {"HOME": str(home), "USERPROFILE": str(home)}
+        ):
+            _, findings, code = self.do_scan(
+                adapter=None,
+                client="codex",
+                bundled=ADAPTERS_DIR,
+                environ={},
+            )
+        self.assertFalse(
+            [finding for finding in findings if "unresolved" in finding], findings
+        )
+        self.assertEqual(code, 0)
+
+
+class ScanFallbackSelectionTests(ScanTestCase):
+    """Falling back to `generic` is a coverage failure, not a quiet outcome.
+
+    docs/validation/scan-dogfood-0.2.5.md finding 1: on a machine with two
+    supported clients installed, the plan's own `scan --id BASE-2026-000`
+    selected `generic`, emitted `"items": []`, printed the reason to stderr,
+    and exited `0`. The exit code is the one thing a script reads, and it said
+    the machine was clean when nothing had been looked at.
+    """
+
+    def write_client(self, client: str, user_config: Path) -> Path:
+        path = self.bundled / f"{client}.json"
+        path.write_text(
+            json.dumps(
+                self.adapter_document(
+                    client=client,
+                    anchors={
+                        "$USER_CONFIG": [str(user_config)],
+                        "$PROJECT": ["."],
+                    },
+                )
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def write_generic(self) -> Path:
+        path = self.bundled / "generic.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "adapter_version": 1,
+                    "client": "generic",
+                    "expires_on": "2099-01-01",
+                    "anchors": {"$PROJECT": ["."]},
+                    "probes": [],
+                    "sensitive_key_patterns": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def detected(self, *clients: str) -> tuple[dict, list[str], int]:
+        """A machine where each named client's `$USER_CONFIG` exists."""
+        self.write_generic()
+        for client in ("alpha", "beta"):
+            root = self.tmp / f"{client}-home"
+            if client in clients:
+                root.mkdir()
+            self.write_client(client, root)
+        return self.do_scan(adapter=None)
+
+    def fallback_findings(self, messages: list[str]) -> list[str]:
+        """The finding, told apart from the selection note beside it.
+
+        `scan` returns notes and findings in one list. Matching on "generic"
+        would match the note too -- including the note for `--client generic`,
+        which is the case that must produce nothing -- so the filter is a
+        phrase only the finding uses.
+        """
+        return [message for message in messages if "fell back" in message]
+
+    def test_ambiguous_detection_is_a_finding_and_exits_one(self) -> None:
+        entry, findings, code = self.detected("alpha", "beta")
+        self.assertEqual(entry["client"], "generic")
+        self.assertTrue(self.fallback_findings(findings), findings)
+        self.assertEqual(code, 1)
+
+    def test_the_ambiguous_finding_names_both_candidates_and_points_at_client(
+        self,
+    ) -> None:
+        _, findings, _ = self.detected("alpha", "beta")
+        finding = self.fallback_findings(findings)[0]
+        self.assertIn("alpha", finding)
+        self.assertIn("beta", finding)
+        self.assertIn("--client", finding)
+
+    def test_the_empty_baseline_is_still_emitted(self) -> None:
+        entry, _, _ = self.detected("alpha", "beta")
+        self.assertEqual(entry["items"], [])
+        self.assertEqual(validate_baseline(entry, 0, source="scan"), [])
+
+    def test_detecting_nothing_is_a_finding_and_exits_one(self) -> None:
+        entry, findings, code = self.detected()
+        self.assertEqual(entry["client"], "generic")
+        self.assertTrue(self.fallback_findings(findings), findings)
+        self.assertEqual(code, 1)
+
+    def test_generic_asked_for_by_name_is_no_finding_and_exits_zero(self) -> None:
+        """The operator chose an adapter that probes nothing. That is an
+        answer, not a failure, and it must not move the exit code."""
+        self.write_generic()
+        for client in ("alpha", "beta"):
+            root = self.tmp / f"{client}-home"
+            root.mkdir()
+            self.write_client(client, root)
+        entry, findings, code = self.do_scan(adapter=None, client="generic")
+        self.assertEqual(entry["client"], "generic")
+        self.assertFalse(self.fallback_findings(findings), findings)
+        self.assertEqual(code, 0)
+
+    def test_a_detected_client_is_no_finding(self) -> None:
+        entry, findings, code = self.detected("alpha")
+        self.assertEqual(entry["client"], "alpha")
+        self.assertFalse(self.fallback_findings(findings), findings)
+        self.assertEqual(code, 0)
 
 
 class ScanIdentifierTests(ScanTestCase):
