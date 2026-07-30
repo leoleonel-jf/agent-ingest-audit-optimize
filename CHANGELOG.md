@@ -2,6 +2,50 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.3 - 2026-07-30
+
+The first of three increments toward the design spec's 0.3.0 (`docs/specs/2026-07-30-anchors-and-path-safety.md`).
+Adds no new command: it builds the anchor and path-safety layer the next release's `scan` will
+consume, and gives `baselines[]` a real field schema.
+
+- adds `anchor_path`, storing a path relative to the anchor that contains it — `$USER_CONFIG`,
+  `$PROJECT`, or `$PLUGIN` — with the longest matching root winning when more than one anchor
+  applies, and marking a path outside every anchor absolute with `portable: false`;
+- adds `resolve_anchored` and `PathSafetyError`, refusing with a distinct, named reason an unknown
+  anchor, a `..` segment (checked textually before any normalization), an absolute path where an
+  anchored form was required, a resolved result outside the anchor, and — stricter than mere
+  resolution — a symlink or junction whose target leaves the anchor even when the path's final
+  resolution lands back inside it; none of this touches how `verify` reads its own command-line
+  arguments or opens a path read out of ledger content;
+- adds `check_glob`, refusing an adapter probe glob containing a `..` segment or an absolute form,
+  without expanding any glob;
+- gives `baselines[]` entries and their items a real field schema in
+  `assets/schemas/ledger.schema.json` and a matching `validate_baseline` in `dashboard.py`,
+  replacing "each element must be an object, but no field-level schema yet"; adds a `state` field
+  (`present` / `not_present`) the design spec's field table never defined, recording a probe that
+  matched nothing without overloading `kind` or a null `digest`;
+- makes a `baselines[]` entry's `id` participate in the sequence rules exactly as a record's `id`
+  does, in both the per-document floor and the ID authority's set-wide coverage;
+- adds `portable` as an optional boolean on a run target and on a baseline item, checked for type
+  only when present and never required;
+- documents all of it in `references/LEDGER.md`: Path anchors, Path safety, Adapter glob safety,
+  the `BASE`-identifier sequence rule, and the Baselines field tables, each guarded by an ablated
+  reference test.
+- **correction:** `references/LEDGER.md`'s Path safety section originally named only five of
+  `resolve_anchored`'s refusal reasons, though the code already enforced fourteen; the hardlinked
+  regular file, reserved DOS device name, and alternate-data-stream (`:` component) refusals —
+  all added during the same security review as the other checks above — never reached this or any
+  other public document, alongside four narrower reasons (invalid anchor name, empty path,
+  malformed anchor reference, and a resolve/inspect `OSError` wrapped rather than left to escape).
+  The document now names all fourteen, plus the four reasons `check_glob` can raise, in a
+  machine-checked block an alignment test compares against the code directly.
+  **Operational consequence:** a user whose instruction file is hardlinked between two client
+  roots — a routine setup for sharing one file across projects — will see the hardlink refusal.
+
+**Compatibility:** additive. A ledger valid under 0.2.2 stays valid — `baselines` is empty in every
+ledger that exists, because nothing has ever written one, and `portable` is optional everywhere,
+including on every RUN record written before this release, so no existing ledger is invalidated.
+
 ## 0.2.2 - 2026-07-30
 
 - compares `known_projects[].last_digest` against the referenced ledger when that ledger is passed
