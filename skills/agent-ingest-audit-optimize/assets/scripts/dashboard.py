@@ -101,6 +101,11 @@ def validate_ledger(data: dict, *, source: str) -> list[str]:
                 findings.append(
                     f"{source}: sequences.{prefix} must be an integer of at least 0"
                 )
+        unexpected = set(sequences) - set(SEQUENCE_PREFIXES)
+        if unexpected:
+            findings.append(
+                f"{source}: sequences has unexpected keys: {sorted(unexpected)}"
+            )
 
     for field in ARRAY_FIELDS:
         if not isinstance(data[field], list):

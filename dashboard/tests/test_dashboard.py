@@ -123,6 +123,12 @@ class LedgerDocumentTests(unittest.TestCase):
         findings = dashboard.validate_ledger(data, source="test")
         self.assertTrue(any("updated" in finding for finding in findings))
 
+    def test_unexpected_key_in_sequences_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["sequences"]["FOO"] = 1
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("FOO" in finding for finding in findings))
+
     def test_verify_returns_zero_for_a_valid_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = write_ledger(Path(temp), minimal_ledger())
