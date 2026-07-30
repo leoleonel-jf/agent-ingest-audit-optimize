@@ -26,9 +26,19 @@ import stat
 from collections.abc import Sequence
 from pathlib import Path
 
+from ledgerlib.adapters import PARSE_FORMATS
 from ledgerlib.constants import ANCHOR_REFERENCE
 from ledgerlib.errors import PathSafetyError
 from ledgerlib.paths import anchor_path, file_digest, resolve_anchored
+
+try:  # pragma: no cover - which branch runs is the interpreter's choice
+    import tomllib
+except ImportError:  # pragma: no cover - Python 3.10, which this bundle supports
+    # Bound to `None` rather than left undefined, and every use below branches
+    # on the binding rather than on `sys.version_info`. A test can patch this
+    # name; it cannot patch the interpreter it is running on, and a degradation
+    # path only exercised on an interpreter nobody has is not exercised.
+    tomllib = None  # type: ignore[assignment]
 
 
 # The reasons `scan` itself puts in `attributes.reason`, as opposed to the
@@ -46,8 +56,22 @@ SCAN_REASONS = frozenset(
         "inaccessible",
         "directory",
         "unreadable",
+        "pointer_unresolved",
     }
 )
+
+# The values `attributes.parse_error` may take, following `SCAN_REASONS`:
+# a closed set of stable strings, never the parser's own message. CPython
+# rewrote every `json` decoder message in 3.13 and `tomllib`'s carry byte
+# offsets, so a baseline holding one would diff against itself on the next
+# interpreter -- reporting a change in a file nobody touched.
+PARSE_ERRORS = frozenset({"malformed_json", "malformed_toml", "unreadable"})
+
+_MALFORMED = {"json": "malformed_json", "toml": "malformed_toml"}
+
+# "no value was parsed" as distinct from "the parsed value was `null`". A
+# configuration file may hold `null`, and the two must not collapse.
+_ABSENT = object()
 
 
 def _value_digest(value: object) -> str:
@@ -180,9 +204,10 @@ def run_probe(
     whatever order the directory index hands back, which differs by filesystem
     and by insertion history; an unordered baseline diffs against itself.
 
-    `patterns` is accepted and unused here on purpose. Parsing arrives in the
-    next task and is where redaction is wired in; a probe carrying `parse` or
-    `pointer` yields the whole-file item for now.
+    `patterns` is the adapter's `sensitive_key_patterns`, and it is used on the
+    parsing path only: a probe without `parse` reads no value out of a file, so
+    there is nothing for it to protect. With `parse`, every value that reaches
+    an item passes through `redact` first.
     """
     spec, is_glob = _probe_target(probe)
     if spec is None:
@@ -204,7 +229,7 @@ def run_probe(
                       reason="unresolved_anchor")]
 
     if not is_glob:
-        return [_probe_one(probe, spec, roots)]
+        return _probe_one(probe, spec, roots, patterns)
 
     tail = reference.group(2) or ""
     try:
@@ -225,7 +250,7 @@ def run_probe(
             items.append(_item(probe, name=_leaf(str(match)), anchor=str(match),
                                state="not_present", reason=exc.reason))
             continue
-        items.append(_probe_one(probe, stored, roots, portable=portable))
+        items.extend(_probe_one(probe, stored, roots, patterns, portable=portable))
 
     if not items:
         # The probe's own pattern is the name, so the baseline records *what*
@@ -238,9 +263,19 @@ def run_probe(
 
 
 def _probe_one(
-    probe: dict, stored: str, roots: dict[str, Path], *, portable: bool | None = None
-) -> dict:
-    """One item for one anchored path, re-checking it before opening it.
+    probe: dict,
+    stored: str,
+    roots: dict[str, Path],
+    patterns: Sequence[str],
+    *,
+    portable: bool | None = None,
+) -> list[dict]:
+    """The items for one anchored path, re-checking it before opening it.
+
+    A list rather than a single item because a probe carrying `parse` turns one
+    file into one item per key at the pointed-to location -- one `settings.json`
+    into one `mcp-server` item per server. Without `parse` the list holds
+    exactly one item and this function behaves as it always has.
 
     `portable` is what `anchor_path` already reported for a glob match, kept
     only so a refusal can still record it: design spec 7.1 stores a path
@@ -252,34 +287,241 @@ def _probe_one(
         resolved = resolve_anchored(stored, roots)
         anchor, portable = anchor_path(resolved, roots)
     except PathSafetyError as exc:
-        return _item(probe, name=_leaf(stored), anchor=stored,
-                     state="not_present", reason=exc.reason, portable=portable)
+        return [_item(probe, name=_leaf(stored), anchor=stored,
+                      state="not_present", reason=exc.reason, portable=portable)]
 
     name = resolved.name or anchor
     try:
         info = os.stat(resolved)
     except (FileNotFoundError, NotADirectoryError):
-        return _item(probe, name=name, anchor=anchor, state="not_present",
-                     reason="missing", portable=portable)
+        return [_item(probe, name=name, anchor=anchor, state="not_present",
+                      reason="missing", portable=portable)]
     except (OSError, ValueError):
-        return _item(probe, name=name, anchor=anchor, state="not_present",
-                     reason="inaccessible", portable=portable)
+        return [_item(probe, name=name, anchor=anchor, state="not_present",
+                      reason="inaccessible", portable=portable)]
 
     if stat.S_ISDIR(info.st_mode):
         # A directory is present and has no bytes to hash. Recording it with a
         # null digest and the reason is the honest answer; omitting it would
         # lose a skill directory that exists but holds no SKILL.md.
-        return _item(probe, name=name, anchor=anchor, state="present",
-                     reason="directory", portable=portable)
+        return [_item(probe, name=name, anchor=anchor, state="present",
+                      reason="directory", portable=portable)]
 
     try:
         digest = file_digest(resolved)
     except (OSError, ValueError, MemoryError):
-        return _item(probe, name=name, anchor=anchor, state="present",
-                     reason="unreadable", portable=portable)
+        return [_item(probe, name=name, anchor=anchor, state="present",
+                      reason="unreadable", portable=portable)]
 
-    return _item(probe, name=name, anchor=anchor, state="present",
-                 digest=digest, portable=portable)
+    fmt = _parse_format(probe)
+    if fmt is None:
+        return [_item(probe, name=name, anchor=anchor, state="present",
+                      digest=digest, portable=portable)]
+
+    return _parse_items(
+        probe,
+        path=resolved,
+        fmt=fmt,
+        name=name,
+        anchor=anchor,
+        digest=digest,
+        portable=portable,
+        patterns=patterns,
+    )
+
+
+def _parse_format(probe: object) -> str | None:
+    """The probe's `parse`, or `None` when it names no format this can read.
+
+    An unrecognised `parse` is treated as absent rather than as an error.
+    `validate_adapter` refuses anything outside `PARSE_FORMATS` at load time,
+    so reaching here means a hand-built probe, and the honest answer for a
+    format nothing can read is the whole-file item -- which is still a true
+    statement about the file.
+    """
+    if not isinstance(probe, dict):
+        return None
+    fmt = probe.get("parse")
+    if isinstance(fmt, str) and fmt in PARSE_FORMATS:
+        return fmt
+    return None
+
+
+def _parse_items(
+    probe: dict,
+    *,
+    path: Path,
+    fmt: str,
+    name: str,
+    anchor: str,
+    digest: str,
+    portable: bool | None,
+    patterns: Sequence[str],
+) -> list[dict]:
+    """Read, parse, redact, and turn the pointed-to location into items.
+
+    The order is the point. The document is redacted **immediately** after it
+    is parsed and before anything else looks at it, so the value a pointer
+    walks and the value an item stores are the redacted one -- there is no
+    window in which an unredacted value is a candidate for an item. A pointer
+    aimed inside a redacted subtree therefore finds a marker rather than the
+    secret, which is the correct answer: the tool knows something is there and
+    will not enumerate it.
+
+    Every item keeps the digest of the **file's bytes**, not of its own value.
+    A parsed item still has to answer "which file, and did that file change",
+    and a per-value digest would answer neither.
+
+    Nothing here raises. A file that cannot be read or cannot be parsed is
+    still a file that exists, and the item says so with `parse_error`.
+    """
+    if fmt == "toml" and tomllib is None:
+        # Design spec section 14. Not a crash, and not a pretence that the file
+        # held nothing -- the digest is real and the item says why there are no
+        # keys under it.
+        return [_item(probe, name=name, anchor=anchor, state="present",
+                      digest=digest, portable=portable, parse_unavailable=fmt)]
+
+    try:
+        data = path.read_bytes()
+    except (OSError, MemoryError):
+        return [_item(probe, name=name, anchor=anchor, state="present",
+                      digest=digest, portable=portable, parse_error="unreadable")]
+
+    try:
+        if fmt == "toml":
+            document: object = tomllib.loads(data.decode("utf-8"))
+        else:
+            document = json.loads(data)
+    except (ValueError, RecursionError):
+        # `json.JSONDecodeError`, `tomllib.TOMLDecodeError`, and
+        # `UnicodeDecodeError` are all `ValueError`; a pathologically nested
+        # document raises `RecursionError`. The exception is discarded rather
+        # than recorded: its text is the one thing that must not reach the
+        # item.
+        return [_item(probe, name=name, anchor=anchor, state="present",
+                      digest=digest, portable=portable,
+                      parse_error=_MALFORMED[fmt])]
+
+    document = redact(document, patterns)
+
+    pointer = probe.get("pointer") if isinstance(probe, dict) else None
+    if not isinstance(pointer, str) or not pointer:
+        # Spec section 3.4: with no pointer there is no pointed-to location to
+        # enumerate, and the file is one item carrying the whole document.
+        return [_item(probe, name=name, anchor=anchor, state="present",
+                      digest=digest, portable=portable,
+                      value=_jsonable(document))]
+
+    found, value = _resolve_pointer(document, pointer)
+    if not found:
+        # Not an error. An adapter pointing at a key a particular machine's
+        # file does not have is the ordinary case -- a client with no MCP
+        # servers configured has no `mcpServers` -- and the baseline has to
+        # record that it looked.
+        return [_item(probe, name=f"{name}{pointer}", anchor=anchor,
+                      state="not_present", reason="pointer_unresolved",
+                      portable=portable)]
+
+    if not isinstance(value, dict) or _is_marker(value):
+        # No mapping means no keys to enumerate: an array, a scalar, or a
+        # redacted subtree. One item carries the value as it stands.
+        return [_item(probe, name=name, anchor=anchor, state="present",
+                      digest=digest, portable=portable, value=_jsonable(value))]
+
+    if not value:
+        return [_item(probe, name=name, anchor=anchor, state="not_present",
+                      reason="no_match", portable=portable)]
+
+    # Sorted for the same reason glob matches are: a user reordering the keys
+    # in their own `settings.json` must not reorder the baseline, or the next
+    # diff reports a change nobody made.
+    return [
+        _item(
+            probe,
+            name=key if key.strip() else name,
+            anchor=anchor,
+            state="present",
+            digest=digest,
+            portable=portable,
+            value=_jsonable(value[key]),
+        )
+        for key in sorted(value, key=str)
+        if isinstance(key, str)
+    ]
+
+
+def _resolve_pointer(document: object, pointer: str) -> tuple[bool, object]:
+    """Walk an RFC 6901 JSON pointer, reporting whether it resolved.
+
+    A `(found, value)` pair rather than a sentinel, because `None` is a value a
+    document can legitimately hold at the pointed-to location and a sentinel
+    would make "the key is absent" and "the key is null" the same answer.
+
+    The escapes are unescaped `~1` -> `/` first and `~0` -> `~` second, which
+    is the order RFC 6901 section 3 requires and not an implementation detail:
+    the other order turns the token `~01` into `~1` and then into `/`, silently
+    resolving a different key than the one the adapter named.
+    """
+    node = document
+    for token in pointer.split("/")[1:]:
+        key = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(node, dict) and not _is_marker(node):
+            if key not in node:
+                return False, None
+            node = node[key]
+        elif isinstance(node, list):
+            # RFC 6901 section 4: an array index is a decimal number with no
+            # leading zeros. `"-"` names the nonexistent element past the end
+            # and never resolves for reading.
+            if not key.isdigit() or (len(key) > 1 and key[0] == "0"):
+                return False, None
+            index = int(key)
+            if index >= len(node):
+                return False, None
+            node = node[index]
+        else:
+            return False, None
+    return True, node
+
+
+def _is_marker(value: object) -> bool:
+    """Whether a value is one of `redact`'s replacement markers.
+
+    Checked so a pointer aimed into a redacted subtree is not enumerated into
+    two items called `redacted` and `digest`, which would read as configuration
+    the file does not contain.
+    """
+    return (
+        isinstance(value, dict)
+        and set(value) == {"redacted", "digest"}
+        and value.get("redacted") is True
+    )
+
+
+def _jsonable(value: object) -> object:
+    """A copy of `value` that `json.dumps` will accept.
+
+    `tomllib` yields `datetime.datetime`, `datetime.date`, and `datetime.time`,
+    and `json.dumps` refuses all three. The entry `scan` emits is JSON, so such
+    a value reaching an item's attributes would not produce a bad baseline --
+    it would produce no baseline at all, the command failing at the last step
+    on a file it had already read successfully. Leaves that JSON cannot carry
+    become their `repr`; every JSON-native leaf passes through untouched.
+
+    Runs after `redact`, never instead of it. Markers are ordinary dicts of
+    JSON-native leaves and pass through unchanged.
+    """
+    if isinstance(value, dict):
+        return {
+            key if isinstance(key, str) else repr(key): _jsonable(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_jsonable(item) for item in value]
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    return repr(value)
 
 
 def _probe_target(probe: object) -> tuple[str | None, bool]:
@@ -331,6 +573,9 @@ def _item(
     digest: str | None = None,
     reason: str | None = None,
     portable: bool | None = None,
+    value: object = _ABSENT,
+    parse_error: str | None = None,
+    parse_unavailable: str | None = None,
 ) -> dict:
     """Assemble one baseline item.
 
@@ -343,8 +588,15 @@ def _item(
     single "which layer wins" answer computed here would be wrong for half the
     kinds. `scan` records the layer and leaves the winner to `drift`.
 
-    No file content ever reaches an item. The only thing derived from bytes is
-    the digest.
+    `value` is the only route by which file content reaches an item, it is
+    reached only from `_parse_items`, and what arrives has already been through
+    `redact`. It is defaulted to a sentinel rather than to `None` because
+    `null` is a value a configuration file can legitimately hold, and an item
+    whose parsed value is `null` must be distinguishable from an item that was
+    never parsed at all.
+
+    Outside that one attribute no file content reaches an item; the only other
+    thing derived from bytes is the digest.
     """
     attributes: dict = {}
     if isinstance(probe, dict):
@@ -353,6 +605,12 @@ def _item(
             attributes["scope"] = scope
     if reason is not None:
         attributes["reason"] = reason
+    if parse_error is not None:
+        attributes["parse_error"] = parse_error
+    if parse_unavailable is not None:
+        attributes["parse_unavailable"] = parse_unavailable
+    if value is not _ABSENT:
+        attributes["value"] = value
 
     item = {
         "kind": probe.get("kind") if isinstance(probe, dict) else None,

@@ -25,6 +25,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -46,7 +47,13 @@ from ledgerlib.constants import (  # noqa: E402
     REQUIRED_BASELINE_ITEM_FIELDS,
 )
 from ledgerlib.errors import PATH_SAFETY_REASONS  # noqa: E402
-from ledgerlib.scan import redact, run_probe  # noqa: E402
+from ledgerlib import scan as scan_module  # noqa: E402
+from ledgerlib.scan import (  # noqa: E402
+    PARSE_ERRORS,
+    SCAN_REASONS,
+    redact,
+    run_probe,
+)
 from ledgerlib.validate import validate_baseline  # noqa: E402
 
 
@@ -738,22 +745,18 @@ class ItemShapeTests(ProbeTestCase):
         )[0]
         self.assertNotIn("scope", item["attributes"])
 
-    def test_parse_and_pointer_are_ignored_and_yield_the_whole_file_item(self) -> None:
+    def test_a_probe_without_parse_yields_the_whole_file_item(self) -> None:
         target = self.write(
             self.user_config / "settings.json", '{"mcpServers": {"a": {}}}\n'
         )
         items = run_probe(
-            {
-                "kind": "mcp-server",
-                "path": "$USER_CONFIG/settings.json",
-                "parse": "json",
-                "pointer": "/mcpServers",
-            },
+            {"kind": "mcp-server", "path": "$USER_CONFIG/settings.json"},
             self.roots,
             [],
         )
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["digest"], self.digest_of(target))
+        self.assertNotIn("value", items[0]["attributes"])
 
 
 class NeverRaisesTests(ProbeTestCase):
@@ -790,6 +793,545 @@ class NeverRaisesTests(ProbeTestCase):
         self.assertEqual(
             items[0]["attributes"]["reason"], "path_reserved_device_name"
         )
+
+
+class ParseJsonTests(ProbeTestCase):
+    """`parse: "json"` -- one item per key at the pointed-to location."""
+
+    THREE_SERVERS = json.dumps(
+        {
+            "mcpServers": {
+                "gamma": {"command": "npx"},
+                "alpha": {"command": "uvx"},
+                "beta": {"command": "node"},
+            },
+            "other": {"ignored": True},
+        }
+    )
+
+    def probe(self, **extra: object) -> dict:
+        probe = {
+            "kind": "mcp-server",
+            "path": "$USER_CONFIG/settings.json",
+            "parse": "json",
+        }
+        probe.update(extra)
+        return probe
+
+    def test_a_pointer_over_three_servers_yields_one_item_per_key(self) -> None:
+        self.write(self.user_config / "settings.json", self.THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/mcpServers"), self.roots, [])
+        self.assertEqual(len(items), 3)
+        self.assertEqual(
+            [item["name"] for item in items], ["alpha", "beta", "gamma"]
+        )
+        self.assertTrue(all(item["state"] == "present" for item in items))
+
+    def test_the_pointed_to_location_is_the_only_one_enumerated(self) -> None:
+        self.write(self.user_config / "settings.json", self.THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/mcpServers"), self.roots, [])
+        self.assertNotIn("other", [item["name"] for item in items])
+
+    def test_every_parsed_item_carries_the_files_byte_digest(self) -> None:
+        target = self.write(self.user_config / "settings.json", self.THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/mcpServers"), self.roots, [])
+        self.assertEqual(
+            {item["digest"] for item in items}, {self.digest_of(target)}
+        )
+
+    def test_every_parsed_item_keeps_the_files_anchored_form(self) -> None:
+        self.write(self.user_config / "settings.json", self.THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/mcpServers"), self.roots, [])
+        self.assertEqual(
+            {item["anchor"] for item in items}, {"$USER_CONFIG/settings.json"}
+        )
+
+    def test_the_parsed_value_lands_in_the_items_attributes(self) -> None:
+        self.write(self.user_config / "settings.json", self.THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/mcpServers"), self.roots, [])
+        by_name = {item["name"]: item for item in items}
+        self.assertEqual(
+            by_name["alpha"]["attributes"]["value"], {"command": "uvx"}
+        )
+
+    def test_the_probes_scope_survives_parsing(self) -> None:
+        self.write(self.user_config / "settings.json", self.THREE_SERVERS)
+        items = run_probe(
+            self.probe(pointer="/mcpServers", scope="user"), self.roots, []
+        )
+        self.assertEqual(
+            {item["attributes"]["scope"] for item in items}, {"user"}
+        )
+
+    def test_a_pointer_that_does_not_resolve_yields_one_not_present_item(self) -> None:
+        self.write(self.user_config / "settings.json", self.THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/nowhere"), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "not_present")
+        self.assertIsNone(items[0]["digest"])
+
+    def test_an_unresolved_pointer_names_a_reason_from_the_closed_set(self) -> None:
+        self.write(self.user_config / "settings.json", self.THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/nowhere"), self.roots, [])
+        self.assertEqual(items[0]["attributes"]["reason"], "pointer_unresolved")
+        self.assertIn("pointer_unresolved", SCAN_REASONS)
+
+    def test_an_unresolved_pointer_says_what_was_absent(self) -> None:
+        self.write(self.user_config / "settings.json", self.THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/nowhere"), self.roots, [])
+        self.assertIn("/nowhere", items[0]["name"])
+
+    def test_a_pointer_through_a_scalar_does_not_resolve(self) -> None:
+        self.write(self.user_config / "settings.json", '{"a": 1}')
+        items = run_probe(self.probe(pointer="/a/b"), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["attributes"]["reason"], "pointer_unresolved")
+
+    def test_a_pointer_omitted_yields_one_item_for_the_whole_document(self) -> None:
+        target = self.write(self.user_config / "settings.json", self.THREE_SERVERS)
+        items = run_probe(self.probe(), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "present")
+        self.assertEqual(items[0]["digest"], self.digest_of(target))
+        self.assertEqual(
+            items[0]["attributes"]["value"], json.loads(self.THREE_SERVERS)
+        )
+
+    def test_a_pointer_may_index_an_array(self) -> None:
+        self.write(
+            self.user_config / "settings.json",
+            json.dumps({"servers": [{"a": 1}, {"b": 2}]}),
+        )
+        items = run_probe(self.probe(pointer="/servers/1"), self.roots, [])
+        self.assertEqual([item["name"] for item in items], ["b"])
+
+    def test_an_empty_object_at_the_pointer_yields_one_not_present_item(self) -> None:
+        self.write(self.user_config / "settings.json", '{"mcpServers": {}}')
+        items = run_probe(self.probe(pointer="/mcpServers"), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "not_present")
+        self.assertEqual(items[0]["attributes"]["reason"], "no_match")
+
+    def test_a_non_mapping_at_the_pointer_yields_one_item_for_the_value(self) -> None:
+        self.write(self.user_config / "settings.json", '{"servers": ["a", "b"]}')
+        items = run_probe(self.probe(pointer="/servers"), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "present")
+        self.assertEqual(items[0]["attributes"]["value"], ["a", "b"])
+
+    def test_an_empty_key_falls_back_to_the_files_name(self) -> None:
+        self.write(self.user_config / "settings.json", '{"mcpServers": {"": {}}}')
+        items = run_probe(self.probe(pointer="/mcpServers"), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertTrue(items[0]["name"].strip())
+
+
+class PointerEscapeTests(ProbeTestCase):
+    """RFC 6901: `~1` is `/` and `~0` is `~`, unescaped in that order."""
+
+    def probe(self, pointer: str) -> dict:
+        return {
+            "kind": "mcp-server",
+            "path": "$USER_CONFIG/settings.json",
+            "parse": "json",
+            "pointer": pointer,
+        }
+
+    def test_tilde_one_means_a_slash(self) -> None:
+        self.write(
+            self.user_config / "settings.json", json.dumps({"a/b": {"inner": {}}})
+        )
+        items = run_probe(self.probe("/a~1b"), self.roots, [])
+        self.assertEqual([item["name"] for item in items], ["inner"])
+
+    def test_tilde_zero_means_a_tilde(self) -> None:
+        self.write(
+            self.user_config / "settings.json", json.dumps({"a~b": {"inner": {}}})
+        )
+        items = run_probe(self.probe("/a~0b"), self.roots, [])
+        self.assertEqual([item["name"] for item in items], ["inner"])
+
+    def test_tilde_one_is_unescaped_before_tilde_zero(self) -> None:
+        # `~01` must come back as the literal `~1`, never as `/`. Unescaping
+        # `~0` first would turn `~01` into `~1` and then into `/`, resolving
+        # the wrong key -- or, here, no key at all.
+        self.write(
+            self.user_config / "settings.json",
+            json.dumps({"~1": {"right": {}}, "/": {"wrong": {}}}),
+        )
+        items = run_probe(self.probe("/~01"), self.roots, [])
+        self.assertEqual([item["name"] for item in items], ["right"])
+
+    def test_an_unescaped_slash_is_a_separator_not_a_key(self) -> None:
+        self.write(
+            self.user_config / "settings.json", json.dumps({"a/b": {"inner": {}}})
+        )
+        items = run_probe(self.probe("/a/b"), self.roots, [])
+        self.assertEqual(items[0]["attributes"]["reason"], "pointer_unresolved")
+
+
+class ParseErrorTests(ProbeTestCase):
+    """A malformed file is `present` and says so with a stable string."""
+
+    MALFORMED = '{"mcpServers": {"a": }\n'
+
+    def probe(self) -> dict:
+        return {
+            "kind": "mcp-server",
+            "path": "$USER_CONFIG/settings.json",
+            "parse": "json",
+            "pointer": "/mcpServers",
+        }
+
+    def test_a_malformed_file_yields_one_present_item(self) -> None:
+        self.write(self.user_config / "settings.json", self.MALFORMED)
+        items = run_probe(self.probe(), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "present")
+
+    def test_a_malformed_file_keeps_its_digest(self) -> None:
+        target = self.write(self.user_config / "settings.json", self.MALFORMED)
+        items = run_probe(self.probe(), self.roots, [])
+        self.assertEqual(items[0]["digest"], self.digest_of(target))
+
+    def test_the_parse_error_is_the_exact_documented_constant(self) -> None:
+        self.write(self.user_config / "settings.json", self.MALFORMED)
+        items = run_probe(self.probe(), self.roots, [])
+        self.assertEqual(items[0]["attributes"]["parse_error"], "malformed_json")
+        self.assertIn("malformed_json", PARSE_ERRORS)
+
+    def test_the_parse_error_does_not_carry_the_exceptions_own_text(self) -> None:
+        # The interpreter's own message varies by version -- 3.13 rewrote
+        # every `json` decoder message -- so a baseline carrying it diffs
+        # against itself across machines.
+        self.write(self.user_config / "settings.json", self.MALFORMED)
+        items = run_probe(self.probe(), self.roots, [])
+        try:
+            json.loads(self.MALFORMED)
+        except ValueError as exc:
+            message = str(exc)
+        else:  # pragma: no cover - the fixture is malformed by construction
+            self.fail("the fixture parsed")
+        dumped = json.dumps(items)
+        self.assertNotIn(message, dumped)
+        for fragment in ("Expecting", "line 1", "char ", "column"):
+            self.assertNotIn(fragment, dumped)
+
+    def test_a_malformed_file_carries_no_parsed_value(self) -> None:
+        self.write(self.user_config / "settings.json", self.MALFORMED)
+        items = run_probe(self.probe(), self.roots, [])
+        self.assertNotIn("value", items[0]["attributes"])
+
+    def test_no_file_content_reaches_a_malformed_items_output(self) -> None:
+        self.write(
+            self.user_config / "settings.json", '{"a": "PLAINTEXT-3b19de" '
+        )
+        items = run_probe(self.probe(), self.roots, [])
+        self.assertNotIn("PLAINTEXT-3b19de", json.dumps(items))
+
+    def test_undecodable_bytes_are_a_parse_error_not_a_crash(self) -> None:
+        target = self.user_config / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"\xff\xfe\x00garbage")
+        items = run_probe(self.probe(), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "present")
+        self.assertIn(items[0]["attributes"]["parse_error"], PARSE_ERRORS)
+
+
+class RedactionThroughParseTests(ProbeTestCase):
+    """Task 6 wired through: nothing parsed reaches an item unredacted."""
+
+    PLAINTEXT = "PLAINTEXT-7c2e91af"
+
+    def probe(self, **extra: object) -> dict:
+        probe = {
+            "kind": "mcp-server",
+            "path": "$USER_CONFIG/settings.json",
+            "parse": "json",
+        }
+        probe.update(extra)
+        return probe
+
+    def write_document(self, document: object) -> None:
+        self.write(self.user_config / "settings.json", json.dumps(document))
+
+    def test_the_plaintext_appears_nowhere_in_the_serialised_items(self) -> None:
+        self.write_document(
+            {
+                "mcpServers": {
+                    "one": {"command": "npx", "env": {"API_TOKEN": self.PLAINTEXT}},
+                    "two": {"headers": {"Authorization": self.PLAINTEXT}},
+                }
+            }
+        )
+        items = run_probe(
+            self.probe(pointer="/mcpServers"),
+            self.roots,
+            ["env", "*authorization*"],
+        )
+        self.assertEqual(len(items), 2)
+        self.assertNotIn(self.PLAINTEXT, json.dumps(items))
+
+    def test_a_marker_replaces_what_was_removed(self) -> None:
+        self.write_document(
+            {"mcpServers": {"one": {"env": {"API_TOKEN": self.PLAINTEXT}}}}
+        )
+        items = run_probe(self.probe(pointer="/mcpServers"), self.roots, ["env"])
+        found = markers(items[0]["attributes"]["value"])
+        self.assertEqual(len(found), 1)
+        self.assertRegex(found[0]["digest"], DIGEST)
+
+    def test_a_sensitive_key_at_the_pointed_location_itself_is_redacted(self) -> None:
+        self.write_document({"mcpServers": {"api_token": self.PLAINTEXT}})
+        items = run_probe(
+            self.probe(pointer="/mcpServers"), self.roots, ["*token*"]
+        )
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["name"], "api_token")
+        self.assertNotIn(self.PLAINTEXT, json.dumps(items))
+        self.assertEqual(len(markers(items[0]["attributes"]["value"])), 1)
+
+    def test_the_whole_document_form_is_redacted_too(self) -> None:
+        self.write_document({"env": {"API_TOKEN": self.PLAINTEXT}})
+        items = run_probe(self.probe(), self.roots, ["env"])
+        self.assertNotIn(self.PLAINTEXT, json.dumps(items))
+
+    def test_a_pointer_into_a_redacted_subtree_never_enumerates_it(self) -> None:
+        self.write_document({"env": {"API_TOKEN": self.PLAINTEXT}})
+        items = run_probe(self.probe(pointer="/env"), self.roots, ["env"])
+        self.assertNotIn(self.PLAINTEXT, json.dumps(items))
+        self.assertNotIn("API_TOKEN", json.dumps(items))
+
+    def test_no_patterns_means_no_redaction(self) -> None:
+        self.write_document({"mcpServers": {"one": {"command": "npx"}}})
+        items = run_probe(self.probe(pointer="/mcpServers"), self.roots, [])
+        self.assertEqual(items[0]["attributes"]["value"], {"command": "npx"})
+
+
+TOML_THREE_SERVERS = """
+[mcp_servers.gamma]
+command = "npx"
+
+[mcp_servers.alpha]
+command = "uvx"
+
+[mcp_servers.beta]
+command = "node"
+"""
+
+
+@unittest.skipIf(
+    scan_module.tomllib is None,
+    "tomllib is absent below Python 3.11; the degradation suite covers that path",
+)
+class ParseTomlTests(ProbeTestCase):
+    """`parse: "toml"` behaves identically through `tomllib`."""
+
+    def probe(self, **extra: object) -> dict:
+        probe = {
+            "kind": "mcp-server",
+            "path": "$USER_CONFIG/config.toml",
+            "parse": "toml",
+        }
+        probe.update(extra)
+        return probe
+
+    def test_a_pointer_over_three_tables_yields_one_item_per_key(self) -> None:
+        self.write(self.user_config / "config.toml", TOML_THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/mcp_servers"), self.roots, [])
+        self.assertEqual([item["name"] for item in items], ["alpha", "beta", "gamma"])
+
+    def test_the_digest_is_still_the_files_bytes(self) -> None:
+        target = self.write(self.user_config / "config.toml", TOML_THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/mcp_servers"), self.roots, [])
+        self.assertEqual({item["digest"] for item in items}, {self.digest_of(target)})
+
+    def test_the_parsed_value_lands_in_attributes(self) -> None:
+        self.write(self.user_config / "config.toml", TOML_THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/mcp_servers"), self.roots, [])
+        by_name = {item["name"]: item for item in items}
+        self.assertEqual(by_name["alpha"]["attributes"]["value"], {"command": "uvx"})
+
+    def test_a_pointer_omitted_yields_one_item_for_the_whole_document(self) -> None:
+        self.write(self.user_config / "config.toml", 'model = "o3"\n')
+        items = run_probe(self.probe(), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["attributes"]["value"], {"model": "o3"})
+
+    def test_a_pointer_that_does_not_resolve_yields_one_not_present_item(self) -> None:
+        self.write(self.user_config / "config.toml", TOML_THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/nowhere"), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "not_present")
+        self.assertEqual(items[0]["attributes"]["reason"], "pointer_unresolved")
+
+    def test_a_malformed_file_is_present_with_a_stable_parse_error(self) -> None:
+        self.write(self.user_config / "config.toml", "this is not = = toml\n")
+        items = run_probe(self.probe(pointer="/mcp_servers"), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "present")
+        self.assertEqual(items[0]["attributes"]["parse_error"], "malformed_toml")
+        self.assertIn("malformed_toml", PARSE_ERRORS)
+
+    def test_values_are_redacted(self) -> None:
+        self.write(
+            self.user_config / "config.toml",
+            '[mcp_servers.one.env]\nAPI_TOKEN = "PLAINTEXT-5ad0c1"\n',
+        )
+        items = run_probe(
+            self.probe(pointer="/mcp_servers"), self.roots, ["env"]
+        )
+        self.assertNotIn("PLAINTEXT-5ad0c1", json.dumps(items))
+
+    def test_a_toml_date_survives_serialisation(self) -> None:
+        # `tomllib` yields `datetime.date`, which `json.dumps` refuses. The
+        # entry is emitted as JSON, so a value that cannot be serialised would
+        # crash the command rather than the parse.
+        self.write(self.user_config / "config.toml", "[a]\nwhen = 2026-07-30\n")
+        items = run_probe(self.probe(pointer="/a"), self.roots, [])
+        self.assertEqual(len(items), 1)
+        json.dumps(items)
+
+
+class TomllibDegradationTests(ProbeTestCase):
+    """Design spec section 14: not a crash, and not a pretence of emptiness.
+
+    `tomllib` arrived in Python 3.11 and the bundle supports 3.10. The module
+    binds `None` when the import fails and branches on the binding, so this
+    test patches the binding rather than requiring an old interpreter -- a
+    test that can only run on an interpreter the developer does not have is a
+    test that never runs.
+    """
+
+    def probe(self, **extra: object) -> dict:
+        probe = {
+            "kind": "mcp-server",
+            "path": "$USER_CONFIG/config.toml",
+            "parse": "toml",
+        }
+        probe.update(extra)
+        return probe
+
+    def test_a_toml_probe_yields_one_present_item_with_its_digest(self) -> None:
+        target = self.write(self.user_config / "config.toml", TOML_THREE_SERVERS)
+        with mock.patch.object(scan_module, "tomllib", None):
+            items = run_probe(self.probe(pointer="/mcp_servers"), self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "present")
+        self.assertEqual(items[0]["digest"], self.digest_of(target))
+
+    def test_the_item_says_the_parser_was_unavailable(self) -> None:
+        self.write(self.user_config / "config.toml", TOML_THREE_SERVERS)
+        with mock.patch.object(scan_module, "tomllib", None):
+            items = run_probe(self.probe(pointer="/mcp_servers"), self.roots, [])
+        self.assertEqual(items[0]["attributes"]["parse_unavailable"], "toml")
+
+    def test_no_parsed_keys_are_produced(self) -> None:
+        self.write(self.user_config / "config.toml", TOML_THREE_SERVERS)
+        with mock.patch.object(scan_module, "tomllib", None):
+            items = run_probe(self.probe(pointer="/mcp_servers"), self.roots, [])
+        self.assertNotIn("value", items[0]["attributes"])
+        self.assertNotIn("parse_error", items[0]["attributes"])
+        self.assertNotIn("alpha", json.dumps(items))
+
+    def test_no_file_content_reaches_the_item(self) -> None:
+        self.write(self.user_config / "config.toml", 'a = "PLAINTEXT-91c40b"\n')
+        with mock.patch.object(scan_module, "tomllib", None):
+            items = run_probe(self.probe(), self.roots, [])
+        self.assertNotIn("PLAINTEXT-91c40b", json.dumps(items))
+
+    def test_a_json_probe_is_unaffected(self) -> None:
+        self.write(
+            self.user_config / "settings.json", '{"mcpServers": {"alpha": {}}}'
+        )
+        with mock.patch.object(scan_module, "tomllib", None):
+            items = run_probe(
+                {
+                    "kind": "mcp-server",
+                    "path": "$USER_CONFIG/settings.json",
+                    "parse": "json",
+                    "pointer": "/mcpServers",
+                },
+                self.roots,
+                [],
+            )
+        self.assertEqual([item["name"] for item in items], ["alpha"])
+
+
+class ParsedItemAgreementTests(ProbeTestCase):
+    """Parsed items are baseline items and must satisfy the same validator."""
+
+    def produce_items(self) -> list[dict]:
+        self.write(
+            self.user_config / "settings.json",
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "alpha": {"command": "npx", "env": {"T": "PLAINTEXT-0f1"}},
+                        "beta": {"command": "uvx"},
+                    }
+                }
+            ),
+        )
+        self.write(self.user_config / "broken.json", "{")
+        probes = [
+            {
+                "kind": "mcp-server",
+                "scope": "user",
+                "path": "$USER_CONFIG/settings.json",
+                "parse": "json",
+                "pointer": "/mcpServers",
+            },
+            {
+                "kind": "mcp-server",
+                "scope": "user",
+                "path": "$USER_CONFIG/settings.json",
+                "parse": "json",
+                "pointer": "/absent",
+            },
+            {
+                "kind": "mcp-server",
+                "scope": "user",
+                "path": "$USER_CONFIG/broken.json",
+                "parse": "json",
+            },
+            {
+                "kind": "mcp-server",
+                "scope": "user",
+                "path": "$USER_CONFIG/gone.json",
+                "parse": "json",
+                "pointer": "/mcpServers",
+            },
+        ]
+        items: list[dict] = []
+        for probe in probes:
+            items.extend(run_probe(probe, self.roots, ["env"]))
+        return items
+
+    def test_the_parsed_items_pass_validate_baseline(self) -> None:
+        items = self.produce_items()
+        self.assertGreaterEqual(len(items), 5)
+        entry = {
+            "id": "BASE-2026-000",
+            "captured_on": "2026-07-30",
+            "client": "claude-code",
+            "adapter_version": 1,
+            "items": items,
+        }
+        self.assertEqual(validate_baseline(entry, 0, source="scan"), [])
+
+    def test_the_parsed_entry_survives_a_json_round_trip(self) -> None:
+        entry = {
+            "id": "BASE-2026-000",
+            "captured_on": "2026-07-30",
+            "client": "claude-code",
+            "adapter_version": 1,
+            "items": self.produce_items(),
+        }
+        restored = json.loads(json.dumps(entry))
+        self.assertEqual(validate_baseline(restored, 0, source="scan"), [])
+        self.assertNotIn("PLAINTEXT-0f1", json.dumps(restored))
 
 
 class BaselineAgreementTests(ProbeTestCase):
