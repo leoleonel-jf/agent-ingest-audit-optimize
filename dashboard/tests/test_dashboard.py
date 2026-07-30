@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -1576,40 +1577,67 @@ class ReferenceTests(unittest.TestCase):
     # rather than a hardcoded list, so adding a value to dashboard.py
     # without documenting it in LEDGER.md fails here.
 
+    def _assert_vocabulary_documented(
+        self, vocabulary: set[str], reference_text: str, vocab_name: str
+    ) -> None:
+        """Assert that all vocabulary members appear in backtick-delimited format.
+
+        Requires each vocabulary member to appear in backticks. Prevents false matches
+        from bare prose (like 'project' in 'project root') and prevents drift between
+        the validator constants and their documentation.
+        """
+        # Require all vocabulary values to appear in backtick-delimited format
+        # This anchors the test on specific formatting, not bare prose mentions
+        for value in vocabulary:
+            backtick_form = f"`{value}`"
+            self.assertIn(
+                backtick_form,
+                reference_text,
+                f"Vocabulary member {value!r} not found in backtick-delimited "
+                f"format in {vocab_name}. Add it to the documentation.",
+            )
+
     def test_reference_documents_every_record_type(self) -> None:
         text = REFERENCE.read_text(encoding="utf-8")
-        for record_type in dashboard.RECORD_TYPES:
-            self.assertIn(record_type, text)
+        self._assert_vocabulary_documented(
+            dashboard.RECORD_TYPES, text, "RECORD_TYPES"
+        )
 
     def test_reference_documents_every_record_status(self) -> None:
         text = REFERENCE.read_text(encoding="utf-8")
-        for status in dashboard.RECORD_STATUSES:
-            self.assertIn(status, text)
+        self._assert_vocabulary_documented(
+            dashboard.RECORD_STATUSES, text, "RECORD_STATUSES"
+        )
 
     def test_reference_documents_every_record_scope(self) -> None:
         text = REFERENCE.read_text(encoding="utf-8")
-        for scope in dashboard.RECORD_SCOPES:
-            self.assertIn(scope, text)
+        self._assert_vocabulary_documented(
+            dashboard.RECORD_SCOPES, text, "RECORD_SCOPES"
+        )
 
     def test_reference_documents_every_classification(self) -> None:
         text = REFERENCE.read_text(encoding="utf-8")
-        for classification in dashboard.CLASSIFICATIONS:
-            self.assertIn(classification, text)
+        self._assert_vocabulary_documented(
+            dashboard.CLASSIFICATIONS, text, "CLASSIFICATIONS"
+        )
 
     def test_reference_documents_every_run_result(self) -> None:
         text = REFERENCE.read_text(encoding="utf-8")
-        for result in dashboard.RUN_RESULTS:
-            self.assertIn(result, text)
+        self._assert_vocabulary_documented(
+            dashboard.RUN_RESULTS, text, "RUN_RESULTS"
+        )
 
     def test_reference_documents_every_rollback_test_state(self) -> None:
         text = REFERENCE.read_text(encoding="utf-8")
-        for state in dashboard.ROLLBACK_TEST_STATES:
-            self.assertIn(state, text)
+        self._assert_vocabulary_documented(
+            dashboard.ROLLBACK_TEST_STATES, text, "ROLLBACK_TEST_STATES"
+        )
 
     def test_reference_documents_every_project_status(self) -> None:
         text = REFERENCE.read_text(encoding="utf-8")
-        for status in dashboard.PROJECT_STATUSES:
-            self.assertIn(status, text)
+        self._assert_vocabulary_documented(
+            dashboard.PROJECT_STATUSES, text, "PROJECT_STATUSES"
+        )
 
     def test_reference_documents_the_verify_command(self) -> None:
         text = REFERENCE.read_text(encoding="utf-8")
