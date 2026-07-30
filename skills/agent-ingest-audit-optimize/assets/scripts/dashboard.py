@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
-from typing import Any
 
 
 SCHEMA_VERSION = "1.0"
@@ -36,6 +36,7 @@ REQUIRED_LEDGER_FIELDS = {
 SEQUENCE_PREFIXES = ("MAT", "PROP", "RUN", "ADR", "BASE")
 LEDGER_SCOPES = {"global", "project"}
 ARRAY_FIELDS = ("known_projects", "records", "baselines", "backlog")
+DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class LedgerError(RuntimeError):
@@ -47,7 +48,7 @@ def load_json(path: Path) -> dict:
         value = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise LedgerError(f"Missing ledger: {path}") from exc
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise LedgerError(f"Unreadable ledger: {path}: {exc}") from exc
     if not isinstance(value, dict):
         raise LedgerError(f"Ledger must be a JSON object: {path}")
@@ -69,8 +70,20 @@ def validate_ledger(data: dict, *, source: str) -> list[str]:
         findings.append(
             f"{source}: unsupported schema_version: {data['schema_version']!r}"
         )
+    if type(data["ledger_id"]) is not str or len(data["ledger_id"]) < 1:
+        findings.append(f"{source}: ledger_id must be a non-empty string")
     if data["scope"] not in LEDGER_SCOPES:
         findings.append(f"{source}: invalid scope: {data['scope']!r}")
+    if type(data["language"]) is not str or len(data["language"]) < 2:
+        findings.append(f"{source}: language must be a string of at least 2 characters")
+    if type(data["client"]) is not str or len(data["client"]) < 1:
+        findings.append(f"{source}: client must be a non-empty string")
+    if type(data["adapter_version"]) is not int or data["adapter_version"] < 1:
+        findings.append(f"{source}: adapter_version must be an integer of at least 1")
+    for field in ("created", "updated"):
+        value = data[field]
+        if type(value) is not str or not DATE.match(value):
+            findings.append(f"{source}: {field} must match YYYY-MM-DD")
     if type(data["id_authority"]) is not bool:
         findings.append(f"{source}: id_authority must be a boolean")
     if data["scope"] == "global" and data.get("id_authority") is False:

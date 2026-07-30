@@ -75,6 +75,54 @@ class LedgerDocumentTests(unittest.TestCase):
         schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
         self.assertEqual(set(schema["required"]), dashboard.REQUIRED_LEDGER_FIELDS)
 
+    def test_empty_ledger_id_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["ledger_id"] = ""
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("ledger_id" in finding for finding in findings))
+
+    def test_short_language_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["language"] = "e"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("language" in finding for finding in findings))
+
+    def test_empty_client_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["client"] = ""
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("client" in finding for finding in findings))
+
+    def test_non_integer_adapter_version_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["adapter_version"] = "nope"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("adapter_version" in finding for finding in findings))
+
+    def test_adapter_version_below_minimum_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["adapter_version"] = 0
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("adapter_version" in finding for finding in findings))
+
+    def test_boolean_adapter_version_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["adapter_version"] = True
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("adapter_version" in finding for finding in findings))
+
+    def test_malformed_created_date_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["created"] = "not-a-date"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("created" in finding for finding in findings))
+
+    def test_malformed_updated_date_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["updated"] = "07/29/2026"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("updated" in finding for finding in findings))
+
     def test_verify_returns_zero_for_a_valid_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = write_ledger(Path(temp), minimal_ledger())
@@ -96,6 +144,10 @@ class LedgerDocumentTests(unittest.TestCase):
     def test_verify_returns_two_for_a_missing_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             self.assertEqual(dashboard.verify([Path(temp) / "absent.json"]), 2)
+
+    def test_verify_returns_two_for_a_directory_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            self.assertEqual(dashboard.verify([Path(temp)]), 2)
 
 
 if __name__ == "__main__":
