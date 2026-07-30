@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Validate the agent-ingest-audit-optimize governance ledger.
 
-`verify` is the only command implemented. Scanning, drift detection, rollback
-preview, and dashboard rendering arrive in later phases.
+`verify` validates one or more ledgers. `scan` reads one client's
+configuration and emits a single `baselines[]` entry on stdout; it is
+read-only and writes no file anywhere. Drift detection, rollback preview, and
+dashboard rendering arrive in later phases.
 """
 
 from __future__ import annotations
@@ -80,6 +82,14 @@ from ledgerlib.paths import (  # noqa: E402
     load_json,
     resolve_anchored,
 )
+from ledgerlib.scan import (  # noqa: E402
+    PARSE_ERRORS,
+    SCAN_REASONS,
+    redact,
+    run_probe,
+    scan,
+    scan_command,
+)
 from ledgerlib.validate import (  # noqa: E402
     _prefix_and_number,
     validate_backlog_entry,
@@ -98,10 +108,56 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     verify_parser = subparsers.add_parser("verify", help="validate one or more ledgers")
     verify_parser.add_argument("paths", nargs="+", type=Path)
+
+    scan_parser = subparsers.add_parser(
+        "scan",
+        help="read a client's configuration and emit one baselines[] entry (read-only)",
+    )
+    # Required, and not defaulted. Identifier allocation is a ledger concern
+    # with rules about sequences and cross-scope collision; `scan` does not get
+    # a second, private implementation of it.
+    scan_parser.add_argument(
+        "--id",
+        dest="identifier",
+        required=True,
+        help="the BASE identifier for the entry, allocated from the ID authority",
+    )
+    scan_parser.add_argument(
+        "--client", default=None, help="the client to scan; detected when omitted"
+    )
+    scan_parser.add_argument(
+        "--project",
+        type=Path,
+        default=None,
+        help="the project root $PROJECT anchors to; the working directory when omitted",
+    )
+    scan_parser.add_argument(
+        "--adapter",
+        type=Path,
+        default=None,
+        help="an adapter file to use, overriding selection entirely",
+    )
+    scan_parser.add_argument(
+        "--user-config",
+        dest="user_config",
+        type=Path,
+        default=None,
+        help="the configuration root user adapters are read from; skipped when omitted",
+    )
+
     arguments = parser.parse_args(argv)
 
     if arguments.command == "verify":
         return verify(arguments.paths)
+
+    if arguments.command == "scan":
+        return scan_command(
+            identifier=arguments.identifier,
+            client=arguments.client,
+            adapter=arguments.adapter,
+            user_config=arguments.user_config,
+            project=arguments.project,
+        )
 
 
 if __name__ == "__main__":

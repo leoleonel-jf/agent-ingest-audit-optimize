@@ -1,4 +1,4 @@
-"""Tests for `ledgerlib.scan`: redaction of sensitive values.
+"""Tests for `ledgerlib.scan`: redaction, probing, parsing, and assembly.
 
 The suite loads `dashboard.py` by file path exactly the way
 `test_dashboard.py` and `test_adapters.py` do. That import has a side effect
@@ -13,9 +13,12 @@ serialised form is what actually leaves the process.
 
 from __future__ import annotations
 
+import builtins
+import contextlib
 import datetime
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -44,17 +47,23 @@ SPEC.loader.exec_module(dashboard)
 
 from ledgerlib.constants import (  # noqa: E402
     BASELINE_ITEM_STATES,
+    RECORD_ID,
+    REQUIRED_BASELINE_FIELDS,
     REQUIRED_BASELINE_ITEM_FIELDS,
 )
-from ledgerlib.errors import PATH_SAFETY_REASONS  # noqa: E402
+from ledgerlib.errors import LedgerError, PATH_SAFETY_REASONS  # noqa: E402
 from ledgerlib import scan as scan_module  # noqa: E402
 from ledgerlib.scan import (  # noqa: E402
+    BASELINE_PREFIX,
     PARSE_ERRORS,
     SCAN_REASONS,
     redact,
     run_probe,
+    scan,
+    scan_command,
 )
 from ledgerlib.validate import validate_baseline  # noqa: E402
+from ledgerlib.verify import verify  # noqa: E402
 
 
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -1377,6 +1386,709 @@ class BaselineAgreementTests(ProbeTestCase):
         }
         restored = json.loads(json.dumps(entry))
         self.assertEqual(validate_baseline(restored, 0, source="scan"), [])
+
+
+def minimal_ledger() -> dict:
+    """The smallest ledger `verify` accepts.
+
+    Built the way `test_dashboard.py` builds its fixtures, and deliberately
+    duplicated rather than imported: importing across test modules would make
+    this suite fail for a reason that lives in another file, and the whole
+    point of the acceptance test below is that a `scan` entry drops into a
+    ledger nobody edited to accommodate it.
+    """
+    return {
+        "schema_version": "1.0",
+        "ledger_id": "l-000000",
+        "scope": "global",
+        "language": "en",
+        "client": "claude-code",
+        "adapter_version": 1,
+        "created": "2026-07-29",
+        "updated": "2026-07-30",
+        "id_authority": True,
+        "sequences": {"MAT": 0, "PROP": 0, "RUN": 0, "ADR": 0, "BASE": 1},
+        "known_projects": [],
+        "records": [],
+        "baselines": [],
+        "backlog": [],
+    }
+
+
+class ScanTestCase(unittest.TestCase):
+    """A whole fake machine: an adapter directory, a user config, a project.
+
+    Anchor candidates are written as absolute paths into the temporary tree
+    rather than as `$env:` names, so every test here is hermetic against the
+    real environment: nothing this suite runs can be steered by whatever
+    `CLAUDE_CONFIG_DIR` happens to hold on the machine running it.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.bundled = self.tmp / "adapters"
+        self.bundled.mkdir()
+        self.user_config = self.tmp / "user_config"
+        self.skills = self.user_config / "skills"
+        self.skills.mkdir(parents=True)
+        self.project = self.tmp / "project"
+        self.project.mkdir()
+
+    def write(self, path: Path, text: str) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def adapter_document(self, **overrides: object) -> dict:
+        document: dict = {
+            "adapter_version": 3,
+            "client": "test-client",
+            "expires_on": "2099-01-01",
+            "anchors": {
+                "$USER_CONFIG": [str(self.user_config)],
+                "$PROJECT": ["."],
+            },
+            "probes": [
+                {
+                    "kind": "instruction-file",
+                    "scope": "user",
+                    "path": "$USER_CONFIG/CLAUDE.md",
+                },
+                {
+                    "kind": "skill",
+                    "scope": "user",
+                    "glob": "$USER_CONFIG/skills/*/SKILL.md",
+                },
+                {
+                    "kind": "mcp-server",
+                    "scope": "user",
+                    "path": "$USER_CONFIG/settings.json",
+                    "parse": "json",
+                    "pointer": "/mcpServers",
+                },
+                {"kind": "hook", "scope": "project", "glob": "$PROJECT/hooks/*.js"},
+                {
+                    "kind": "agent",
+                    "scope": "managed",
+                    "path": "$USER_CONFIG/ABSENT.md",
+                },
+            ],
+            "sensitive_key_patterns": ["env", "*token*"],
+        }
+        document.update(overrides)
+        return document
+
+    def write_adapter(self, name: str = "test-client.json", **overrides: object) -> Path:
+        path = self.bundled / name
+        path.write_text(
+            json.dumps(self.adapter_document(**overrides)), encoding="utf-8"
+        )
+        return path
+
+    def populate(self) -> None:
+        """A machine with something on it, including a secret to not leak."""
+        self.write(self.user_config / "CLAUDE.md", "# memory\n")
+        self.write(self.skills / "one" / "SKILL.md", "a\n")
+        self.write(self.skills / "two" / "SKILL.md", "b\n")
+        self.write(
+            self.user_config / "settings.json",
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "alpha": {"command": "npx", "env": {"T": "PLAINTEXT-51ce"}},
+                        "beta": {"command": "uvx"},
+                    }
+                }
+            ),
+        )
+        self.write(self.project / "hooks" / "guard.js", "// guard\n")
+
+    def do_scan(self, **kwargs: object) -> tuple[dict, list[str], int]:
+        """Call `scan` with hermetic defaults, overridable per test."""
+        if "adapter" not in kwargs:
+            kwargs["adapter"] = self.write_adapter()
+        arguments: dict = {
+            "identifier": "BASE-2026-000",
+            "client": None,
+            "user_config": None,
+            "project": self.project,
+            "bundled": self.bundled,
+            "environ": {},
+            "captured_on": "2026-07-30",
+        }
+        arguments.update(kwargs)
+        return scan(**arguments)
+
+    def run_cli(self, *argv: str) -> tuple[int, str, str]:
+        """Drive `dashboard.main` the way a shell would, capturing both streams.
+
+        Every CLI assertion in this module goes through `main`, never through
+        `scan` directly. A previous release of this repository shipped a
+        feature whose argparse wiring could be deleted without a single test
+        noticing, because every test called the inner function.
+        """
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = dashboard.main(list(argv))
+            except SystemExit as exc:
+                code = exc.code
+        return code, out.getvalue(), err.getvalue()
+
+    def cli_arguments(self, adapter: Path | None = None) -> list[str]:
+        return [
+            "scan",
+            "--id",
+            "BASE-2026-000",
+            "--adapter",
+            str(adapter if adapter is not None else self.write_adapter()),
+            "--project",
+            str(self.project),
+        ]
+
+
+class ScanEntryTests(ScanTestCase):
+    """The five fields design spec section 7.5 requires, and nothing else."""
+
+    def test_the_entry_has_every_required_baseline_field(self) -> None:
+        self.populate()
+        entry, _, _ = self.do_scan()
+        self.assertEqual(REQUIRED_BASELINE_FIELDS - set(entry), set())
+
+    def test_the_entry_carries_no_field_beyond_the_required_five(self) -> None:
+        self.populate()
+        entry, _, _ = self.do_scan()
+        self.assertEqual(set(entry), set(REQUIRED_BASELINE_FIELDS))
+
+    def test_the_id_is_the_one_the_caller_allocated(self) -> None:
+        entry, _, _ = self.do_scan(identifier="BASE-2026-042")
+        self.assertEqual(entry["id"], "BASE-2026-042")
+
+    def test_captured_on_comes_from_the_injected_parameter(self) -> None:
+        entry, _, _ = self.do_scan(captured_on="2019-03-04")
+        self.assertEqual(entry["captured_on"], "2019-03-04")
+
+    def test_captured_on_defaults_to_today(self) -> None:
+        entry, _, _ = self.do_scan(captured_on=None)
+        self.assertEqual(entry["captured_on"], datetime.date.today().isoformat())
+
+    def test_a_captured_on_that_is_not_a_date_is_a_tool_error(self) -> None:
+        with self.assertRaises(LedgerError):
+            self.do_scan(captured_on="yesterday")
+
+    def test_client_and_adapter_version_come_from_the_adapter(self) -> None:
+        entry, _, _ = self.do_scan()
+        self.assertEqual(entry["client"], "test-client")
+        self.assertEqual(entry["adapter_version"], 3)
+
+    def test_every_probe_contributes_at_least_one_item(self) -> None:
+        self.populate()
+        entry, _, _ = self.do_scan()
+        probes = self.adapter_document()["probes"]
+        self.assertGreaterEqual(len(entry["items"]), len(probes))
+
+    def test_a_probe_matching_nothing_is_still_recorded(self) -> None:
+        entry, _, _ = self.do_scan()
+        absent = [item for item in entry["items"] if item["state"] == "not_present"]
+        self.assertTrue(absent)
+        self.assertIn("ABSENT.md", json.dumps(absent))
+
+    def test_an_adapter_with_no_probes_yields_an_empty_items_array(self) -> None:
+        entry, _, _ = self.do_scan(adapter=self.write_adapter(probes=[]))
+        self.assertEqual(entry["items"], [])
+
+    def test_a_secret_in_a_parsed_file_never_reaches_the_entry(self) -> None:
+        self.populate()
+        entry, _, _ = self.do_scan()
+        self.assertNotIn("PLAINTEXT-51ce", json.dumps(entry))
+
+
+class ScanVerifyAcceptanceTests(ScanTestCase):
+    """The acceptance criterion: the emitted entry is a valid ledger entry.
+
+    This is what ties this release to the schema 0.2.3 shipped. It runs the
+    real `verify` over a real file on disk rather than calling
+    `validate_baseline` directly, because the command is what a user runs and
+    the command is where a serialisation failure would surface.
+    """
+
+    def emit(self) -> dict:
+        self.populate()
+        entry, _, _ = self.do_scan()
+        return entry
+
+    def test_the_emitted_entry_verifies_clean_inside_a_ledger(self) -> None:
+        ledger = minimal_ledger()
+        ledger["baselines"] = [self.emit()]
+        path = self.tmp / "ledger.json"
+        path.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = verify([path])
+        self.assertEqual(code, 0, err.getvalue())
+        self.assertIn("1 ledger(s) validated", out.getvalue())
+
+    def test_the_emitted_entry_passes_validate_baseline(self) -> None:
+        self.assertEqual(validate_baseline(self.emit(), 0, source="scan"), [])
+
+    def test_the_entry_verifies_after_a_json_round_trip(self) -> None:
+        restored = json.loads(json.dumps(self.emit(), indent=2))
+        self.assertEqual(validate_baseline(restored, 0, source="scan"), [])
+
+    def test_an_expired_scans_entry_still_verifies(self) -> None:
+        self.populate()
+        entry, _, code = self.do_scan(
+            adapter=self.write_adapter(expires_on="2026-07-29")
+        )
+        self.assertEqual(code, 1)
+        ledger = minimal_ledger()
+        ledger["baselines"] = [entry]
+        path = self.tmp / "ledger.json"
+        path.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(verify([path]), 0, err.getvalue())
+
+
+class ScanItemTests(ScanTestCase):
+    def test_every_item_origin_is_pre_existing(self) -> None:
+        self.populate()
+        entry, _, _ = self.do_scan()
+        self.assertTrue(entry["items"])
+        for item in entry["items"]:
+            self.assertEqual(item["origin"], "pre-existing")
+
+    def test_every_item_carries_its_probes_scope(self) -> None:
+        self.populate()
+        entry, _, _ = self.do_scan()
+        self.assertTrue(entry["items"])
+        for item in entry["items"]:
+            self.assertIn("scope", item["attributes"], item)
+            self.assertIn(item["attributes"]["scope"], {"user", "project", "managed"})
+
+    def test_a_scope_survives_onto_a_not_present_item(self) -> None:
+        entry, _, _ = self.do_scan()
+        absent = [item for item in entry["items"] if item["state"] == "not_present"]
+        self.assertTrue(absent)
+        for item in absent:
+            self.assertIn("scope", item["attributes"], item)
+
+    def test_every_item_state_is_from_the_closed_set(self) -> None:
+        self.populate()
+        entry, _, _ = self.do_scan()
+        for item in entry["items"]:
+            self.assertIn(item["state"], BASELINE_ITEM_STATES)
+
+    def test_project_scoped_items_are_anchored_at_the_named_project(self) -> None:
+        self.populate()
+        entry, _, _ = self.do_scan()
+        hooks = [item for item in entry["items"] if item["kind"] == "hook"]
+        self.assertEqual(len(hooks), 1)
+        self.assertEqual(hooks[0]["anchor"], "$PROJECT/hooks/guard.js")
+
+
+class ScanExpiryTests(ScanTestCase):
+    """An adapter past its expiry is a finding, never an error.
+
+    An adapter whose paths have quietly gone stale produces a baseline that
+    looks clean, and a silently clean baseline is the worst output this tool
+    can produce. So the run continues and says so, rather than refusing and
+    leaving the operator with nothing.
+    """
+
+    def expired(self, **overrides: object) -> tuple[dict, list[str], int]:
+        self.populate()
+        return self.do_scan(adapter=self.write_adapter(expires_on="2026-07-29", **overrides))
+
+    def test_an_expired_adapter_produces_a_finding(self) -> None:
+        _, findings, _ = self.expired()
+        self.assertTrue(
+            any("expired" in finding for finding in findings), findings
+        )
+
+    def test_the_expiry_finding_names_the_date_and_the_client(self) -> None:
+        _, findings, _ = self.expired()
+        expiry = next(finding for finding in findings if "expired" in finding)
+        self.assertIn("'2026-07-29'", expiry)
+        self.assertIn("'test-client'", expiry)
+
+    def test_an_expired_adapter_still_emits_a_baseline(self) -> None:
+        entry, _, _ = self.expired()
+        self.assertEqual(validate_baseline(entry, 0, source="scan"), [])
+        self.assertTrue(entry["items"])
+
+    def test_an_expired_adapter_exits_one(self) -> None:
+        _, _, code = self.expired()
+        self.assertEqual(code, 1)
+
+    def test_an_unexpired_adapter_produces_no_expiry_finding(self) -> None:
+        self.populate()
+        _, findings, code = self.do_scan()
+        self.assertFalse(
+            [finding for finding in findings if "expired" in finding], findings
+        )
+        self.assertEqual(code, 0)
+
+    def test_an_adapter_expiring_on_the_day_of_the_scan_is_not_expired(self) -> None:
+        self.populate()
+        _, findings, code = self.do_scan(
+            adapter=self.write_adapter(expires_on="2026-07-30"),
+            captured_on="2026-07-30",
+        )
+        self.assertFalse(
+            [finding for finding in findings if "expired" in finding], findings
+        )
+        self.assertEqual(code, 0)
+
+    def test_expiry_is_judged_against_the_injected_date_not_the_clock(self) -> None:
+        self.populate()
+        _, findings, code = self.do_scan(
+            adapter=self.write_adapter(expires_on="2099-01-01"),
+            captured_on="2099-06-01",
+        )
+        self.assertTrue(any("expired" in finding for finding in findings), findings)
+        self.assertEqual(code, 1)
+
+
+class ScanUnresolvedAnchorTests(ScanTestCase):
+    """An anchor no candidate resolves is the other way a baseline lies.
+
+    Not settled by the spec, which names only expiry. Recorded as a finding on
+    the same grounds: every probe beneath an unresolved anchor is `not_present`
+    whether the client is absent or the tool merely looked in the wrong place,
+    and those two must not be reported identically.
+    """
+
+    def unresolved(self) -> tuple[dict, list[str], int]:
+        adapter = self.write_adapter(
+            anchors={
+                "$USER_CONFIG": [str(self.tmp / "nowhere")],
+                "$PROJECT": ["."],
+            }
+        )
+        return self.do_scan(adapter=adapter)
+
+    def test_an_unresolved_anchor_produces_a_finding(self) -> None:
+        _, findings, code = self.unresolved()
+        self.assertTrue(
+            any("unresolved" in finding for finding in findings), findings
+        )
+        self.assertEqual(code, 1)
+
+    def test_an_unresolved_anchor_still_emits_a_baseline(self) -> None:
+        entry, _, _ = self.unresolved()
+        self.assertEqual(validate_baseline(entry, 0, source="scan"), [])
+        self.assertTrue(entry["items"])
+
+    def test_every_probe_under_an_unresolved_anchor_is_not_present(self) -> None:
+        entry, _, _ = self.unresolved()
+        under = [
+            item for item in entry["items"] if item["anchor"].startswith("$USER_CONFIG")
+        ]
+        self.assertTrue(under)
+        for item in under:
+            self.assertEqual(item["state"], "not_present")
+            self.assertEqual(item["attributes"]["reason"], "unresolved_anchor")
+
+
+class ScanIdentifierTests(ScanTestCase):
+    """`--id` is checked, not allocated.
+
+    Identifier allocation is a ledger concern with rules about sequences,
+    provisional suffixes, and cross-scope collision. `scan` does not get a
+    second, private implementation of it; it checks the shape and refuses.
+    """
+
+    def test_a_well_formed_baseline_id_is_accepted(self) -> None:
+        entry, _, _ = self.do_scan(identifier="BASE-2026-999")
+        self.assertEqual(entry["id"], "BASE-2026-999")
+
+    def test_a_provisional_baseline_id_is_accepted(self) -> None:
+        entry, _, _ = self.do_scan(identifier="BASE-2026-001-P")
+        self.assertEqual(entry["id"], "BASE-2026-001-P")
+
+    def test_a_malformed_id_is_a_tool_error(self) -> None:
+        with self.assertRaises(LedgerError):
+            self.do_scan(identifier="NOPE")
+
+    def test_the_malformed_id_message_names_the_pattern(self) -> None:
+        with self.assertRaises(LedgerError) as caught:
+            self.do_scan(identifier="NOPE")
+        self.assertIn(RECORD_ID.pattern, str(caught.exception))
+
+    def test_a_right_shape_wrong_prefix_id_is_a_tool_error(self) -> None:
+        with self.assertRaises(LedgerError) as caught:
+            self.do_scan(identifier="RUN-2026-001")
+        self.assertIn(BASELINE_PREFIX, str(caught.exception))
+
+    def test_an_empty_id_is_a_tool_error(self) -> None:
+        with self.assertRaises(LedgerError):
+            self.do_scan(identifier="")
+
+    def test_the_id_is_checked_before_anything_is_read(self) -> None:
+        # A bad id must not cost a directory walk. The adapter path below does
+        # not exist, so reaching the loader at all would raise a different
+        # error than the one asserted.
+        with self.assertRaises(LedgerError) as caught:
+            self.do_scan(identifier="NOPE", adapter=self.tmp / "no-such-adapter.json")
+        self.assertIn(RECORD_ID.pattern, str(caught.exception))
+
+
+class ScanCliTests(ScanTestCase):
+    """Everything here goes through `dashboard.main`, never through `scan`."""
+
+    def test_the_subcommand_is_wired_into_main(self) -> None:
+        self.populate()
+        code, stdout, _ = self.run_cli(*self.cli_arguments())
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout)["client"], "test-client")
+
+    def test_the_entry_is_written_to_stdout_as_indented_json(self) -> None:
+        self.populate()
+        _, stdout, _ = self.run_cli(*self.cli_arguments())
+        entry = json.loads(stdout)
+        self.assertEqual(stdout.rstrip("\n"), json.dumps(entry, indent=2))
+
+    def test_stdout_holds_the_entry_and_nothing_else(self) -> None:
+        """A caller must be able to pipe stdout straight into a JSON reader."""
+        self.populate()
+        _, stdout, stderr = self.run_cli(*self.cli_arguments())
+        entry = json.loads(stdout)
+        self.assertEqual(set(entry), set(REQUIRED_BASELINE_FIELDS))
+        self.assertNotIn("selected adapter", stdout)
+        self.assertIn("selected adapter", stderr)
+
+    def test_selection_notes_reach_stderr(self) -> None:
+        self.populate()
+        _, _, stderr = self.run_cli(*self.cli_arguments())
+        self.assertIn("selected adapter", stderr)
+        self.assertIn("test-client", stderr)
+
+    def test_selection_notes_are_not_inside_the_entrys_items(self) -> None:
+        self.populate()
+        _, stdout, _ = self.run_cli(*self.cli_arguments())
+        self.assertNotIn("selected adapter", json.dumps(json.loads(stdout)["items"]))
+
+    def test_findings_reach_stderr_and_the_entry_still_reaches_stdout(self) -> None:
+        self.populate()
+        adapter = self.write_adapter(expires_on="2026-07-29")
+        code, stdout, stderr = self.run_cli(*self.cli_arguments(adapter))
+        self.assertEqual(code, 1)
+        self.assertIn("expired", stderr)
+        self.assertNotIn("expired", stdout)
+        self.assertEqual(validate_baseline(json.loads(stdout), 0, source="cli"), [])
+
+    def test_a_missing_id_exits_two(self) -> None:
+        code, stdout, stderr = self.run_cli(
+            "scan", "--adapter", str(self.write_adapter()), "--project", str(self.project)
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        # Asserting on the *reason* and not only on the code: without this,
+        # the test would pass just as happily against a parser that has no
+        # `scan` subcommand at all, since argparse answers an unknown
+        # subcommand with exit 2 as well.
+        self.assertIn("--id", stderr)
+
+    def test_a_malformed_id_exits_two_naming_the_pattern(self) -> None:
+        arguments = self.cli_arguments()
+        arguments[arguments.index("BASE-2026-000")] = "NOPE"
+        code, stdout, stderr = self.run_cli(*arguments)
+        self.assertEqual(code, 2)
+        self.assertIn(RECORD_ID.pattern, stderr)
+        self.assertEqual(stdout, "")
+
+    def test_a_right_shape_wrong_prefix_id_exits_two(self) -> None:
+        arguments = self.cli_arguments()
+        arguments[arguments.index("BASE-2026-000")] = "RUN-2026-001"
+        code, stdout, stderr = self.run_cli(*arguments)
+        self.assertEqual(code, 2)
+        self.assertIn(BASELINE_PREFIX, stderr)
+        self.assertEqual(stdout, "")
+
+    def test_an_unknown_client_exits_two(self) -> None:
+        self.write_adapter()
+        code, stdout, stderr = self.run_cli(
+            "scan",
+            "--id",
+            "BASE-2026-000",
+            "--client",
+            "no-such-client",
+            "--project",
+            str(self.project),
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertIn("no-such-client", stderr)
+
+    def test_an_unreadable_adapter_exits_two(self) -> None:
+        missing = self.tmp / "no-such-adapter.json"
+        code, stdout, stderr = self.run_cli(
+            "scan",
+            "--id",
+            "BASE-2026-000",
+            "--adapter",
+            str(missing),
+            "--project",
+            str(self.project),
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertIn(missing.name, stderr)
+
+    def test_the_client_flag_selects_a_bundled_adapter(self) -> None:
+        """Against the real bundled directory: there is no `--bundled` flag.
+
+        `generic` is chosen deliberately -- it probes nothing, so this test
+        exercises the selection path without reading the machine's real
+        configuration into a unit test.
+        """
+        code, stdout, stderr = self.run_cli(
+            "scan",
+            "--id",
+            "BASE-2026-000",
+            "--client",
+            "generic",
+            "--project",
+            str(self.project),
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(stdout)["client"], "generic")
+        self.assertEqual(json.loads(stdout)["items"], [])
+
+    def test_verify_still_dispatches(self) -> None:
+        ledger = minimal_ledger()
+        path = self.tmp / "ledger.json"
+        path.write_text(json.dumps(ledger), encoding="utf-8")
+        code, stdout, _ = self.run_cli("verify", str(path))
+        self.assertEqual(code, 0)
+        self.assertIn("1 ledger(s) validated", stdout)
+
+    def test_scan_is_re_exported_from_dashboard(self) -> None:
+        self.assertIs(dashboard.scan, scan_module.scan)
+        self.assertIs(dashboard.scan_command, scan_module.scan_command)
+
+
+class ScanSubprocessTests(ScanTestCase):
+    """The real thing: a separate process, a real pipe, a real exit code."""
+
+    def invoke(self, *extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "scan",
+                "--id",
+                "BASE-2026-000",
+                "--adapter",
+                str(self.write_adapter()),
+                "--project",
+                str(self.project),
+                *extra,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    def test_stdout_is_parseable_json_on_its_own(self) -> None:
+        self.populate()
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        entry = json.loads(result.stdout)
+        self.assertEqual(set(entry), set(REQUIRED_BASELINE_FIELDS))
+
+    def test_nothing_but_the_entry_is_written_to_stdout(self) -> None:
+        self.populate()
+        result = self.invoke()
+        self.assertEqual(
+            result.stdout.rstrip("\n"), json.dumps(json.loads(result.stdout), indent=2)
+        )
+        self.assertNotEqual(result.stderr.strip(), "")
+
+    def test_a_secret_does_not_survive_the_pipe(self) -> None:
+        self.populate()
+        result = self.invoke()
+        self.assertNotIn("PLAINTEXT-51ce", result.stdout)
+        self.assertNotIn("PLAINTEXT-51ce", result.stderr)
+
+
+class ScanWritesNothingTests(ScanTestCase):
+    """`scan` is read-only, and the guard is a patch rather than a chmod.
+
+    A read-only tree is not portable -- Windows honours neither a POSIX mode
+    nor a directory-level deny for the owner reliably -- and it reports a
+    generic permission error rather than naming which call tried to write.
+    These patches fail loudly and say what was attempted.
+    """
+
+    def arm(self) -> None:
+        real_path_open = Path.open
+        real_open = builtins.open
+
+        def guarded_path_open(this, mode="r", *args, **kwargs):
+            if isinstance(mode, str) and set(mode) & set("wxa+"):
+                raise AssertionError(f"scan opened {this} with mode {mode!r}")
+            return real_path_open(this, mode, *args, **kwargs)
+
+        def guarded_open(file, mode="r", *args, **kwargs):
+            if isinstance(mode, str) and set(mode) & set("wxa+"):
+                raise AssertionError(f"scan opened {file!r} with mode {mode!r}")
+            return real_open(file, mode, *args, **kwargs)
+
+        def refuse(name):
+            def guard(this, *args, **kwargs):
+                raise AssertionError(f"scan called Path.{name} on {this}")
+
+            return guard
+
+        patches = [
+            mock.patch.object(Path, "open", guarded_path_open),
+            mock.patch.object(Path, "write_text", refuse("write_text")),
+            mock.patch.object(Path, "write_bytes", refuse("write_bytes")),
+            mock.patch.object(Path, "mkdir", refuse("mkdir")),
+            mock.patch.object(Path, "touch", refuse("touch")),
+            mock.patch.object(builtins, "open", guarded_open),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_the_guard_is_actually_armed(self) -> None:
+        """Without this, a broken patch makes every test below pass silently."""
+        self.arm()
+        with self.assertRaises(AssertionError):
+            (self.tmp / "written.txt").write_text("no", encoding="utf-8")
+        with self.assertRaises(AssertionError):
+            (self.tmp / "made").mkdir()
+        with self.assertRaises(AssertionError):
+            open(self.tmp / "opened.txt", "w").close()
+
+    def test_a_full_scan_completes_with_every_write_api_failing_loudly(self) -> None:
+        self.populate()
+        adapter = self.write_adapter()
+        self.arm()
+        entry, _, code = self.do_scan(adapter=adapter)
+        self.assertEqual(code, 0)
+        self.assertTrue(entry["items"])
+
+    def test_the_cli_writes_nothing_either(self) -> None:
+        self.populate()
+        arguments = self.cli_arguments()
+        self.arm()
+        code, stdout, _ = self.run_cli(*arguments)
+        self.assertEqual(code, 0)
+        self.assertTrue(json.loads(stdout)["items"])
+
+    def test_reading_still_works_under_the_guard(self) -> None:
+        self.populate()
+        adapter = self.write_adapter()
+        self.arm()
+        entry, _, _ = self.do_scan(adapter=adapter)
+        present = [item for item in entry["items"] if item["state"] == "present"]
+        self.assertTrue(present)
+        self.assertTrue(any(item["digest"] for item in present))
 
 
 if __name__ == "__main__":

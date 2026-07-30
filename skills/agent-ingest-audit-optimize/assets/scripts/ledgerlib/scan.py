@@ -18,17 +18,23 @@ way out.
 
 from __future__ import annotations
 
+import datetime
 import fnmatch
 import hashlib
 import json
 import os
 import stat
-from collections.abc import Sequence
+import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from ledgerlib.adapters import PARSE_FORMATS
-from ledgerlib.constants import ANCHOR_REFERENCE
-from ledgerlib.errors import PathSafetyError
+from ledgerlib.adapters import (
+    PARSE_FORMATS,
+    resolve_anchor_roots,
+    select_adapter,
+)
+from ledgerlib.constants import ANCHOR_REFERENCE, DATE, RECORD_ID
+from ledgerlib.errors import LedgerError, PathSafetyError
 from ledgerlib.paths import anchor_path, file_digest, resolve_anchored
 
 try:  # pragma: no cover - which branch runs is the interpreter's choice
@@ -68,6 +74,17 @@ SCAN_REASONS = frozenset(
 PARSE_ERRORS = frozenset({"malformed_json", "malformed_toml", "unreadable"})
 
 _MALFORMED = {"json": "malformed_json", "toml": "malformed_toml"}
+
+# The one identifier prefix a `baselines[]` entry may carry. `validate_baseline`
+# enforces the same thing on the other side of the boundary; this module checks
+# it before a single directory is walked, so a typo costs nothing.
+BASELINE_PREFIX = "BASE"
+
+# The bundle's own adapter directory: `assets/adapters/`, two levels up from
+# `assets/scripts/ledgerlib/scan.py`. Derived from `__file__` rather than from
+# the process's working directory, because `scan` is run from wherever the
+# project being scanned happens to live.
+BUNDLED_ADAPTERS = Path(__file__).resolve().parents[2] / "adapters"
 
 # "no value was parsed" as distinct from "the parsed value was `null`". A
 # configuration file may hold `null`, and the two must not collapse.
@@ -624,3 +641,207 @@ def _item(
     if portable is not None:
         item["portable"] = portable
     return item
+
+
+def scan(
+    *,
+    identifier: str,
+    client: str | None = None,
+    adapter: Path | None = None,
+    user_config: Path | None = None,
+    project: Path | None = None,
+    bundled: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    captured_on: str | None = None,
+) -> tuple[dict, list[str], int]:
+    """Assemble one `baselines[]` entry from one client's configuration.
+
+    Returns `(entry, messages, exit_code)`.
+
+    `messages` is everything the caller should put on stderr, in order: the
+    adapter-selection notes first, then the findings. The two share one list
+    because they share one stream -- an operator reading a scan needs to know
+    *which* adapter ran before being told what it found -- but only the
+    findings move `exit_code`, which is why a note does not turn an ordinary
+    run into a failing one. `exit_code` is `0` clean and `1` with findings,
+    matching `verify`; `2` is not returned here at all. A tool error is raised
+    as `LedgerError`, the channel every other command in this bundle already
+    uses, and `scan_command` is the one place that turns it into `2`.
+
+    `captured_on` is a parameter rather than a read of the clock so that a
+    test is not time-dependent and so that expiry is judged against the date
+    the entry claims -- an entry stamped with one date and expiry-checked
+    against another would be internally inconsistent the moment a scan crossed
+    midnight.
+
+    `environ` and `project` are parameters for the same reason
+    `resolve_anchor_roots` takes them: nothing about which tree gets read may
+    depend on process state a caller cannot see.
+
+    Nothing here writes. The whole call graph beneath it -- `select_adapter`,
+    `resolve_anchor_roots`, `run_probe` -- opens files for reading and hashes
+    them, and `ScanWritesNothingTests` holds that by patching every write API
+    in `pathlib` and `builtins` to fail loudly.
+    """
+    identifier = _check_identifier(identifier)
+    captured_on = _check_captured_on(captured_on)
+
+    project = Path.cwd() if project is None else project
+    environ = os.environ if environ is None else environ
+    bundled = BUNDLED_ADAPTERS if bundled is None else bundled
+
+    document, notes = select_adapter(
+        client=client,
+        adapter=adapter,
+        user_config=user_config,
+        bundled=bundled,
+        environ=environ,
+        project=project,
+    )
+
+    roots, unresolved = resolve_anchor_roots(
+        document, project=project, environ=environ
+    )
+    findings = _coverage_findings(
+        document, unresolved=unresolved, captured_on=captured_on
+    )
+
+    patterns = document["sensitive_key_patterns"]
+    items: list[dict] = []
+    for probe in document["probes"]:
+        items.extend(run_probe(probe, roots, patterns))
+
+    entry = {
+        "id": identifier,
+        "captured_on": captured_on,
+        "client": document["client"],
+        "adapter_version": document["adapter_version"],
+        "items": items,
+    }
+    # Exactly the five fields design spec section 7.5 requires. The selection
+    # notes are deliberately not among them: they describe how this scan was
+    # configured, not what it found, and a note inside `items` would read as
+    # configuration the machine does not have.
+    return entry, [*notes, *findings], 1 if findings else 0
+
+
+def _check_identifier(identifier: object) -> str:
+    """Refuse anything that is not a well-formed `BASE` identifier.
+
+    Allocation is a ledger concern -- `references/LEDGER.md` owns the rules
+    about sequences, provisional suffixes, and cross-scope collision -- so
+    `scan` takes the identifier it is given and checks only that it is one a
+    ledger could hold. This runs before the adapter is opened: a typo must not
+    cost a directory walk over somebody's configuration.
+    """
+    if (
+        not isinstance(identifier, str)
+        or not RECORD_ID.fullmatch(identifier)
+        or identifier.split("-")[0] != BASELINE_PREFIX
+    ):
+        raise LedgerError(
+            f"invalid --id {identifier!r}: a baseline identifier must match "
+            f"{RECORD_ID.pattern} with the prefix {BASELINE_PREFIX}, for "
+            f"example {BASELINE_PREFIX}-2026-001. Take the next free number "
+            "from the ID authority's sequences; scan does not allocate one."
+        )
+    return identifier
+
+
+def _check_captured_on(captured_on: object) -> str:
+    """Today, or the injected date, refusing anything that is not a date.
+
+    A malformed date would produce an entry that fails `validate_baseline` at
+    the far end of a pipe, long after the scan that could have said so.
+    """
+    if captured_on is None:
+        return datetime.date.today().isoformat()
+    if not isinstance(captured_on, str) or not DATE.fullmatch(captured_on):
+        raise LedgerError(f"invalid captured_on {captured_on!r}: must be YYYY-MM-DD")
+    return captured_on
+
+
+def _coverage_findings(
+    document: dict, *, unresolved: Sequence[str], captured_on: str
+) -> list[str]:
+    """The two ways a baseline can look clean because it looked at nothing.
+
+    Both are findings and neither is an error: the scan runs, the entry is
+    emitted, and the exit code says the output is not to be trusted as a
+    complete picture. Refusing outright would leave the operator with no
+    baseline at all, which is worse than a baseline that says what it missed.
+
+    The first is expiry. `docs/specs/2026-07-30-adapters-and-scan.md` section
+    3.3: vendor paths are time-sensitive, so each adapter carries the research
+    document's expiry, and an adapter run past it may be naming files the
+    client no longer reads.
+
+    The second -- an anchor no candidate resolved -- the spec does not name.
+    It is recorded on the same grounds: every probe beneath such an anchor is
+    `not_present` whether the client is genuinely absent or the tool merely
+    looked in the wrong tree, and those two must not come out of the command
+    looking identical.
+    """
+    client = document["client"]
+    findings: list[str] = []
+
+    expires_on = document["expires_on"]
+    # Both are `YYYY-MM-DD` -- `validate_adapter` and `_check_captured_on`
+    # each guarantee their side -- and that form sorts lexicographically in
+    # date order, so no parsing is needed to compare them.
+    if captured_on > expires_on:
+        findings.append(
+            f"adapter for client {client!r} expired on {expires_on!r} and this "
+            f"scan ran on {captured_on!r}: its paths were verified against the "
+            "vendor's documentation before that date and may no longer name "
+            "the files the client reads, so this baseline may look clean "
+            "because it looked in the wrong place"
+        )
+
+    if unresolved:
+        findings.append(
+            f"adapter for client {client!r} has unresolved anchors "
+            f"{sorted(unresolved)}: no candidate root for them exists on this "
+            "machine, so every probe beneath them is recorded not_present "
+            "rather than looked at"
+        )
+
+    return findings
+
+
+def scan_command(
+    *,
+    identifier: str,
+    client: str | None = None,
+    adapter: Path | None = None,
+    user_config: Path | None = None,
+    project: Path | None = None,
+) -> int:
+    """`scan` as a command: entry to stdout, everything else to stderr.
+
+    The split of streams is the contract. A caller pipes stdout straight into
+    a JSON reader, so not one byte that is not the entry may go there --
+    notes, findings, and tool errors all go to stderr, and a scan that found
+    nothing writes exactly the same shape as one that found everything.
+
+    Exit codes match `verify`: `0` clean, `1` findings, `2` tool error.
+    `sys.stdout` and `sys.stderr` are looked up at call time rather than bound
+    as defaults, so a caller redirecting either -- as the tests do -- gets
+    what it redirected.
+    """
+    try:
+        entry, messages, code = scan(
+            identifier=identifier,
+            client=client,
+            adapter=adapter,
+            user_config=user_config,
+            project=project,
+        )
+    except LedgerError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    for message in messages:
+        print(message, file=sys.stderr)
+    print(json.dumps(entry, indent=2))
+    return code
