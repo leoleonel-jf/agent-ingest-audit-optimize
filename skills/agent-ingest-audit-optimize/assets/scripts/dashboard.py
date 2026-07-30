@@ -628,6 +628,9 @@ def validate_ledger(data: dict, *, source: str) -> list[str]:
                 f"{source}: sequences has unexpected keys: {sorted(unexpected)}"
             )
 
+    # ARRAY_FIELDS is ("known_projects", "records", "baselines", "backlog"):
+    # every one of the four has an explicit elif arm below, so there is no
+    # fifth case left for a trailing `else` to ever handle.
     for field in ARRAY_FIELDS:
         if not isinstance(data[field], list):
             findings.append(f"{source}: {field} must be an array")
@@ -643,12 +646,6 @@ def validate_ledger(data: dict, *, source: str) -> list[str]:
         elif field == "baselines":
             for index, entry in enumerate(data[field]):
                 findings.extend(validate_baseline(entry, index, source=source))
-        else:
-            for index, element in enumerate(data[field]):
-                if not isinstance(element, dict):
-                    findings.append(
-                        f"{source}: {field}[{index}] must be an object"
-                    )
 
     return findings
 
