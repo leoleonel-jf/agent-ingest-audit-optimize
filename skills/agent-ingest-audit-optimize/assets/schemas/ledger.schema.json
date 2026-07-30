@@ -264,7 +264,8 @@
             },
             "self_reported": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": { "type": "string" },
+              "contains": { "const": "targets" }
             }
           }
         }

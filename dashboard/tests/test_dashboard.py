@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import re
 import tempfile
 import unittest
@@ -737,7 +738,7 @@ def minimal_run() -> dict:
                 "file": "records/RUN-2026-000.rollback.md",
                 "tested": "NOT_TESTED",
             },
-            "self_reported": ["tests"],
+            "self_reported": ["targets", "tests"],
         }
     )
     return record
@@ -784,6 +785,23 @@ class RunEntryTests(unittest.TestCase):
         self.assertTrue(
             any("self_reported" in finding for finding in self.check(record))
         )
+
+    def test_run_must_name_targets_in_self_reported(self) -> None:
+        record = minimal_run()
+        record["self_reported"] = ["backup", "result"]
+        findings = self.check(record)
+        self.assertTrue(
+            any(
+                "self_reported" in finding and "targets" in finding
+                for finding in findings
+            )
+        )
+
+    def test_run_naming_targets_in_self_reported_is_accepted(self) -> None:
+        record = minimal_run()
+        record["self_reported"] = ["targets", "backup", "result"]
+        findings = self.check(record)
+        self.assertFalse(any("self_reported" in finding for finding in findings))
 
     def test_non_run_records_do_not_require_run_fields(self) -> None:
         self.assertEqual(self.check(minimal_record()), [])
@@ -978,6 +996,30 @@ class RunSchemaAlignmentTests(unittest.TestCase):
         self.assertEqual(
             set(target_schema["required"]), dashboard.REQUIRED_TARGET_FIELDS
         )
+
+    def test_schema_self_reported_contains_matches_runtime_validator(self) -> None:
+        # There is no jsonschema library here (standard library only), so this
+        # does not execute the schema's `contains` keyword directly. Instead
+        # it reads the required value out of the schema and feeds it through
+        # the real validate_run(), on both a record that satisfies it and one
+        # that does not -- so a schema/runtime drift on the *value* (e.g. the
+        # schema requiring "targets" while the runtime checks a different
+        # string) is caught, not just a structural presence-of-key check.
+        self_reported_schema = self.record_schema["then"]["properties"][
+            "self_reported"
+        ]
+        required_value = self_reported_schema["contains"]["const"]
+
+        satisfying = minimal_run()
+        satisfying["self_reported"] = [required_value]
+        self.assertEqual(
+            dashboard.validate_run(satisfying, label="RUN-2026-000"), []
+        )
+
+        violating = minimal_run()
+        violating["self_reported"] = ["something-else"]
+        findings = dashboard.validate_run(violating, label="RUN-2026-000")
+        self.assertTrue(any("self_reported" in finding for finding in findings))
 
     def test_schema_proposal_pattern_matches_record_id_pattern(self) -> None:
         self.assertEqual(
@@ -1398,6 +1440,111 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
         self.assertTrue(any("RUN-2026-009" in finding for finding in findings))
         self.assertFalse(any("\x1b" in finding for finding in findings))
 
+    def test_backlog_id_referencing_no_record_is_reported(self) -> None:
+        ledger = self.project_ledger()
+        record = minimal_record()
+        record["id"] = "MAT-2026-000"
+        record["type"] = "MATERIAL"
+        ledger["records"] = [record]
+        ledger["sequences"]["MAT"] = 1
+        ledger["backlog"] = [
+            {
+                "id": "MAT-2026-777",
+                "classification": "MONITOR",
+                "reason": "refers to nothing",
+                "revisit_trigger": "never",
+                "revisit_after": None,
+            }
+        ]
+
+        findings = dashboard.validate_collection([("project.json", ledger)])
+
+        self.assertTrue(any("MAT-2026-777" in finding for finding in findings))
+
+    def test_two_backlog_entries_may_share_one_id(self) -> None:
+        ledger = self.project_ledger()
+        record = minimal_record()
+        record["id"] = "MAT-2026-000"
+        record["type"] = "MATERIAL"
+        ledger["records"] = [record]
+        ledger["sequences"]["MAT"] = 1
+        entry = {
+            "id": "MAT-2026-000",
+            "classification": "MONITOR",
+            "reason": "one material can produce several findings",
+            "revisit_trigger": "upstream fix",
+            "revisit_after": None,
+        }
+        ledger["backlog"] = [dict(entry), dict(entry)]
+
+        findings = dashboard.validate_collection([("project.json", ledger)])
+
+        self.assertFalse(any("backlog" in finding for finding in findings))
+
+    def test_authority_sequences_must_cover_a_sibling_ledgers_records(self) -> None:
+        authority = minimal_ledger()
+        authority["sequences"]["MAT"] = 0
+        project = self.project_ledger()
+        record = minimal_record()
+        record["id"] = "MAT-2026-000"
+        record["type"] = "MATERIAL"
+        project["records"] = [record]
+        project["sequences"]["MAT"] = 1
+
+        findings = dashboard.validate_collection(
+            [("global.json", authority), ("project.json", project)]
+        )
+
+        self.assertTrue(
+            any("sequences.MAT" in finding and "global.json" in finding for finding in findings)
+        )
+
+    def test_a_project_ledger_is_not_responsible_for_a_siblings_records(self) -> None:
+        authority = minimal_ledger()
+        authority["sequences"]["MAT"] = 6
+        first = self.project_ledger()
+        first_record = minimal_record()
+        first_record["id"] = "MAT-2026-005"
+        first_record["type"] = "MATERIAL"
+        first["records"] = [first_record]
+        first["sequences"]["MAT"] = 6
+        second = self.project_ledger()
+        second_record = minimal_record()
+        second_record["id"] = "MAT-2026-000"
+        second_record["type"] = "MATERIAL"
+        second["records"] = [second_record]
+        second["sequences"]["MAT"] = 1
+
+        findings = dashboard.validate_collection(
+            [("global.json", authority), ("a.json", first), ("b.json", second)]
+        )
+
+        self.assertFalse(any("sequences" in finding for finding in findings))
+
+    def test_authority_holding_the_highest_record_produces_one_finding_not_two(
+        self,
+    ) -> None:
+        # Deleting `if holder == source: continue` from the authority check
+        # would double-count this exact case: the per-document rule (the
+        # first loop over `highest`) already reports a ledger's sequences
+        # trailing its own highest record, and without the skip the
+        # authority-scoped rule (the second loop over `spent`) reports the
+        # same drift again under a second message, because here the
+        # authority is also the ledger that holds the record.
+        authority = minimal_ledger()
+        record = minimal_record()
+        record["id"] = "MAT-2026-005"
+        record["type"] = "MATERIAL"
+        authority["records"] = [record]
+        authority["sequences"]["MAT"] = 0
+
+        findings = dashboard.validate_collection([("global.json", authority)])
+
+        matching = [finding for finding in findings if "MAT-2026-005" in finding]
+        self.assertEqual(
+            len(matching), 1, f"expected exactly one finding, got: {matching}"
+        )
+
     def test_more_than_one_id_authority_is_reported(self) -> None:
         findings = dashboard.validate_collection(
             [("a", minimal_ledger()), ("b", minimal_ledger())]
@@ -1424,6 +1571,236 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
             exit_code, stdout, stderr = _capture_verify(paths)
             self.assertEqual(exit_code, 1)
             self.assertIn("duplicate", stderr.lower())
+
+    def test_stale_last_digest_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "project.json"
+            project.write_text(json.dumps(self.project_ledger()), encoding="utf-8")
+            global_data = minimal_ledger()
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(root),
+                    "ledger_path": str(project),
+                    "last_seen": "2026-07-30",
+                    "last_digest": "sha256:" + "0" * 64,
+                    "status": "OK",
+                }
+            ]
+            global_path = root / "global.json"
+            global_path.write_text(json.dumps(global_data), encoding="utf-8")
+
+            findings = dashboard.validate_collection(
+                [
+                    (str(global_path), json.loads(global_path.read_text(encoding="utf-8"))),
+                    (str(project), json.loads(project.read_text(encoding="utf-8"))),
+                ],
+                digests={
+                    dashboard._path_key(str(global_path)): dashboard.file_digest(global_path),
+                    dashboard._path_key(str(project)): dashboard.file_digest(project),
+                },
+            )
+
+            self.assertTrue(any("last_digest" in finding for finding in findings))
+
+    def test_matching_last_digest_is_not_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "project.json"
+            project.write_text(json.dumps(self.project_ledger()), encoding="utf-8")
+            global_data = minimal_ledger()
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(root),
+                    "ledger_path": str(project),
+                    "last_seen": "2026-07-30",
+                    "last_digest": dashboard.file_digest(project),
+                    "status": "OK",
+                }
+            ]
+            global_path = root / "global.json"
+            global_path.write_text(json.dumps(global_data), encoding="utf-8")
+
+            findings = dashboard.validate_collection(
+                [
+                    (str(global_path), json.loads(global_path.read_text(encoding="utf-8"))),
+                    (str(project), json.loads(project.read_text(encoding="utf-8"))),
+                ],
+                digests={
+                    dashboard._path_key(str(global_path)): dashboard.file_digest(global_path),
+                    dashboard._path_key(str(project)): dashboard.file_digest(project),
+                },
+            )
+
+            self.assertFalse(any("last_digest" in finding for finding in findings))
+
+    def test_digest_for_a_ledger_outside_the_set_is_not_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            global_data = minimal_ledger()
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(root),
+                    "ledger_path": str(root / "absent.json"),
+                    "last_seen": "2026-07-30",
+                    "last_digest": "sha256:" + "0" * 64,
+                    "status": "OK",
+                }
+            ]
+            global_path = root / "global.json"
+            global_path.write_text(json.dumps(global_data), encoding="utf-8")
+
+            findings = dashboard.validate_collection(
+                [(str(global_path), global_data)],
+                digests={
+                    dashboard._path_key(str(global_path)): dashboard.file_digest(global_path)
+                },
+            )
+
+            self.assertFalse(any("last_digest" in finding for finding in findings))
+
+    def test_verify_matches_relative_invocation_against_absolute_ledger_path(
+        self,
+    ) -> None:
+        # verify() itself must exercise the digest wiring end to end: it
+        # populates `digests`, passes it into validate_collection, and
+        # registers each path under two keys (the path as given, and its
+        # resolved form) so a ledger's stored absolute ledger_path still
+        # matches an invocation that names the same file differently. Here
+        # the project ledger is invoked via a relative path while the
+        # global ledger's known_projects[0] records it by absolute path --
+        # the match can only happen through the `path.resolve()` key.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project_dir = root / "project"
+            project_dir.mkdir()
+            project_data = self.project_ledger()
+            project_data["records"] = [minimal_record()]
+            project_data["sequences"]["PROP"] = 1
+            project_path = write_ledger(project_dir, project_data)
+
+            global_data = minimal_ledger()
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(project_dir),
+                    "ledger_path": str(project_path.resolve()),
+                    "last_seen": "2026-07-30",
+                    # Wrong but well-formed: the real digest is whatever
+                    # write_ledger actually produced, never all-nines.
+                    "last_digest": "sha256:" + "9" * 64,
+                    "status": "OK",
+                }
+            ]
+            global_path = write_ledger(root, global_data)
+
+            try:
+                relative_project_path = Path(
+                    os.path.relpath(project_path, Path.cwd())
+                )
+            except ValueError:
+                # On Windows, os.path.relpath raises ValueError when the two
+                # paths are on different drives -- e.g. a checkout on C:\
+                # with TEMP redirected to D:\. There is no relative path to
+                # form in that case, so there is nothing this test can
+                # exercise; skip rather than error.
+                self.skipTest(
+                    "no relative path exists between the checkout and TEMP "
+                    "(different drives)"
+                )
+            exit_code, stdout, stderr = _capture_verify(
+                [relative_project_path, global_path]
+            )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("last_digest", stderr)
+
+    def test_path_key_normalizes_separator_and_case(self) -> None:
+        # _path_key's normalization is what lets a stored ledger_path
+        # compare equal to an invocation path that names the same file with
+        # different slashes or case. Replacing _path_key's body with
+        # `return value` leaves every other digest test in this class
+        # green, because each one passes str(path) verbatim on both sides;
+        # none of them differs the two strings in spelling. This one does:
+        # the stored ledger_path uses forward slashes and upper case, the
+        # invocation path is exactly what write_ledger returned.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            sub = root / "sub"
+            sub.mkdir()
+            project_data = self.project_ledger()
+            project_path = write_ledger(sub, project_data)
+
+            mixed_path = str(project_path).replace(os.sep, "/").upper()
+            self.assertNotEqual(mixed_path, str(project_path))
+
+            global_data = minimal_ledger()
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(sub),
+                    "ledger_path": mixed_path,
+                    "last_seen": "2026-07-30",
+                    # Wrong but well-formed, same as the other digest tests
+                    # in this class: the point is that the comparison
+                    # happens at all, which a mismatch finding proves.
+                    "last_digest": "sha256:" + "9" * 64,
+                    "status": "OK",
+                }
+            ]
+            global_path = write_ledger(root, global_data)
+
+            exit_code, stdout, stderr = _capture_verify([project_path, global_path])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("last_digest", stderr)
+
+    def test_verify_matches_relative_ledger_path_against_relative_invocation(
+        self,
+    ) -> None:
+        # Deleting `digests[_path_key(source)] = digest` from verify()
+        # leaves every existing digest test in this class green: they all
+        # either use identical strings on both sides or depend on the
+        # resolved-path key covered by
+        # test_verify_matches_relative_invocation_against_absolute_ledger_path
+        # above. Only the as-given key covers this case: a ledger_path
+        # stored relative, matched by a relative invocation path, where the
+        # resolved (absolute) key would never match the stored value.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project_dir = root / "project"
+            project_dir.mkdir()
+            project_data = self.project_ledger()
+            project_data["records"] = [minimal_record()]
+            project_data["sequences"]["PROP"] = 1
+            write_ledger(project_dir, project_data)
+
+            relative_ledger_path = os.path.join("project", "ledger.json")
+            global_data = minimal_ledger()
+            # Matches the project ledger's PROP-2026-000 so the authority
+            # sequence check stays quiet and stderr carries only the
+            # last_digest finding this test is about.
+            global_data["sequences"]["PROP"] = 1
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(project_dir),
+                    "ledger_path": relative_ledger_path,
+                    "last_seen": "2026-07-30",
+                    "last_digest": "sha256:" + "9" * 64,
+                    "status": "OK",
+                }
+            ]
+            write_ledger(root, global_data)
+
+            previous_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                exit_code, stdout, stderr = _capture_verify(
+                    [Path(relative_ledger_path), Path("ledger.json")]
+                )
+            finally:
+                os.chdir(previous_cwd)
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("last_digest", stderr)
 
 
 class CrossLedgerDefensiveParsingTests(unittest.TestCase):
@@ -1532,6 +1909,24 @@ class PartialSetHonestyTests(unittest.TestCase):
         findings = dashboard.validate_collection([("only", data)], complete=False)
         self.assertEqual(findings, [])
 
+    def test_backlog_back_references_are_suppressed_for_a_partial_set(self) -> None:
+        ledger = self.project_ledger()
+        ledger["backlog"] = [
+            {
+                "id": "MAT-2026-777",
+                "classification": "MONITOR",
+                "reason": "the record may live in the ledger that could not be read",
+                "revisit_trigger": "never",
+                "revisit_after": None,
+            }
+        ]
+
+        findings = dashboard.validate_collection(
+            [("project.json", ledger)], complete=False
+        )
+
+        self.assertFalse(any("MAT-2026-777" in finding for finding in findings))
+
     def test_incomplete_collection_still_reports_duplicate_ids(self) -> None:
         first = self.project_ledger()
         second = self.project_ledger()
@@ -1562,6 +1957,34 @@ class PartialSetHonestyTests(unittest.TestCase):
             exit_code, stdout, stderr = _capture_verify([present_path, missing_path])
             self.assertEqual(exit_code, 2)
             self.assertNotIn("unknown record", stderr)
+
+    def test_verify_partial_set_suppresses_backlog_back_reference_finding(self) -> None:
+        # The unit-level test above
+        # (test_backlog_back_references_are_suppressed_for_a_partial_set)
+        # covers validate_collection(complete=False) directly. The plan's
+        # acceptance criterion is end to end: verify() itself, with one
+        # ledger genuinely unreadable, must both exit 2 and not report a
+        # backlog id that resolves to no record in the readable set --
+        # that record may live in the ledger that could not be read.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            present_dir = root / "present"
+            present_dir.mkdir()
+            data = self.project_ledger()
+            data["backlog"] = [
+                {
+                    "id": "MAT-2026-777",
+                    "classification": "MONITOR",
+                    "reason": "the record may live in the ledger that could not be read",
+                    "revisit_trigger": "never",
+                    "revisit_after": None,
+                }
+            ]
+            present_path = write_ledger(present_dir, data)
+            missing_path = root / "missing" / "ledger.json"
+            exit_code, stdout, stderr = _capture_verify([present_path, missing_path])
+            self.assertEqual(exit_code, 2)
+            self.assertNotIn("MAT-2026-777", stderr)
 
     def test_verify_prints_findings_from_readable_ledgers_before_failing(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1716,6 +2139,27 @@ class ReferenceTests(unittest.TestCase):
     def test_reference_documents_the_verify_command(self) -> None:
         text = REFERENCE.read_text(encoding="utf-8")
         self.assertIn("dashboard.py verify", text)
+
+    def test_reference_documents_the_new_checks(self) -> None:
+        text = REFERENCE.read_text(encoding="utf-8")
+        for phrase in (
+            "final on-disk bytes",
+            "not comparable",
+            "a floor",
+            "back-reference",
+            "does not make coverage verifiable",
+        ):
+            self.assertIn(phrase, text)
+
+    def test_reference_states_the_sequences_floor_rule_not_its_negation(self) -> None:
+        # test_reference_documents_the_new_checks above asserts "a floor"
+        # as a bare substring, which the *negation* of the rule also
+        # contains ("It is an equality, not a floor" still matches "a
+        # floor"). Rewriting the documented rule into its opposite would
+        # keep that test green. Pin the exact phrase order, both ways.
+        text = REFERENCE.read_text(encoding="utf-8")
+        self.assertIn("a floor, not an equality", text)
+        self.assertNotIn("an equality, not a floor", text)
 
 
 SKILL = REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "SKILL.md"

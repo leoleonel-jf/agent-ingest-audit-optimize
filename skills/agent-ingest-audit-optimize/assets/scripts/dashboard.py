@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Validate the agent-ingest-audit-optimize governance ledger.
 
-Phase 0.2.0 implements the `verify` command only. Scanning, drift detection,
-rollback preview, and dashboard rendering arrive in later phases.
+`verify` is the only command implemented. Scanning, drift detection, rollback
+preview, and dashboard rendering arrive in later phases.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -159,6 +161,32 @@ def load_json(path: Path) -> dict:
     if not isinstance(value, dict):
         raise LedgerError(f"Ledger must be a JSON object: {path}")
     return value
+
+
+def file_digest(path: Path) -> str:
+    """Hash a ledger's final on-disk bytes.
+
+    The digest recorded in `known_projects[].last_digest` describes the file as
+    written, so it must be taken from the bytes on disk: a trailing newline or a
+    line-ending difference changes the hash of an otherwise identical document.
+    """
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _path_key(value: str) -> str:
+    """Normalize a path for comparison without touching the filesystem.
+
+    `ledger_path` is ledger content, and ledger content is attacker-influenced.
+    This normalizes textually -- never resolving, never opening -- so comparing
+    a ledger's stored path against the paths the user named cannot be steered
+    into reading somewhere else.
+
+    `normpath`'s textual `..` collapse is correct on Windows, whose own path
+    normalization is likewise textual, but it is unsound across POSIX
+    symlinks. `resolve()` is deliberately not used here: the whole point is
+    to never touch the filesystem for a ledger-supplied value.
+    """
+    return os.path.normcase(os.path.normpath(value))
 
 
 def validate_ledger(data: dict, *, source: str) -> list[str]:
@@ -315,6 +343,16 @@ def validate_run(record: dict, *, label: str) -> list[str]:
         not isinstance(item, str) for item in reported
     ):
         findings.append(f"{label} self_reported must be an array of strings")
+    elif "targets" not in reported:
+        # Every target's shape is checked; the array's coverage cannot be.
+        # Nothing in a ledger says how many files a run was supposed to touch,
+        # so a RUN can name three targets for a fourteen-file change and pass.
+        # The record must say so in the field built for exactly that admission.
+        findings.append(
+            f"{label} self_reported must name 'targets': verify checks each "
+            "target's shape and can never check that the array covers what the "
+            "run changed"
+        )
 
     return findings
 
@@ -493,7 +531,10 @@ def _prefix_and_number(identifier: str) -> tuple[str, int]:
 
 
 def validate_collection(
-    documents: list[tuple[str, dict]], *, complete: bool = True
+    documents: list[tuple[str, dict]],
+    *,
+    complete: bool = True,
+    digests: dict[str, str] | None = None,
 ) -> list[str]:
     # complete=False skips link checks to avoid false dangling-link findings.
     findings: list[str] = []
@@ -501,6 +542,10 @@ def validate_collection(
     declared: set[str] = set()
     authorities: list[str] = []
     all_records: list[tuple[str, dict]] = []
+    # Highest number seen per prefix across the whole verified set, with the
+    # identifier and the ledger that holds it, so the authority check below can
+    # name where the id was actually spent.
+    spent: dict[str, tuple[int, str, str]] = {}
     for source, data in documents:
         if isinstance(data, dict) and data.get("id_authority") is True:
             authorities.append(source)
@@ -535,6 +580,9 @@ def validate_collection(
             current = highest.get(prefix)
             if current is None or number > current[0]:
                 highest[prefix] = (number, identifier)
+            current_spent = spent.get(prefix)
+            if current_spent is None or number > current_spent[0]:
+                spent[prefix] = (number, identifier, source)
         sequences = data.get("sequences") if isinstance(data, dict) else None
         if isinstance(sequences, dict):
             for prefix, (number, highest_identifier) in highest.items():
@@ -544,6 +592,26 @@ def validate_collection(
                         f"{source}: sequences.{prefix} is {allocated} but "
                         f"{highest_identifier} is already allocated"
                     )
+
+    # The global ledger is the sole ID authority, and normally holds no records
+    # of its own: every project-scoped record routes to a project ledger. So the
+    # per-document rule above never relates the authority's allocation counter to
+    # the ids it actually issued. Fold in the whole set.
+    for source, data in documents:
+        if not isinstance(data, dict) or data.get("id_authority") is not True:
+            continue
+        sequences = data.get("sequences")
+        if not isinstance(sequences, dict):
+            continue
+        for prefix, (number, identifier, holder) in spent.items():
+            if holder == source:
+                continue  # the per-document rule already covers this one
+            allocated = sequences.get(prefix)
+            if type(allocated) is int and allocated < number + 1:
+                findings.append(
+                    f"{source}: sequences.{prefix} is {allocated} but the ID "
+                    f"authority must cover {identifier}, allocated in {holder}"
+                )
 
     if complete:
         for source, record in all_records:
@@ -561,6 +629,50 @@ def validate_collection(
                             f"unknown record: {target!r}"
                         )
 
+        # A backlog entry's id is a back-reference to the record whose evidence
+        # produced the finding, not a unique key: one material routinely yields
+        # several backlog entries, so duplicates are correct here. What is
+        # checkable is that the record exists. Suppressed with the link checks
+        # when the set is partial, for the same reason: the record may live in
+        # the ledger that could not be read.
+        for source, data in documents:
+            backlog = data.get("backlog") if isinstance(data, dict) else None
+            if not isinstance(backlog, list):
+                continue
+            for index, entry in enumerate(backlog):
+                if not isinstance(entry, dict):
+                    continue
+                identifier = entry.get("id")
+                if not isinstance(identifier, str) or not RECORD_ID.fullmatch(identifier):
+                    continue  # validate_backlog_entry already reported the shape
+                if identifier not in declared:
+                    findings.append(
+                        f"{source}: backlog[{index}] id {identifier!r} references "
+                        "a record that exists in no verified ledger"
+                    )
+
+    if digests:
+        for source, data in documents:
+            projects = data.get("known_projects") if isinstance(data, dict) else None
+            if not isinstance(projects, list):
+                continue
+            for index, entry in enumerate(projects):
+                if not isinstance(entry, dict):
+                    continue
+                ledger_path = entry.get("ledger_path")
+                recorded = entry.get("last_digest")
+                if not isinstance(ledger_path, str) or not isinstance(recorded, str):
+                    continue
+                # A path that was not passed on the command line is not
+                # comparable. Silence here means "not checked", never "correct".
+                actual = digests.get(_path_key(ledger_path))
+                if actual is None or actual == recorded:
+                    continue
+                findings.append(
+                    f"{source}: known_projects[{index}] last_digest {recorded!r} "
+                    f"does not match {ledger_path!r}, which hashes to {actual!r}"
+                )
+
     if len(authorities) > 1:
         findings.append(
             f"More than one ledger claims ID authority: {sorted(authorities)}"
@@ -573,18 +685,36 @@ def verify(paths: list[Path]) -> int:
     findings: list[str] = []
     documents: list[tuple[str, dict]] = []
     errors: list[str] = []
+    digests: dict[str, str] = {}
 
     for path in paths:
         source = str(path)
         try:
+            # load_json and file_digest each open the file independently, so
+            # in principle the digest could describe different bytes than
+            # the parsed document if the file changes between the two reads.
+            # Accepted: a local validator run by the ledger's owner over
+            # their own files has no privilege boundary to defend, and the
+            # realistic outcome of that microsecond window is a spurious
+            # finding that a re-run clears.
             data = load_json(path)
+            digest = file_digest(path)
         except LedgerError as exc:
             errors.append(str(exc))
             continue
+        except OSError as exc:
+            errors.append(f"Unreadable ledger: {path}: {exc}")
+            continue
+        # Register both the path as given and its resolved form, so a ledger
+        # that stores an absolute path still matches a relative invocation.
+        digests[_path_key(source)] = digest
+        digests[_path_key(str(path.resolve()))] = digest
         findings.extend(validate_ledger(data, source=source))
         documents.append((source, data))
 
-    findings.extend(validate_collection(documents, complete=not errors))
+    findings.extend(
+        validate_collection(documents, complete=not errors, digests=digests)
+    )
     for line in (*findings, *errors):
         print(line, file=sys.stderr)
 

@@ -58,8 +58,9 @@ top-level fields, and flags any other field as unknown:
 | `baselines` | array; each element must be an object, but no field-level schema yet |
 | `backlog` | array (see Backlog) |
 
-`sequences` holds the next free number for each identifier prefix, integer at least 0, with no
-keys beyond `MAT`, `PROP`, `RUN`, `ADR`, `BASE`.
+`sequences` holds a floor for each identifier prefix, not the next free number outright — integer
+at least 0, with no keys beyond `MAT`, `PROP`, `RUN`, `ADR`, `BASE`. See Identifiers for the exact
+rule.
 
 ## Scope routing
 
@@ -86,11 +87,18 @@ next successful global write, rewriting every reference. `verify` checks only th
 `-P` id without `pending_id_reconciliation: true` is a finding. It does not check that
 references were actually rewritten.
 
-`verify` also checks that a ledger's `sequences` value for a prefix is high enough to cover the
-highest number already used by that prefix — never that it matches exactly. A sequence value
-higher than necessary is not flagged. This applies to every ledger, including a project ledger
-that never allocates identifiers itself: its `sequences` must still be kept at or above the
-highest number used by its own records.
+`verify` checks that a ledger's `sequences` value for a prefix is at least one past the highest
+number that ledger's own records already use. It is a floor, not an equality: a value above it
+passes too, so a padded `sequences` is never flagged. Keeping it at exactly the next free number is
+a house convention, stricter than what is enforced.
+
+The ledger that declares `id_authority: true` is additionally checked against every record in the
+verified set, not just its own — it is the ledger that issued those identifiers, and it usually
+holds no records itself. This includes provisional (`-P`) identifiers: one minted while the
+authority was unreachable still counts toward this check, so the authority can be asked to cover a
+number it never itself issued and that reconciliation will later discard. This is consistent with
+`-P` ids being treated the same as any other identifier everywhere else in this check, and the
+remedy is harmless — the rule is a floor, so bumping the counter costs nothing.
 
 ## Records
 
@@ -143,6 +151,12 @@ one of the two must be non-empty and non-falsy.
 `OBSOLETE`, `NOT APPLICABLE`, and `ALREADY IMPLEMENTED` are terminal. They are recorded as
 records and never enter the backlog; using one of them on a backlog entry is itself a finding.
 
+A backlog entry's `id` is a **back-reference** to the record whose evidence produced the finding,
+not an identifier of the entry itself. It is deliberately not unique: one material routinely
+produces several backlog entries, and two entries sharing an id is correct. `verify` checks that the
+id resolves to a record declared somewhere in the verified set, and suppresses that check, like the
+link checks, when any ledger in the set could not be read.
+
 ## Runs
 
 A RUN record additionally requires `proposal`, `authorization`, `result`, `targets`, `backup`,
@@ -169,6 +183,12 @@ required.
 
 Never record a digest that was not computed. Never mark a backup verified without reading it.
 
+`self_reported` must name `targets`. `verify` checks every target's shape and can never check that
+the array covers what the run actually changed — nothing in a ledger states how many files a run was
+supposed to touch. A RUN record naming three targets for a fourteen-file change validates clean.
+Listing `targets` in `self_reported` does not make coverage verifiable; it stops the record from
+being silent about the one thing it cannot prove.
+
 ## Known projects
 
 Each entry in the global ledger's `known_projects` requires `project_root`, `ledger_path`,
@@ -182,6 +202,22 @@ Each entry in the global ledger's `known_projects` requires `project_root`, `led
 | `status` | `OK`, `UNREACHABLE`, `CHANGED_EXTERNALLY` |
 
 Mark a project `UNREACHABLE` rather than removing its entry.
+
+`last_digest` is the sha256 of the referenced ledger's **final on-disk bytes**, taken after every
+other edit to that ledger is complete. Hash the file, not the JSON text in an editor: a trailing
+newline or a line-ending difference changes the digest of an otherwise identical document.
+
+The digest is recompared, and a mismatch is a finding, when a normalized `ledger_path` textually
+agrees with a normalized path passed to that `verify` invocation. The comparison is purely
+textual — case-insensitive, separator-normalized, never resolved against the filesystem — so it is
+not "the same file was passed" that triggers it but "the same string, once normalized". A
+`ledger_path` stored as a relative path is not compared against an invocation that names the same
+file with an absolute path, or with a relative path built from a different starting directory, or
+in a different case or separator style on a case-sensitive filesystem: those are different strings
+after normalization, so the comparison is silently skipped even though the referenced ledger was in
+fact passed. When there is no textual match, nothing is checked — silence there means
+**not comparable**, never "correct". `verify` deliberately does not open a path read out of
+ledger content.
 
 ## Language
 
@@ -198,14 +234,19 @@ in any operating state.
 python assets/scripts/dashboard.py verify <path-to-ledger.json> [more...]
 ```
 
-Pass every reachable ledger in one invocation so cross-ledger checks run: duplicate
-identifiers (within or across ledgers), sequence consistency, unreconciled provisional
-identifiers, dangling links, and more than one ledger claiming ID authority.
+Pass every reachable ledger in one invocation so cross-ledger checks run: known-project digest
+comparison against the referenced ledger's on-disk bytes (the check that depends most on every
+ledger being present, since a ledger left out of the invocation cannot be compared at all),
+duplicate identifiers (within or across ledgers), sequence consistency, unreconciled provisional
+identifiers, dangling links, backlog `id` back-references, and more than one ledger claiming ID
+authority.
 
 `verify` prints every finding it can compute plus a read error for each ledger it could not
-parse. If any ledger in the set could not be read, dangling-link checks are skipped for the
-whole set — a partial set must not produce a misleading dangling-link finding — but every
-other check still runs against the ledgers that were readable.
+parse. If any ledger in the set could not be read, dangling-link checks and backlog
+back-reference checks are both skipped for the whole set — a partial set must not produce a
+misleading finding for either, since the record a link or a backlog entry points to could live in
+the ledger that could not be read — but every other check still runs against the ledgers that were
+readable.
 
 Exit codes: `0` clean, `1` findings with every ledger readable, `2` at least one ledger could
 not be read (missing, invalid JSON, or not a JSON object).
