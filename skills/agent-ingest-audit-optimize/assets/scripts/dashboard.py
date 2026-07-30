@@ -38,6 +38,59 @@ LEDGER_SCOPES = {"global", "project"}
 ARRAY_FIELDS = ("known_projects", "records", "baselines", "backlog")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+RECORD_ID = re.compile(r"^(MAT|PROP|RUN|ADR|BASE)-\d{4}-\d{3}(-P)?$")
+RECORD_TYPES = {"MATERIAL", "PROPOSAL", "RUN", "ADR", "BASELINE"}
+RECORD_STATUSES = {
+    "ANALYZED",
+    "PROPOSED",
+    "DECIDED",
+    "IMPLEMENTED",
+    "VALIDATED",
+    "VALIDATED WITH CAVEATS",
+    "NOT IMPLEMENTED",
+    "PENDING",
+    "ROLLBACK",
+    "SUPERSEDED",
+}
+CLASSIFICATIONS = {
+    "ADOPT GLOBALLY",
+    "ADOPT AS A DEFAULT FOR NEW PROJECTS",
+    "MIGRATE EXISTING PROJECTS",
+    "ADOPT LOCALLY",
+    "TEST IN ISOLATION",
+    "ADAPT",
+    "MONITOR",
+    "REJECT",
+    "OBSOLETE",
+    "ALREADY IMPLEMENTED",
+    "NOT APPLICABLE",
+    "NEEDS MORE EVIDENCE",
+    "RISK EXCEEDS BENEFIT",
+}
+RECORD_SCOPES = {
+    "session",
+    "project",
+    "workspace",
+    "user-global",
+    "organization",
+    "fleet",
+}
+LINK_FIELDS = ("materials", "runs", "adrs")
+REQUIRED_RECORD_FIELDS = {
+    "id",
+    "type",
+    "title",
+    "status",
+    "classification",
+    "scope",
+    "created",
+    "updated",
+    "file",
+    "links",
+    "evidence",
+}
+EVIDENCE_FIELDS = {"source", "kind", "verified_on", "time_sensitive"}
+
 
 class LedgerError(RuntimeError):
     """Raised when a ledger cannot be read at all."""
@@ -110,11 +163,89 @@ def validate_ledger(data: dict, *, source: str) -> list[str]:
     for field in ARRAY_FIELDS:
         if not isinstance(data[field], list):
             findings.append(f"{source}: {field} must be an array")
+        elif field == "records":
+            for index, record in enumerate(data[field]):
+                findings.extend(validate_record(record, index, source=source))
         else:
             for index, element in enumerate(data[field]):
                 if not isinstance(element, dict):
                     findings.append(
                         f"{source}: {field}[{index}] must be an object"
+                    )
+
+    return findings
+
+
+def validate_record(record: dict, index: int, *, source: str) -> list[str]:
+    label = f"{source}: records[{index}]"
+    findings: list[str] = []
+    if not isinstance(record, dict):
+        return [f"{label} must be an object"]
+
+    missing = REQUIRED_RECORD_FIELDS - set(record)
+    if missing:
+        return [f"{label} missing fields: {sorted(missing)}"]
+
+    identifier = record["id"]
+    if not isinstance(identifier, str) or not RECORD_ID.fullmatch(identifier):
+        findings.append(f"{label} has an invalid id: {identifier!r}")
+    else:
+        label = f"{source}: {identifier}"
+
+    if record["type"] not in RECORD_TYPES:
+        findings.append(f"{label} has an invalid type: {record['type']!r}")
+    if record["status"] not in RECORD_STATUSES:
+        findings.append(f"{label} has an invalid status: {record['status']!r}")
+    if record["classification"] not in CLASSIFICATIONS:
+        findings.append(
+            f"{label} has an invalid classification: {record['classification']!r}"
+        )
+    if record["scope"] not in RECORD_SCOPES:
+        findings.append(f"{label} has an invalid scope: {record['scope']!r}")
+    for field in ("title", "file"):
+        if not isinstance(record[field], str) or not record[field].strip():
+            findings.append(f"{label} {field} must be a non-empty string")
+    for field in ("created", "updated"):
+        value = record[field]
+        if type(value) is not str or not DATE.fullmatch(value):
+            findings.append(f"{label} {field} must match YYYY-MM-DD")
+
+    links = record["links"]
+    if not isinstance(links, dict):
+        findings.append(f"{label} links must be an object")
+    else:
+        for field in LINK_FIELDS:
+            targets = links.get(field, [])
+            if not isinstance(targets, list):
+                findings.append(f"{label} links.{field} must be an array")
+                continue
+            for target in targets:
+                if not isinstance(target, str) or not RECORD_ID.fullmatch(target):
+                    findings.append(f"{label} links.{field} has an invalid id: {target!r}")
+
+    evidence = record["evidence"]
+    if not isinstance(evidence, list):
+        findings.append(f"{label} evidence must be an array")
+    else:
+        for position, item in enumerate(evidence):
+            if not isinstance(item, dict):
+                findings.append(f"{label} evidence[{position}] must be an object")
+                continue
+            absent = EVIDENCE_FIELDS - set(item)
+            if absent:
+                findings.append(
+                    f"{label} evidence[{position}] missing fields: {sorted(absent)}"
+                )
+                continue
+            if type(item["time_sensitive"]) is not bool:
+                findings.append(
+                    f"{label} evidence[{position}] time_sensitive must be a boolean"
+                )
+            elif item["time_sensitive"]:
+                expires_on = item.get("expires_on")
+                if not isinstance(expires_on, str) or not expires_on.strip():
+                    findings.append(
+                        f"{label} evidence[{position}] is time_sensitive and requires expires_on"
                     )
 
     return findings

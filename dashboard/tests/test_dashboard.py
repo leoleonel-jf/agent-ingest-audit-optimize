@@ -255,8 +255,12 @@ class LedgerDocumentTests(unittest.TestCase):
         )
 
     def test_valid_empty_dicts_in_arrays_have_no_findings(self) -> None:
+        # `records` now carries its own schema (validate_record), so an empty
+        # dict is no longer a valid element there — it is exercised via
+        # RecordEntryTests / test_records_are_validated_through_the_ledger
+        # instead. known_projects/baselines/backlog have no per-item schema
+        # yet (later tasks own those), so empty dicts remain valid for them.
         data = minimal_ledger()
-        data["records"] = [{}, {}]
         data["known_projects"] = [{}]
         data["baselines"] = [{}]
         data["backlog"] = [{}, {}, {}]
@@ -326,6 +330,256 @@ class LedgerDocumentTests(unittest.TestCase):
     def test_verify_returns_two_for_a_directory_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             self.assertEqual(dashboard.verify([Path(temp)]), 2)
+
+
+def minimal_record() -> dict:
+    return {
+        "id": "PROP-2026-000",
+        "type": "PROPOSAL",
+        "title": "Adopt a stricter permission rule",
+        "status": "PROPOSED",
+        "classification": "ADOPT GLOBALLY",
+        "scope": "user-global",
+        "created": "2026-07-29",
+        "updated": "2026-07-29",
+        "file": "records/PROP-2026-000.md",
+        "links": {"materials": [], "runs": [], "adrs": []},
+        "evidence": [
+            {
+                "source": "https://example.invalid/docs",
+                "kind": "official-docs",
+                "verified_on": "2026-07-20",
+                "time_sensitive": False,
+            }
+        ],
+    }
+
+
+class RecordEntryTests(unittest.TestCase):
+    def check(self, record: dict) -> list[str]:
+        return dashboard.validate_record(record, 0, source="test")
+
+    def test_minimal_record_has_no_findings(self) -> None:
+        self.assertEqual(self.check(minimal_record()), [])
+
+    def test_provisional_id_is_accepted(self) -> None:
+        record = minimal_record()
+        record["id"] = "PROP-2026-000-P"
+        self.assertEqual(self.check(record), [])
+
+    def test_malformed_id_is_reported(self) -> None:
+        record = minimal_record()
+        record["id"] = "PROP-26-0"
+        self.assertTrue(any("id" in finding for finding in self.check(record)))
+
+    def test_unknown_type_is_reported(self) -> None:
+        record = minimal_record()
+        record["type"] = "NOTE"
+        self.assertTrue(
+            any(
+                "PROP-2026-000 has an invalid type" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_unknown_status_is_reported(self) -> None:
+        record = minimal_record()
+        record["status"] = "DONE"
+        self.assertTrue(
+            any(
+                "PROP-2026-000 has an invalid status" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_unknown_classification_is_reported(self) -> None:
+        record = minimal_record()
+        record["classification"] = "ADOPT EVERYWHERE"
+        self.assertTrue(
+            any("classification" in finding for finding in self.check(record))
+        )
+
+    def test_unknown_scope_is_reported(self) -> None:
+        record = minimal_record()
+        record["scope"] = "galaxy"
+        self.assertTrue(
+            any(
+                "PROP-2026-000 has an invalid scope" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_empty_title_is_reported(self) -> None:
+        record = minimal_record()
+        record["title"] = ""
+        self.assertTrue(
+            any(
+                "PROP-2026-000 title must be a non-empty string" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_empty_file_is_reported(self) -> None:
+        record = minimal_record()
+        record["file"] = "   "
+        self.assertTrue(
+            any(
+                "PROP-2026-000 file must be a non-empty string" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_malformed_created_date_is_reported(self) -> None:
+        record = minimal_record()
+        record["created"] = "07/29/2026"
+        self.assertTrue(any("created" in finding for finding in self.check(record)))
+
+    def test_malformed_updated_date_is_reported(self) -> None:
+        record = minimal_record()
+        record["updated"] = "not-a-date"
+        self.assertTrue(any("updated" in finding for finding in self.check(record)))
+
+    def test_non_object_links_is_reported(self) -> None:
+        record = minimal_record()
+        record["links"] = ["not-an-object"]
+        self.assertTrue(
+            any(
+                "PROP-2026-000 links must be an object" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_link_target_must_be_a_record_id(self) -> None:
+        record = minimal_record()
+        record["links"]["materials"] = ["not-an-id"]
+        self.assertTrue(any("links.materials" in finding for finding in self.check(record)))
+
+    def test_links_field_must_be_an_array(self) -> None:
+        record = minimal_record()
+        record["links"]["runs"] = "PROP-2026-000"
+        self.assertTrue(
+            any(
+                "links.runs must be an array" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_non_array_evidence_is_reported(self) -> None:
+        record = minimal_record()
+        record["evidence"] = {"source": "x"}
+        self.assertTrue(
+            any(
+                "PROP-2026-000 evidence must be an array" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_non_object_evidence_item_is_reported(self) -> None:
+        record = minimal_record()
+        record["evidence"] = ["not-an-object"]
+        self.assertTrue(
+            any("evidence[0] must be an object" in finding for finding in self.check(record))
+        )
+
+    def test_evidence_item_missing_fields_is_reported(self) -> None:
+        record = minimal_record()
+        del record["evidence"][0]["kind"]
+        self.assertTrue(
+            any("evidence[0] missing fields" in finding for finding in self.check(record))
+        )
+
+    def test_non_boolean_time_sensitive_is_reported(self) -> None:
+        record = minimal_record()
+        record["evidence"][0]["time_sensitive"] = "yes"
+        self.assertTrue(
+            any(
+                "evidence[0] time_sensitive must be a boolean" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_time_sensitive_evidence_requires_expiry(self) -> None:
+        record = minimal_record()
+        record["evidence"][0]["time_sensitive"] = True
+        self.assertTrue(any("expires_on" in finding for finding in self.check(record)))
+
+    def test_time_sensitive_evidence_with_expiry_is_accepted(self) -> None:
+        record = minimal_record()
+        record["evidence"][0]["time_sensitive"] = True
+        record["evidence"][0]["expires_on"] = "2026-10-20"
+        self.assertEqual(self.check(record), [])
+
+    def test_non_string_expires_on_is_reported(self) -> None:
+        record = minimal_record()
+        record["evidence"][0]["time_sensitive"] = True
+        record["evidence"][0]["expires_on"] = 20261020
+        self.assertTrue(any("expires_on" in finding for finding in self.check(record)))
+
+    def test_whitespace_only_expires_on_is_reported(self) -> None:
+        record = minimal_record()
+        record["evidence"][0]["time_sensitive"] = True
+        record["evidence"][0]["expires_on"] = "   "
+        self.assertTrue(any("expires_on" in finding for finding in self.check(record)))
+
+    def test_missing_record_field_is_reported(self) -> None:
+        record = minimal_record()
+        del record["title"]
+        self.assertTrue(
+            any(
+                "missing fields" in finding and "'title'" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_non_dict_record_returns_defensive_finding(self) -> None:
+        findings = dashboard.validate_record("not-a-record", 0, source="test")
+        self.assertEqual(findings, ["test: records[0] must be an object"])
+
+    def test_records_are_validated_through_the_ledger(self) -> None:
+        data = minimal_ledger()
+        broken = minimal_record()
+        broken["type"] = "NOTE"
+        data["records"] = [broken]
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("type" in finding for finding in findings))
+
+
+class RecordSchemaAlignmentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        self.record_schema = schema["properties"]["records"]["items"]
+
+    def test_schema_record_required_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.record_schema["required"]), dashboard.REQUIRED_RECORD_FIELDS
+        )
+
+    def test_schema_record_type_enum_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.record_schema["properties"]["type"]["enum"]), dashboard.RECORD_TYPES
+        )
+
+    def test_schema_record_status_enum_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.record_schema["properties"]["status"]["enum"]),
+            dashboard.RECORD_STATUSES,
+        )
+
+    def test_schema_record_classification_enum_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.record_schema["properties"]["classification"]["enum"]),
+            dashboard.CLASSIFICATIONS,
+        )
+
+    def test_schema_record_scope_enum_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.record_schema["properties"]["scope"]["enum"]),
+            dashboard.RECORD_SCOPES,
+        )
+
+    def test_schema_evidence_required_matches_runtime_validator(self) -> None:
+        evidence_schema = self.record_schema["properties"]["evidence"]["items"]
+        self.assertEqual(set(evidence_schema["required"]), dashboard.EVIDENCE_FIELDS)
 
 
 if __name__ == "__main__":

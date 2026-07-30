@@ -43,7 +43,110 @@
       }
     },
     "known_projects": { "type": "array", "items": { "type": "object" } },
-    "records": { "type": "array", "items": { "type": "object" } },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "title",
+          "status",
+          "classification",
+          "scope",
+          "created",
+          "updated",
+          "file",
+          "links",
+          "evidence"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^(MAT|PROP|RUN|ADR|BASE)-\\d{4}-\\d{3}(-P)?$" },
+          "type": { "enum": ["MATERIAL", "PROPOSAL", "RUN", "ADR", "BASELINE"] },
+          "title": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "status": {
+            "enum": [
+              "ANALYZED",
+              "PROPOSED",
+              "DECIDED",
+              "IMPLEMENTED",
+              "VALIDATED",
+              "VALIDATED WITH CAVEATS",
+              "NOT IMPLEMENTED",
+              "PENDING",
+              "ROLLBACK",
+              "SUPERSEDED"
+            ]
+          },
+          "classification": {
+            "enum": [
+              "ADOPT GLOBALLY",
+              "ADOPT AS A DEFAULT FOR NEW PROJECTS",
+              "MIGRATE EXISTING PROJECTS",
+              "ADOPT LOCALLY",
+              "TEST IN ISOLATION",
+              "ADAPT",
+              "MONITOR",
+              "REJECT",
+              "OBSOLETE",
+              "ALREADY IMPLEMENTED",
+              "NOT APPLICABLE",
+              "NEEDS MORE EVIDENCE",
+              "RISK EXCEEDS BENEFIT"
+            ]
+          },
+          "scope": {
+            "enum": [
+              "session",
+              "project",
+              "workspace",
+              "user-global",
+              "organization",
+              "fleet"
+            ]
+          },
+          "created": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "updated": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "file": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "links": {
+            "type": "object",
+            "properties": {
+              "materials": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^(MAT|PROP|RUN|ADR|BASE)-\\d{4}-\\d{3}(-P)?$" }
+              },
+              "runs": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^(MAT|PROP|RUN|ADR|BASE)-\\d{4}-\\d{3}(-P)?$" }
+              },
+              "adrs": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^(MAT|PROP|RUN|ADR|BASE)-\\d{4}-\\d{3}(-P)?$" }
+              }
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["source", "kind", "verified_on", "time_sensitive"],
+              "properties": {
+                "time_sensitive": { "type": "boolean" }
+              },
+              "if": {
+                "properties": { "time_sensitive": { "const": true } }
+              },
+              "then": {
+                "required": ["expires_on"],
+                "properties": {
+                  "expires_on": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "baselines": { "type": "array", "items": { "type": "object" } },
     "backlog": { "type": "array", "items": { "type": "object" } }
   }
