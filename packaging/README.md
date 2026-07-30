@@ -40,7 +40,7 @@ Verification checks:
 Platform-native validation can also be run from the repository root:
 
 ```text
-python C:\Users\leole\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .
+python ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py .
 claude plugin validate --strict .
 ```
 
