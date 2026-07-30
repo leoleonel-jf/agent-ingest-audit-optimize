@@ -370,7 +370,7 @@ class RecordEntryTests(unittest.TestCase):
     def test_malformed_id_is_reported(self) -> None:
         record = minimal_record()
         record["id"] = "PROP-26-0"
-        self.assertTrue(any("has an invalid id" in finding for finding in self.check(record)))
+        self.assertTrue(any("records[0] has an invalid id:" in finding for finding in self.check(record)))
 
     def test_unknown_type_is_reported(self) -> None:
         record = minimal_record()
