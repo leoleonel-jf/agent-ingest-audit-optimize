@@ -139,7 +139,7 @@
               "then": {
                 "required": ["expires_on"],
                 "properties": {
-                  "expires_on": { "type": "string", "minLength": 1 }
+                  "expires_on": { "type": "string", "minLength": 1, "pattern": "\\S" }
                 }
               }
             }

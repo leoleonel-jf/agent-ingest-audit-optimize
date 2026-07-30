@@ -115,13 +115,13 @@ class LedgerDocumentTests(unittest.TestCase):
         data = minimal_ledger()
         data["created"] = "not-a-date"
         findings = dashboard.validate_ledger(data, source="test")
-        self.assertTrue(any("created" in finding for finding in findings))
+        self.assertTrue(any("created must match YYYY-MM-DD" in finding for finding in findings))
 
     def test_malformed_updated_date_is_reported(self) -> None:
         data = minimal_ledger()
         data["updated"] = "07/29/2026"
         findings = dashboard.validate_ledger(data, source="test")
-        self.assertTrue(any("updated" in finding for finding in findings))
+        self.assertTrue(any("updated must match YYYY-MM-DD" in finding for finding in findings))
 
     def test_unexpected_key_in_sequences_is_reported(self) -> None:
         data = minimal_ledger()
@@ -370,7 +370,7 @@ class RecordEntryTests(unittest.TestCase):
     def test_malformed_id_is_reported(self) -> None:
         record = minimal_record()
         record["id"] = "PROP-26-0"
-        self.assertTrue(any("id" in finding for finding in self.check(record)))
+        self.assertTrue(any("has an invalid id" in finding for finding in self.check(record)))
 
     def test_unknown_type_is_reported(self) -> None:
         record = minimal_record()
@@ -396,7 +396,7 @@ class RecordEntryTests(unittest.TestCase):
         record = minimal_record()
         record["classification"] = "ADOPT EVERYWHERE"
         self.assertTrue(
-            any("classification" in finding for finding in self.check(record))
+            any("has an invalid classification" in finding for finding in self.check(record))
         )
 
     def test_unknown_scope_is_reported(self) -> None:
@@ -432,12 +432,12 @@ class RecordEntryTests(unittest.TestCase):
     def test_malformed_created_date_is_reported(self) -> None:
         record = minimal_record()
         record["created"] = "07/29/2026"
-        self.assertTrue(any("created" in finding for finding in self.check(record)))
+        self.assertTrue(any("created must match YYYY-MM-DD" in finding for finding in self.check(record)))
 
     def test_malformed_updated_date_is_reported(self) -> None:
         record = minimal_record()
         record["updated"] = "not-a-date"
-        self.assertTrue(any("updated" in finding for finding in self.check(record)))
+        self.assertTrue(any("updated must match YYYY-MM-DD" in finding for finding in self.check(record)))
 
     def test_non_object_links_is_reported(self) -> None:
         record = minimal_record()
@@ -463,6 +463,36 @@ class RecordEntryTests(unittest.TestCase):
                 for finding in self.check(record)
             )
         )
+
+    def test_materials_link_must_be_an_array(self) -> None:
+        record = minimal_record()
+        record["links"]["materials"] = "PROP-2026-000"
+        self.assertTrue(
+            any(
+                "links.materials must be an array" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_runs_link_target_must_be_a_record_id(self) -> None:
+        record = minimal_record()
+        record["links"]["runs"] = ["not-an-id"]
+        self.assertTrue(any("links.runs" in finding for finding in self.check(record)))
+
+    def test_adrs_link_must_be_an_array(self) -> None:
+        record = minimal_record()
+        record["links"]["adrs"] = "ADR-2026-000"
+        self.assertTrue(
+            any(
+                "links.adrs must be an array" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_adrs_link_target_must_be_a_record_id(self) -> None:
+        record = minimal_record()
+        record["links"]["adrs"] = ["not-an-id"]
+        self.assertTrue(any("links.adrs" in finding for finding in self.check(record)))
 
     def test_non_array_evidence_is_reported(self) -> None:
         record = minimal_record()
