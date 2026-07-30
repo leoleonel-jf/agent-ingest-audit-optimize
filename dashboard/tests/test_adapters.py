@@ -1137,6 +1137,33 @@ class RealBundledSelectionTests(unittest.TestCase):
             client = json.loads(path.read_text(encoding="utf-8"))["client"]
             self.assertIn(repr(client), message)
 
+    def test_no_probe_walks_a_whole_anchor_recursively(self) -> None:
+        """A ** may not sit directly under an anchor.
+
+        Two things break at once when it does. The walk is unbounded -- measured
+        at ~37 microseconds per directory entry, so a probe of $PROJECT/**
+        against a JavaScript repository's node_modules costs seconds, and the
+        Codex adapter shipped two of them. And the result is wrong: Codex reads
+        the AGENTS.md chain from the repository root down to the working
+        directory, so an AGENTS.md sitting in an unrelated subdirectory is a
+        file it would never load, recorded as if it were live configuration --
+        the same defect as probing a file the client does not read at all.
+
+        A recursive wildcard under a fixed directory the client owns, such as
+        $PROJECT/.claude/rules/**/*.md, is bounded by that directory and stays.
+        """
+        for path in sorted(ADAPTERS_DIR.glob("*.json")):
+            data = json.loads(path.read_text(encoding="utf-8"))
+            for index, probe in enumerate(data["probes"]):
+                pattern = probe.get("glob") or probe.get("path") or ""
+                segments = pattern.split("/")
+                with self.subTest(adapter=path.name, probe=index):
+                    self.assertNotEqual(
+                        segments[1:2],
+                        ["**"],
+                        f"{path.name} probes[{index}] walks a whole anchor: {pattern!r}",
+                    )
+
     def test_detection_against_an_empty_machine_selects_generic(self) -> None:
         """No anchor candidate resolves under a tree with nothing in it."""
         with tempfile.TemporaryDirectory() as tmp:
