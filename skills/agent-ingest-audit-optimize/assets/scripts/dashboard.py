@@ -185,7 +185,51 @@ class LedgerError(RuntimeError):
 
 
 class PathSafetyError(RuntimeError):
-    """Raised when a path may not be resolved under its anchor."""
+    """Raised when a path may not be resolved under its anchor.
+
+    Every refusal carries a stable `reason` key in addition to its ordinary
+    human-readable message, so a caller -- and this module's own alignment
+    test against `references/LEDGER.md` -- can enumerate every refusal the
+    path-safety layer can produce without parsing message text.
+    `PATH_SAFETY_REASONS` is the definitive, exhaustive set of keys this
+    exception can carry.
+    """
+
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+# The exhaustive set of reason keys any PathSafetyError raised anywhere in
+# this module can carry. `references/LEDGER.md` must document exactly this
+# set -- no more, no fewer. `PathSafetyReasonAlignmentTests` in
+# dashboard/tests/test_dashboard.py checks both directions: every key here
+# must be documented there, and every key documented there must be one the
+# code can actually raise -- so a tenth refusal added to the code without
+# being documented fails the test, and so does a documented reason the code
+# can no longer raise.
+PATH_SAFETY_REASONS = frozenset(
+    {
+        "invalid_anchor_name",
+        "glob_not_string",
+        "glob_nul_byte",
+        "glob_dotdot_segment",
+        "glob_absolute",
+        "resolve_failed",
+        "path_empty",
+        "path_embedded_nul",
+        "path_dotdot_segment",
+        "path_absolute",
+        "path_malformed_anchor_reference",
+        "path_unknown_anchor",
+        "path_reserved_device_name",
+        "path_alternate_data_stream",
+        "path_link_crosses_anchor",
+        "path_resolves_outside_anchor",
+        "path_inspect_failed",
+        "path_hardlinked",
+    }
+)
 
 
 def load_json(path: Path) -> dict:
@@ -242,7 +286,10 @@ def _validate_anchor_names(roots: dict[str, Path]) -> None:
     """
     for name in roots:
         if not ANCHOR_NAME.fullmatch(name):
-            raise PathSafetyError(f"anchor name is not a valid identifier: {name!r}")
+            raise PathSafetyError(
+                f"anchor name is not a valid identifier: {name!r}",
+                reason="invalid_anchor_name",
+            )
 
 
 def anchor_path(path: Path, roots: dict[str, Path]) -> tuple[str, bool]:
@@ -270,9 +317,17 @@ def anchor_path(path: Path, roots: dict[str, Path]) -> tuple[str, bool]:
     that sorts first by anchor name -- not whichever happened to be inserted
     into `roots` first. `dict` iteration order is insertion order, and a tie
     broken by "first seen" is not a property of the anchors at all.
+
+    I2: `path.resolve()` is routed through `_resolve_or_raise` rather than
+    called bare, exactly as `resolve_anchored` already does for the identical
+    operation. Some inputs make the filesystem itself raise here too -- a
+    trailing-dot/space segment following an existing file component raises
+    `NotADirectoryError` on Windows -- and a raw `OSError` escaping this
+    function would break the same contract `resolve_anchored` protects:
+    `PathSafetyError` is the only thing a caller should have to catch.
     """
     _validate_anchor_names(roots)
-    absolute = path.resolve()
+    absolute = _resolve_or_raise(path, str(path))
     best: tuple[int, str, Path] | None = None
     for name, root in roots.items():
         try:
@@ -302,9 +357,13 @@ def check_glob(pattern: str) -> None:
     directory to expand it against.
     """
     if not isinstance(pattern, str) or not pattern.strip():
-        raise PathSafetyError(f"glob must be a non-empty string: {pattern!r}")
+        raise PathSafetyError(
+            f"glob must be a non-empty string: {pattern!r}", reason="glob_not_string"
+        )
     if "\0" in pattern:
-        raise PathSafetyError(f"glob contains a NUL byte: {pattern!r}")
+        raise PathSafetyError(
+            f"glob contains a NUL byte: {pattern!r}", reason="glob_nul_byte"
+        )
     normalized = pattern.replace("\\", "/")
     for part in normalized.split("/"):
         # A segment made up entirely of dots and/or spaces -- ".." itself,
@@ -316,9 +375,12 @@ def check_glob(pattern: str) -> None:
         # "" and "." are excluded: an empty segment (from a repeated "/")
         # and a literal single-dot segment are ordinary no-ops, not escapes.
         if part not in ("", ".") and part.rstrip(" .") == "":
-            raise PathSafetyError(f"glob contains a '..' segment: {pattern!r}")
+            raise PathSafetyError(
+                f"glob contains a '..' segment: {pattern!r}",
+                reason="glob_dotdot_segment",
+            )
     if normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
-        raise PathSafetyError(f"glob is absolute: {pattern!r}")
+        raise PathSafetyError(f"glob is absolute: {pattern!r}", reason="glob_absolute")
 
 
 def _resolve_or_raise(path: Path, stored: str) -> Path:
@@ -330,11 +392,17 @@ def _resolve_or_raise(path: Path, stored: str) -> Path:
     carries the offending path and the rule that refused it, and callers
     (`scan`, eventually) report it as a finding; a raw `OSError` escaping here
     would instead abort a caller mid-walk on a ledger-supplied string.
+
+    Shared by `resolve_anchored` and `anchor_path` (I2): both resolve a path
+    at the point they touch the filesystem, and both must give the identical
+    guarantee that only `PathSafetyError` ever escapes.
     """
     try:
         return path.resolve()
     except OSError as exc:
-        raise PathSafetyError(f"path could not be resolved: {stored!r}: {exc}") from exc
+        raise PathSafetyError(
+            f"path could not be resolved: {stored!r}: {exc}", reason="resolve_failed"
+        ) from exc
 
 
 def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
@@ -350,28 +418,51 @@ def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
     immediately acting on it -- must re-check per use rather than trust a
     single resolution done once per root: nothing here can see a link
     created after this call returns.
+
+    I1: a stored path carrying an embedded NUL byte is refused here, before
+    anything touches the filesystem -- mirroring `check_glob`'s identical
+    guard on a probe pattern. Without it, a NUL survives every textual check
+    below (it is not a `..` segment, not absolute, not an unknown anchor) and
+    reaches `_refuse_if_hardlinked`'s `path.stat()`, which raises a bare
+    `ValueError` -- `stat: embedded null character in path` -- that is not an
+    `OSError` and was not caught there.
     """
     if not isinstance(stored, str) or not stored.strip():
-        raise PathSafetyError(f"path must be a non-empty string: {stored!r}")
+        raise PathSafetyError(
+            f"path must be a non-empty string: {stored!r}", reason="path_empty"
+        )
+    if "\0" in stored:
+        raise PathSafetyError(
+            f"path contains a NUL byte: {stored!r}", reason="path_embedded_nul"
+        )
     _validate_anchor_names(roots)
     normalized = stored.replace("\\", "/")
     if any(part == ".." for part in normalized.split("/")):
-        raise PathSafetyError(f"path contains a '..' segment: {stored!r}")
+        raise PathSafetyError(
+            f"path contains a '..' segment: {stored!r}", reason="path_dotdot_segment"
+        )
     # Rule 3 gets its own message, distinct from a malformed-or-missing
     # anchor reference below: an absolute path is a different problem from a
     # string that merely fails to parse as $NAME/..., and a caller cannot
     # tell them apart from one shared "not anchored" message.
     if normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
         raise PathSafetyError(
-            f"path is absolute; an anchor reference was required: {stored!r}"
+            f"path is absolute; an anchor reference was required: {stored!r}",
+            reason="path_absolute",
         )
     match = ANCHOR_REFERENCE.match(normalized)
     if match is None:
-        raise PathSafetyError(f"path does not match a valid anchor reference: {stored!r}")
+        raise PathSafetyError(
+            f"path does not match a valid anchor reference: {stored!r}",
+            reason="path_malformed_anchor_reference",
+        )
     name, tail = match.group(1), match.group(2) or ""
     root = roots.get(name)
     if root is None:
-        raise PathSafetyError(f"path names an unknown anchor ${name}: {stored!r}")
+        raise PathSafetyError(
+            f"path names an unknown anchor ${name}: {stored!r}",
+            reason="path_unknown_anchor",
+        )
 
     base = _resolve_or_raise(root, stored)
     candidate = base if not tail else base.joinpath(*tail.split("/"))
@@ -397,17 +488,20 @@ def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
         # is a property of the component itself, not of where it resolves.
         if DEVICE_NAME.fullmatch(part):
             raise PathSafetyError(
-                f"path contains a reserved device name {part!r}: {stored!r}"
+                f"path contains a reserved device name {part!r}: {stored!r}",
+                reason="path_reserved_device_name",
             )
         if ":" in part:
             raise PathSafetyError(
-                f"path component contains ':': {stored!r}"
+                f"path component contains ':': {stored!r}",
+                reason="path_alternate_data_stream",
             )
         walked = walked / part
         resolved_prefix = _resolve_or_raise(walked, stored)
         if not _is_within(resolved_prefix, base):
             raise PathSafetyError(
-                f"path crosses a link that leaves its anchor: {stored!r}"
+                f"path crosses a link that leaves its anchor: {stored!r}",
+                reason="path_link_crosses_anchor",
             )
 
     # Rule 4 is not an ordinary backstop -- for any non-empty tail it looks at
@@ -421,7 +515,10 @@ def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
     # covers a different moment in time, not a different path.
     final = _resolve_or_raise(candidate, stored)
     if not _is_within(final, base):
-        raise PathSafetyError(f"path resolves outside its anchor: {stored!r}")
+        raise PathSafetyError(
+            f"path resolves outside its anchor: {stored!r}",
+            reason="path_resolves_outside_anchor",
+        )
     _refuse_if_hardlinked(final, stored)
     return final
 
@@ -452,15 +549,28 @@ def _refuse_if_hardlinked(path: Path, stored: str) -> None:
     at the moment of resolution. A hardlink created after this call returns
     is invisible to it, the same TOCTOU limit documented on
     `resolve_anchored` itself.
+
+    I1: `stat()` also catches `ValueError` alongside `OSError`, defensively --
+    `resolve_anchored` already refuses an embedded NUL byte in the stored
+    path before this function ever runs, but that guard lives in the one
+    caller this function currently has. `path.stat()` itself raises a bare
+    `ValueError` (not an `OSError`) for a NUL byte in a path, so this
+    function does not rely solely on a caller's upstream check to keep that
+    exception from escaping as something other than `PathSafetyError`.
     """
     try:
         info = path.stat()
     except FileNotFoundError:
         return
-    except OSError as exc:
-        raise PathSafetyError(f"path could not be inspected: {stored!r}: {exc}") from exc
+    except (OSError, ValueError) as exc:
+        raise PathSafetyError(
+            f"path could not be inspected: {stored!r}: {exc}",
+            reason="path_inspect_failed",
+        ) from exc
     if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
-        raise PathSafetyError(f"path resolves to a hardlinked file: {stored!r}")
+        raise PathSafetyError(
+            f"path resolves to a hardlinked file: {stored!r}", reason="path_hardlinked"
+        )
 
 
 def validate_ledger(data: dict, *, source: str) -> list[str]:

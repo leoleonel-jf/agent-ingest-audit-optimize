@@ -2734,6 +2734,24 @@ class AnchorPathTests(unittest.TestCase):
         self.assertEqual(stored_zzz_first, stored_aaa_first)
         self.assertEqual(stored_zzz_first, "$AAA/file.txt")
 
+    def test_oserror_from_resolve_becomes_path_safety_error(self) -> None:
+        # I2: anchor_path's own path.resolve() used to be a bare call, while
+        # resolve_anchored routed the identical operation through
+        # _resolve_or_raise. A trailing-dot/space segment following an
+        # existing FILE component raises a raw NotADirectoryError
+        # ([WinError 267]) from the filesystem -- verbatim the case
+        # _resolve_or_raise's own docstring names. That must never escape
+        # anchor_path as an OSError: callers of the anchor-safety layer
+        # should only ever have to catch PathSafetyError.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            (root / "f.txt").write_text("x", encoding="utf-8")
+            bad = root / "f.txt" / "..."
+            with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                dashboard.anchor_path(bad, {"R": root})
+            self.assertNotIsInstance(ctx.exception, OSError)
+            self.assertEqual(ctx.exception.reason, "resolve_failed")
+
 
 class ResolveAnchoredTests(unittest.TestCase):
     def test_unknown_anchor_is_refused(self) -> None:
@@ -3019,6 +3037,21 @@ class ResolveAnchoredTests(unittest.TestCase):
         with self.assertRaises(dashboard.PathSafetyError) as ctx:
             dashboard.resolve_anchored("$R/sub/in.txt:hidden", {"R": root})
         self.assertIn("':'", str(ctx.exception))
+
+    def test_embedded_nul_byte_is_refused_with_its_own_reason(self) -> None:
+        # I1: an embedded NUL byte survives every textual check above it (it
+        # is not a '..' segment, not absolute, not an unknown anchor) and
+        # used to reach _refuse_if_hardlinked's path.stat(), which raises a
+        # bare ValueError -- "stat: embedded null character in path" -- that
+        # is not an OSError and was not caught there. resolve_anchored must
+        # refuse it directly, by its own named reason, before anything
+        # touches the filesystem.
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("$R/a\x00b", {"R": root})
+        self.assertNotIsInstance(ctx.exception, ValueError)
+        self.assertIn("NUL byte", str(ctx.exception))
+        self.assertEqual(ctx.exception.reason, "path_embedded_nul")
 
     def test_trailing_dot_space_segment_raising_oserror_becomes_path_safety_error(
         self,
