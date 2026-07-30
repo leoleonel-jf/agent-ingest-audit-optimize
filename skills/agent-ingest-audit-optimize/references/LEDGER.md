@@ -55,7 +55,7 @@ top-level fields, and flags any other field as unknown:
 | `sequences` | object, exactly the keys below |
 | `known_projects` | array (see Known projects) |
 | `records` | array (see Records) |
-| `baselines` | array; each element must be an object, but no field-level schema yet |
+| `baselines` | array (see Baselines) |
 | `backlog` | array (see Backlog) |
 
 `sequences` holds a floor for each identifier prefix, not the next free number outright — integer
@@ -72,6 +72,52 @@ rule.
 Update `known_projects` in the global ledger on every project-ledger write. This routing is a
 writing convention, not something `verify` checks — `verify` only checks that a record's
 `scope` is one of the six values above, never which physical ledger holds the record.
+
+## Path anchors
+
+Three anchors exist: `$USER_CONFIG` is the client's user-level configuration root, `$PROJECT` is
+the project root of the ledger that owns the record, and `$PLUGIN` is the installed bundle root.
+`anchor_path` supplies the roots the caller has in hand; this release decides none of them itself.
+
+A path that falls under an anchor is stored anchored, never absolute: the stored form is
+`$NAME/rest` for a path under the root, or bare `$NAME` when the path names the root itself.
+
+When more than one anchor contains a path, the longest anchor wins. A project nested inside a
+user configuration root — for example a project rooted at `$USER_CONFIG/projects/widget`, where
+`$PROJECT` is also rooted there — anchors to `$PROJECT`, not `$USER_CONFIG`: the more specific
+anchor is the only choice that keeps both anchors meaningful.
+
+A path that lies outside every anchor is stored absolute and marked `portable: false`. This is the
+one case an anchored path does not take the `$NAME/...` form.
+
+## Path safety
+
+`resolve_anchored` turns a stored anchored path back into an absolute one, refusing with a
+distinct, named reason whenever:
+
+1. **unknown anchor** — the stored path names an anchor that was not supplied;
+2. **`..` segment** — the path contains a `..` segment. This check is textual and runs before any
+   normalization, so `$PROJECT/a/../b` is refused even though it normalizes back inside the root —
+   the form is the problem, not just the destination;
+3. **absolute path** — the path is absolute where an anchored form was required;
+4. **resolves outside the anchor** — the final resolved path lies outside the anchor's root;
+5. **symlink crosses the anchor boundary** — any component of the path is a symlink (or a
+   platform-equivalent redirection, such as a Windows junction) whose target lies outside the
+   anchor's root, even when the path's final resolution lands back inside the anchor afterward.
+   Rule 5 is deliberately stricter than rule 4: a link that leaves the anchor is one an attacker
+   can re-point later, so it is refused on that basis alone, independent of where it happens to
+   lead today.
+
+None of this changes how `verify` itself operates: it still reads only the paths a caller names on
+its own command line, and it still never dereferences a path that arrived as ledger content rather
+than a command-line argument.
+
+## Adapter glob safety
+
+`check_glob` refuses an adapter probe glob that contains a `..` segment or that is absolute
+(either the POSIX `/...` form or a Windows drive-letter form). No probe field may contain a glob
+that escapes its anchor. This release only validates the pattern; nothing here expands a glob —
+expansion arrives with `scan` in 0.2.4.
 
 ## Identifiers
 
@@ -99,6 +145,13 @@ authority was unreachable still counts toward this check, so the authority can b
 number it never itself issued and that reconciliation will later discard. This is consistent with
 `-P` ids being treated the same as any other identifier everywhere else in this check, and the
 remedy is harmless — the rule is a floor, so bumping the counter costs nothing.
+
+A `baselines[]` entry's `id` participates in these sequence rules exactly as a record's `id` does,
+in both forms above: it feeds the per-document floor (a ledger's `sequences.BASE` must be at least
+one past the highest `BASE` number that ledger's own baselines, or records, already use), and it
+feeds the ID authority's set-wide coverage (the authority's `sequences.BASE` must cover a `BASE` id
+spent in any ledger in the verified set, wherever it was actually spent). A baseline identifier is
+an identifier; nothing in this check treats it differently from a record's.
 
 ## Records
 
@@ -177,6 +230,8 @@ Each target requires `anchor`, `kind`, `before_digest`, `after_digest`, `reversi
 `residual_effect`. `before_digest` and `after_digest` are `sha256:<64 hex>` or `null`. A target
 that is not reversible must carry a non-empty, non-falsy `residual_effect`.
 
+A target may also carry `portable` — a boolean, optional, never required. See Baselines for why.
+
 `backup`, when not `null`, requires `digest` (`sha256:<64 hex>`) and `verified` (boolean).
 `rollback` may also carry a `file` pointing at the written rollback document; only `tested` is
 required.
@@ -218,6 +273,43 @@ after normalization, so the comparison is silently skipped even though the refer
 fact passed. When there is no textual match, nothing is checked — silence there means
 **not comparable**, never "correct". `verify` deliberately does not open a path read out of
 ledger content.
+
+## Baselines
+
+Each entry in `baselines[]` requires `id`, `captured_on`, `client`, `adapter_version`, `items`.
+
+| Field | Rule |
+|---|---|
+| `id` | a `BASE`-prefixed identifier, matching the pattern in Identifiers |
+| `captured_on` | `YYYY-MM-DD` |
+| `client` | non-empty string |
+| `adapter_version` | integer, at least 1 |
+| `items` | array (see below) |
+
+Each element of `items` requires `kind`, `name`, `anchor`, `digest`, `attributes`, `origin`,
+`state`.
+
+| Field | Rule |
+|---|---|
+| `kind` | one of `instruction-file`, `skill`, `plugin`, `agent`, `command`, `hook`, `mcp-server`, `permission-rule`, `model-setting`, `env-var-name` |
+| `name` | non-empty string |
+| `anchor` | non-empty string |
+| `digest` | `sha256:<64 hex>` or `null` |
+| `attributes` | object |
+| `origin` | `pre-existing`, or a record identifier with prefix `PROP` |
+| `state` | `present` or `not_present` |
+| `portable` | boolean, optional |
+
+`state` records that a probe matched nothing. The design spec requires that a probe matching
+nothing be recorded as `not_present`, never as an error, but gives no field to hold that outcome —
+it is neither a `kind` nor one of the other documented item fields. A separate `state` field is
+used rather than overloading `kind` (a closed enum client adapters are written against) or relying
+on a `null` `digest`: a present item can legitimately have nothing to hash — an `env-var-name` has
+a name and no readable value — so `null` already means something else.
+
+`portable`, on a baseline item or on a run target, is a boolean when present and is never required.
+Requiring it would invalidate every RUN record written before this release, including this
+repository's own, none of which ever carried it.
 
 ## Language
 

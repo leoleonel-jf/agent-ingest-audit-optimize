@@ -2475,6 +2475,113 @@ class ReferenceTests(unittest.TestCase):
         self.assertIn("a floor, not an equality", text)
         self.assertNotIn("an equality, not a floor", text)
 
+    @staticmethod
+    def _normalized(text: str) -> str:
+        # Prose in LEDGER.md wraps at ~90 characters, so a multi-word anchor
+        # phrase can straddle a line break. Collapse all whitespace runs
+        # (including newlines) to a single space before searching, so a test
+        # is not accidentally satisfied -- or accidentally defeated -- by
+        # where Markdown happened to wrap a line.
+        return re.sub(r"\s+", " ", text)
+
+    # The 0.2.2 review found an anchor phrase that already occurred
+    # elsewhere in the file, so a test passed even against a deleted
+    # paragraph. Every phrase below was checked, before being chosen, to
+    # occur exactly once in LEDGER.md -- each test below anchors on text
+    # that only the paragraph it guards can satisfy.
+
+    def test_reference_documents_the_three_anchors(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        for phrase in ("$USER_CONFIG", "$PROJECT", "$PLUGIN", "user-level configuration root"):
+            self.assertIn(phrase, text)
+
+    def test_reference_documents_paths_stored_anchored_never_absolute(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn("stored anchored, never absolute", text)
+
+    def test_reference_documents_the_longest_anchor_wins(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn("longest anchor wins", text)
+        self.assertIn("keeps both anchors meaningful", text)
+
+    def test_reference_documents_paths_outside_every_anchor(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn("lies outside every anchor is stored absolute", text)
+        self.assertIn("portable: false", text)
+
+    def test_reference_documents_the_five_refusal_rules(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        for label in (
+            "**unknown anchor**",
+            "**`..` segment**",
+            "**absolute path**",
+            "**resolves outside the anchor**",
+            "**symlink crosses the anchor boundary**",
+        ):
+            with self.subTest(label=label):
+                self.assertIn(label, text)
+
+    def test_reference_documents_the_dot_dot_refusal_timing(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn("before any normalization", text)
+
+    def test_reference_documents_symlink_rule_is_stricter_than_resolution_rule(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn("deliberately stricter than rule 4", text)
+
+    def test_reference_states_what_verify_does_not_change(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn(
+            "it still never dereferences a path that arrived as ledger content", text
+        )
+
+    def test_reference_documents_adapter_glob_safety(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn("escapes its anchor", text)
+
+    def test_reference_documents_base_identifiers_join_sequence_rules(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn("A baseline identifier is an identifier", text)
+
+    def test_reference_documents_every_baseline_item_kind(self) -> None:
+        # `_assert_vocabulary_documented` (used above for RECORD_TYPES etc.)
+        # only checks that each value appears *somewhere* in backtick form.
+        # That is too weak here: `env-var-name` is also named, legitimately,
+        # in the very next paragraph explaining why `digest` may be null, so
+        # deleting just the table's enum list would not be caught. Anchor on
+        # the table's own enumeration phrase instead, verified unique above,
+        # and cross-check its contents against the runtime set so the two
+        # cannot silently drift apart.
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        listed = (
+            "one of `instruction-file`, `skill`, `plugin`, `agent`, `command`, "
+            "`hook`, `mcp-server`, `permission-rule`, `model-setting`, `env-var-name`"
+        )
+        self.assertIn(listed, text)
+        documented = set(re.findall(r"`([\w-]+)`", listed))
+        self.assertEqual(documented, dashboard.BASELINE_ITEM_KINDS)
+
+    def test_reference_documents_every_baseline_item_state(self) -> None:
+        # Same reasoning as the kind test above: `not_present` is also named
+        # in the "state fills a gap" paragraph immediately below the table,
+        # so a loose "appears somewhere" check would not catch the table
+        # row's own enum being deleted. Anchor on the table's exact phrase.
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        listed = "`present` or `not_present`"
+        self.assertIn(listed, text)
+        documented = set(re.findall(r"`(\w+)`", listed))
+        self.assertEqual(documented, dashboard.BASELINE_ITEM_STATES)
+
+    def test_reference_documents_state_fills_a_spec_gap(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn("records that a probe matched nothing", text)
+        self.assertIn("already means something else", text)
+
+    def test_reference_documents_portable_is_optional_everywhere(self) -> None:
+        text = self._normalized(REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn("is never required", text)
+        self.assertIn("none of which ever carried it", text)
+
 
 SKILL = REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "SKILL.md"
 
