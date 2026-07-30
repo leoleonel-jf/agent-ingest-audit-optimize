@@ -33,6 +33,9 @@ Project scope, at the project root:
 Backups always live in the global scope, even for project-scoped changes. Backups may contain
 configuration values and must never be committed by accident.
 
+This layout is a convention `verify` does not check — `verify` validates the ledger document's
+contents only, never the directory structure or where backups are stored.
+
 ## The ledger document
 
 `ledger.json` is a single JSON object. `dashboard.py verify` requires every one of these
@@ -51,7 +54,7 @@ top-level fields, and flags any other field as unknown:
 | `sequences` | object, exactly the keys below |
 | `known_projects` | array (see Known projects) |
 | `records` | array (see Records) |
-| `baselines` | array (no per-item schema yet) |
+| `baselines` | array; each element must be an object, but no field-level schema yet |
 | `backlog` | array (see Backlog) |
 
 `sequences` holds the next free number for each identifier prefix, integer at least 0, with no
@@ -98,7 +101,7 @@ Every record requires `id`, `type`, `title`, `status`, `classification`, `scope`
 | `classification` | the vocabulary in `SKILL.md` |
 | `scope` | `session`, `project`, `workspace`, `user-global`, `organization`, `fleet` |
 | `title` | non-empty string |
-| `file` | non-empty string; a path relative to the ledger's own directory, e.g. `records/PROP-2026-000.md` |
+| `file` | non-empty string. Convention (not checked by `verify`): a path relative to the ledger's own directory, e.g. `records/PROP-2026-000.md` |
 | `created`, `updated` | `YYYY-MM-DD` |
 | `links.materials`, `links.runs`, `links.adrs` | optional arrays of record ids; a missing key means empty |
 
@@ -129,7 +132,7 @@ A finding classified `REJECT`, `NEEDS MORE EVIDENCE`, `RISK EXCEEDS BENEFIT`, `M
 `revisit_trigger`, `revisit_after`.
 
 `revisit_trigger` is a string or `null`. `revisit_after` is `null` or `YYYY-MM-DD`. At least
-one of the two must be present and non-null.
+one of the two must be non-empty and non-falsy.
 
 `OBSOLETE`, `NOT APPLICABLE`, and `ALREADY IMPLEMENTED` are terminal. They are recorded as
 records and never enter the backlog; using one of them on a backlog entry is itself a finding.

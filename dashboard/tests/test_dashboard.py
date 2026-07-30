@@ -1572,12 +1572,44 @@ REFERENCE = (
 
 
 class ReferenceTests(unittest.TestCase):
-    def test_reference_documents_every_classification_rule(self) -> None:
+    # Each test below is driven from the validator's own constant sets
+    # rather than a hardcoded list, so adding a value to dashboard.py
+    # without documenting it in LEDGER.md fails here.
+
+    def test_reference_documents_every_record_type(self) -> None:
         text = REFERENCE.read_text(encoding="utf-8")
-        for classification in dashboard.BACKLOG_CLASSIFICATIONS:
+        for record_type in dashboard.RECORD_TYPES:
+            self.assertIn(record_type, text)
+
+    def test_reference_documents_every_record_status(self) -> None:
+        text = REFERENCE.read_text(encoding="utf-8")
+        for status in dashboard.RECORD_STATUSES:
+            self.assertIn(status, text)
+
+    def test_reference_documents_every_record_scope(self) -> None:
+        text = REFERENCE.read_text(encoding="utf-8")
+        for scope in dashboard.RECORD_SCOPES:
+            self.assertIn(scope, text)
+
+    def test_reference_documents_every_classification(self) -> None:
+        text = REFERENCE.read_text(encoding="utf-8")
+        for classification in dashboard.CLASSIFICATIONS:
             self.assertIn(classification, text)
-        for classification in dashboard.TERMINAL_CLASSIFICATIONS:
-            self.assertIn(classification, text)
+
+    def test_reference_documents_every_run_result(self) -> None:
+        text = REFERENCE.read_text(encoding="utf-8")
+        for result in dashboard.RUN_RESULTS:
+            self.assertIn(result, text)
+
+    def test_reference_documents_every_rollback_test_state(self) -> None:
+        text = REFERENCE.read_text(encoding="utf-8")
+        for state in dashboard.ROLLBACK_TEST_STATES:
+            self.assertIn(state, text)
+
+    def test_reference_documents_every_project_status(self) -> None:
+        text = REFERENCE.read_text(encoding="utf-8")
+        for status in dashboard.PROJECT_STATUSES:
+            self.assertIn(status, text)
 
     def test_reference_documents_the_verify_command(self) -> None:
         text = REFERENCE.read_text(encoding="utf-8")
