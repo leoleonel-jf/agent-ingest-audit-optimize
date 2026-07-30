@@ -62,7 +62,7 @@ Corrupted run:
 
 ```text
 .agent-audit\ledger.json: a project ledger must not be the ID authority
-More than one ledger claims ID authority: ['.agent-audit\\ledger.json', 'C:\\Users\\leole\\.claude\\agent-ingest-audit-optimize\\ledger.json']
+More than one ledger claims ID authority: ['.agent-audit\\ledger.json', '<global ledger path>']
 2 finding(s)
 exit=1
 ```
@@ -117,15 +117,22 @@ completely normal and that finding 1 shows nothing will catch.
 ### 3. `sequences` is ambiguous, but not in the place the fault is easiest to imagine
 
 `references/LEDGER.md`'s prose calls `sequences` "the next free number for each prefix." The code
-`verify` actually runs is narrower: for a ledger that holds a record itself, it requires that
-ledger's `sequences` value for that record's prefix to be *strictly greater* than the highest
-number already used among that ledger's own records — direct testing confirmed a ledger holding a
-record numbered `-000` fails `verify` if its own `sequences` value for that prefix is left at `0`,
-and passes only at `1`. For the ledger that actually holds the records, there is no real slack: the
-check enforces exactly "next free," not "high enough" in any looser sense.
+`verify` actually runs is looser than that prose: for a ledger that holds a record itself, it
+requires that ledger's `sequences` value for that record's prefix be no lower than one past the
+highest number already used among that ledger's own records — a floor, not an equality. Any value
+at or above that floor validates clean; only a value below it is flagged. Direct testing confirmed
+this precisely: building a throwaway ledger holding a single record numbered `-000` and setting its
+own `sequences` value for that prefix to `0`, `1`, `2`, and `5` in turn, `verify` failed only at
+`0` — `1`, `2`, and `5` all validated cleanly. A `sequences` value does not have to equal "next
+free" at all; it only has to be high enough. So `references/LEDGER.md`'s "next free number" is a
+stricter house convention than anything the validator enforces: an author who leaves `sequences`
+padded well ahead of what is actually allocated, by typo or by reserving room for ids they mean to
+skip to, will never see a finding for it. The narrower fact is still real and worth keeping: for
+the ledger that actually holds the records, `0` fails and anything `1` or higher passes — there is
+a floor, just not the ceiling the prose implies.
 
-The real ambiguity sits one level up, in the global ledger — the ledger that is this whole
-installation's sole ID authority, and the one `references/LEDGER.md` says every project should
+There is a second, larger ambiguity one level up, in the global ledger — the ledger that is this
+whole installation's sole ID authority, and the one `references/LEDGER.md` says every project should
 request the next id from. Because the global ledger typically holds no records of its own (every
 project-scoped record routes to the project ledger per the scope-routing table), and because
 `verify`'s sequence check only ever compares a ledger's `sequences` against the records *in that
