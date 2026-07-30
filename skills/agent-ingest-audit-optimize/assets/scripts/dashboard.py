@@ -147,6 +147,30 @@ REQUIRED_PROJECT_FIELDS = {
     "status",
 }
 
+BASELINE_ITEM_KINDS = {
+    "instruction-file",
+    "skill",
+    "plugin",
+    "agent",
+    "command",
+    "hook",
+    "mcp-server",
+    "permission-rule",
+    "model-setting",
+    "env-var-name",
+}
+BASELINE_ITEM_STATES = {"present", "not_present"}
+REQUIRED_BASELINE_FIELDS = {"id", "captured_on", "client", "adapter_version", "items"}
+REQUIRED_BASELINE_ITEM_FIELDS = {
+    "kind",
+    "name",
+    "anchor",
+    "digest",
+    "attributes",
+    "origin",
+    "state",
+}
+
 ANCHOR_REFERENCE = re.compile(r"^\$([A-Z_]+)(?:/(.*))?\Z")
 ANCHOR_NAME = re.compile(r"^[A-Z_]+$")
 # CON, PRN, AUX, NUL, COM1-9, LPT1-9, with or without an extension. Reserved
@@ -506,6 +530,9 @@ def validate_ledger(data: dict, *, source: str) -> list[str]:
         elif field == "known_projects":
             for index, entry in enumerate(data[field]):
                 findings.extend(validate_known_project(entry, index, source=source))
+        elif field == "baselines":
+            for index, entry in enumerate(data[field]):
+                findings.extend(validate_baseline(entry, index, source=source))
         else:
             for index, element in enumerate(data[field]):
                 if not isinstance(element, dict):
@@ -565,6 +592,8 @@ def validate_run(record: dict, *, label: str) -> list[str]:
                 findings.append(
                     f"{place} is not reversible and requires a residual_effect"
                 )
+            if "portable" in target and type(target["portable"]) is not bool:
+                findings.append(f"{place} portable must be a boolean")
 
     backup = record["backup"]
     if backup is not None:
@@ -771,6 +800,85 @@ def validate_known_project(entry: dict, index: int, *, source: str) -> list[str]
     return findings
 
 
+def validate_baseline(entry: dict, index: int, *, source: str) -> list[str]:
+    label = f"{source}: baselines[{index}]"
+    if not isinstance(entry, dict):
+        return [f"{label} must be an object"]
+    missing = REQUIRED_BASELINE_FIELDS - set(entry)
+    if missing:
+        return [f"{label} missing fields: {sorted(missing)}"]
+
+    findings: list[str] = []
+    identifier = entry["id"]
+    if (
+        not isinstance(identifier, str)
+        or not RECORD_ID.fullmatch(identifier)
+        or _prefix_and_number(identifier)[0] != "BASE"
+    ):
+        findings.append(f"{label} has an invalid id: {identifier!r}")
+    else:
+        label = f"{source}: {identifier}"
+
+    captured_on = entry["captured_on"]
+    if not isinstance(captured_on, str) or not DATE.fullmatch(captured_on):
+        findings.append(f"{label} captured_on must match YYYY-MM-DD")
+
+    if not isinstance(entry["client"], str) or not entry["client"].strip():
+        findings.append(f"{label} client must be a non-empty string")
+
+    if type(entry["adapter_version"]) is not int or entry["adapter_version"] < 1:
+        findings.append(f"{label} adapter_version must be an integer of at least 1")
+
+    items = entry["items"]
+    if not isinstance(items, list):
+        findings.append(f"{label} items must be an array")
+    else:
+        for position, item in enumerate(items):
+            place = f"{label} items[{position}]"
+            if not isinstance(item, dict):
+                findings.append(f"{place} must be an object")
+                continue
+            absent = REQUIRED_BASELINE_ITEM_FIELDS - set(item)
+            if absent:
+                findings.append(f"{place} missing fields: {sorted(absent)}")
+                continue
+
+            if not isinstance(item["kind"], str) or item["kind"] not in BASELINE_ITEM_KINDS:
+                findings.append(f"{place} has an invalid kind: {item['kind']!r}")
+            if not isinstance(item["name"], str) or not item["name"].strip():
+                findings.append(f"{place} name must be a non-empty string")
+            if not isinstance(item["anchor"], str) or not item["anchor"].strip():
+                findings.append(f"{place} anchor must be a non-empty string")
+
+            digest = item["digest"]
+            if digest is not None and (
+                not isinstance(digest, str) or not DIGEST.fullmatch(digest)
+            ):
+                findings.append(f"{place} digest must be a sha256 digest or null")
+
+            if not isinstance(item["attributes"], dict):
+                findings.append(f"{place} attributes must be an object")
+
+            origin = item["origin"]
+            if not (
+                origin == "pre-existing"
+                or (
+                    isinstance(origin, str)
+                    and RECORD_ID.fullmatch(origin)
+                    and _prefix_and_number(origin)[0] == "PROP"
+                )
+            ):
+                findings.append(f"{place} has an invalid origin: {origin!r}")
+
+            if not isinstance(item["state"], str) or item["state"] not in BASELINE_ITEM_STATES:
+                findings.append(f"{place} has an invalid state: {item['state']!r}")
+
+            if "portable" in item and type(item["portable"]) is not bool:
+                findings.append(f"{place} portable must be a boolean")
+
+    return findings
+
+
 def _prefix_and_number(identifier: str) -> tuple[str, int]:
     # identifier is RECORD_ID-valid and has already passed RECORD_ID.fullmatch(),
     # e.g., "PROP-2026-001" or "PROP-2026-001-P"
@@ -833,6 +941,26 @@ def validate_collection(
             current_spent = spent.get(prefix)
             if current_spent is None or number > current_spent[0]:
                 spent[prefix] = (number, identifier, source)
+
+        # A baseline is just another identifier holder: its `id` competes for
+        # the same BASE sequence slot a record's id would, so it feeds the
+        # same per-document floor and authority-wide coverage below.
+        baselines = data.get("baselines") if isinstance(data, dict) else None
+        baselines = baselines if isinstance(baselines, list) else []
+        for baseline in baselines:
+            if not isinstance(baseline, dict):
+                continue
+            identifier = baseline.get("id")
+            if not isinstance(identifier, str) or not RECORD_ID.fullmatch(identifier):
+                continue
+            prefix, number = _prefix_and_number(identifier)
+            current = highest.get(prefix)
+            if current is None or number > current[0]:
+                highest[prefix] = (number, identifier)
+            current_spent = spent.get(prefix)
+            if current_spent is None or number > current_spent[0]:
+                spent[prefix] = (number, identifier, source)
+
         sequences = data.get("sequences") if isinstance(data, dict) else None
         if isinstance(sequences, dict):
             for prefix, (number, highest_identifier) in highest.items():

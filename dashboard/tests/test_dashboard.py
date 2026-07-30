@@ -270,16 +270,17 @@ class LedgerDocumentTests(unittest.TestCase):
             any("backlog[0]" in finding for finding in findings)
         )
 
-    def test_valid_empty_dicts_in_arrays_have_no_findings(self) -> None:
-        # `records` carries its own schema (validate_record), and `backlog` /
-        # `known_projects` now carry theirs too (validate_backlog_entry /
-        # validate_known_project) — an empty dict is no longer a valid
-        # element for any of them. Only `baselines` has no per-item schema
-        # yet (a later task owns that), so an empty dict remains valid there.
+    def test_empty_dict_in_baselines_is_reported(self) -> None:
+        # `records`, `backlog`, `known_projects`, and now `baselines` all
+        # carry their own field schema (validate_record /
+        # validate_backlog_entry / validate_known_project /
+        # validate_baseline) — an empty dict is a missing-fields finding for
+        # every one of them; none of the four arrays accepts a bare `{}` any
+        # longer.
         data = minimal_ledger()
         data["baselines"] = [{}]
         findings = dashboard.validate_ledger(data, source="test")
-        self.assertEqual(findings, [])
+        self.assertTrue(any("baselines[0] missing fields" in finding for finding in findings))
 
     def test_missing_required_and_unknown_field_reported(self) -> None:
         data = minimal_ledger()
@@ -902,6 +903,25 @@ class RunEntryTests(unittest.TestCase):
         record["targets"][0]["residual_effect"] = "permission entry remains until reviewed"
         self.assertEqual(self.check(record), [])
 
+    def test_target_portable_absent_is_accepted(self) -> None:
+        # portable is optional -- a RUN record written before this release
+        # (including this repository's own) never carried it.
+        record = minimal_run()
+        self.assertNotIn("portable", record["targets"][0])
+        self.assertEqual(self.check(record), [])
+
+    def test_target_portable_non_boolean_is_reported(self) -> None:
+        record = minimal_run()
+        record["targets"][0]["portable"] = "yes"
+        self.assertTrue(
+            any("portable must be a boolean" in finding for finding in self.check(record))
+        )
+
+    def test_target_portable_boolean_is_accepted(self) -> None:
+        record = minimal_run()
+        record["targets"][0]["portable"] = False
+        self.assertEqual(self.check(record), [])
+
     def test_backup_must_be_an_object_or_null(self) -> None:
         record = minimal_run()
         record["backup"] = "not-an-object"
@@ -1082,6 +1102,28 @@ def minimal_known_project() -> dict:
         "last_seen": "2026-07-29",
         "last_digest": "sha256:" + "3" * 64,
         "status": "OK",
+    }
+
+
+def minimal_baseline_item() -> dict:
+    return {
+        "kind": "mcp-server",
+        "name": "playwright",
+        "anchor": "$USER_CONFIG/settings.json",
+        "digest": "sha256:" + "4" * 64,
+        "attributes": {"transport": "stdio"},
+        "origin": "pre-existing",
+        "state": "present",
+    }
+
+
+def minimal_baseline() -> dict:
+    return {
+        "id": "BASE-2026-000",
+        "captured_on": "2026-07-29",
+        "client": "claude-code",
+        "adapter_version": 1,
+        "items": [minimal_baseline_item()],
     }
 
 
@@ -1337,6 +1379,236 @@ class KnownProjectSchemaAlignmentTests(unittest.TestCase):
         )
 
 
+class BaselineEntryTests(unittest.TestCase):
+    def check(self, entry: dict) -> list[str]:
+        return dashboard.validate_baseline(entry, 0, source="test")
+
+    def test_minimal_baseline_has_no_findings(self) -> None:
+        self.assertEqual(self.check(minimal_baseline()), [])
+
+    def test_non_dict_baseline_returns_defensive_finding(self) -> None:
+        self.assertEqual(
+            dashboard.validate_baseline(123, 0, source="test"),
+            ["test: baselines[0] must be an object"],
+        )
+
+    def test_missing_baseline_field_is_reported(self) -> None:
+        entry = minimal_baseline()
+        del entry["client"]
+        self.assertTrue(
+            any(
+                "missing fields" in finding and "'client'" in finding
+                for finding in self.check(entry)
+            )
+        )
+
+    def test_id_not_base_prefixed_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["id"] = "PROP-2026-000"
+        self.assertTrue(any("invalid id" in finding for finding in self.check(entry)))
+
+    def test_id_not_identifier_shaped_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["id"] = "BASE-26-0"
+        self.assertTrue(any("invalid id" in finding for finding in self.check(entry)))
+
+    def test_bad_captured_on_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["captured_on"] = "07/29/2026"
+        self.assertTrue(
+            any(
+                "captured_on must match YYYY-MM-DD" in finding
+                for finding in self.check(entry)
+            )
+        )
+
+    def test_empty_client_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["client"] = "   "
+        self.assertTrue(any("client" in finding for finding in self.check(entry)))
+
+    def test_adapter_version_below_one_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["adapter_version"] = 0
+        self.assertTrue(
+            any("adapter_version" in finding for finding in self.check(entry))
+        )
+
+    def test_adapter_version_non_integer_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["adapter_version"] = "1"
+        self.assertTrue(
+            any("adapter_version" in finding for finding in self.check(entry))
+        )
+
+    def test_items_must_be_an_array(self) -> None:
+        entry = minimal_baseline()
+        entry["items"] = "not-a-list"
+        self.assertTrue(
+            any("items must be an array" in finding for finding in self.check(entry))
+        )
+
+    def test_non_dict_item_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["items"] = ["not-an-object"]
+        self.assertTrue(
+            any("items[0] must be an object" in finding for finding in self.check(entry))
+        )
+
+    def test_item_missing_fields_is_reported(self) -> None:
+        entry = minimal_baseline()
+        del entry["items"][0]["digest"]
+        self.assertTrue(
+            any(
+                "items[0] missing fields" in finding and "'digest'" in finding
+                for finding in self.check(entry)
+            )
+        )
+
+    def test_item_kind_outside_enum_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["kind"] = "nonsense"
+        self.assertTrue(
+            any("invalid kind" in finding for finding in self.check(entry))
+        )
+
+    def test_item_empty_name_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["name"] = "   "
+        self.assertTrue(any("name" in finding for finding in self.check(entry)))
+
+    def test_item_empty_anchor_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["anchor"] = ""
+        self.assertTrue(any("anchor" in finding for finding in self.check(entry)))
+
+    def test_item_digest_neither_sha256_nor_null_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["digest"] = "md5:abc"
+        self.assertTrue(
+            any("digest must be a sha256 digest or null" in finding for finding in self.check(entry))
+        )
+
+    def test_item_null_digest_is_accepted(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["digest"] = None
+        self.assertEqual(self.check(entry), [])
+
+    def test_item_attributes_not_an_object_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["attributes"] = "not-an-object"
+        self.assertTrue(
+            any("attributes must be an object" in finding for finding in self.check(entry))
+        )
+
+    def test_item_origin_neither_pre_existing_nor_prop_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["origin"] = "nope"
+        self.assertTrue(
+            any("invalid origin" in finding for finding in self.check(entry))
+        )
+
+    def test_item_origin_wrong_prefix_identifier_is_reported(self) -> None:
+        # An identifier-shaped origin is not automatically valid: only
+        # pre-existing or a PROP- id counts.
+        entry = minimal_baseline()
+        entry["items"][0]["origin"] = "MAT-2026-000"
+        self.assertTrue(
+            any("invalid origin" in finding for finding in self.check(entry))
+        )
+
+    def test_item_origin_prop_identifier_is_accepted(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["origin"] = "PROP-2026-000"
+        self.assertEqual(self.check(entry), [])
+
+    def test_item_state_outside_enum_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["state"] = "matched"
+        self.assertTrue(
+            any("invalid state" in finding for finding in self.check(entry))
+        )
+
+    def test_item_not_present_state_is_accepted(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["state"] = "not_present"
+        self.assertEqual(self.check(entry), [])
+
+    def test_item_portable_absent_is_accepted(self) -> None:
+        entry = minimal_baseline()
+        self.assertNotIn("portable", entry["items"][0])
+        self.assertEqual(self.check(entry), [])
+
+    def test_item_portable_non_boolean_is_reported(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["portable"] = "yes"
+        self.assertTrue(
+            any("portable must be a boolean" in finding for finding in self.check(entry))
+        )
+
+    def test_item_portable_boolean_is_accepted(self) -> None:
+        entry = minimal_baseline()
+        entry["items"][0]["portable"] = False
+        self.assertEqual(self.check(entry), [])
+
+    def test_baselines_are_validated_through_the_ledger(self) -> None:
+        data = minimal_ledger()
+        entry = minimal_baseline()
+        entry["items"][0]["kind"] = "nonsense"
+        data["baselines"] = [entry]
+        data["sequences"]["BASE"] = 1
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("invalid kind" in finding for finding in findings))
+
+
+class BaselineSchemaAlignmentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        self.baseline_schema = schema["properties"]["baselines"]["items"]
+        self.item_schema = self.baseline_schema["properties"]["items"]["items"]
+
+    def test_schema_baseline_required_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.baseline_schema["required"]), dashboard.REQUIRED_BASELINE_FIELDS
+        )
+
+    def test_schema_baseline_item_required_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.item_schema["required"]), dashboard.REQUIRED_BASELINE_ITEM_FIELDS
+        )
+
+    def test_schema_baseline_item_kind_enum_matches_runtime_validator(self) -> None:
+        schema_kinds = set(self.item_schema["properties"]["kind"]["enum"])
+        self.assertEqual(schema_kinds, dashboard.BASELINE_ITEM_KINDS)
+        # Drive the real validator with every value the schema declares, not
+        # just compare the two sets as text: a well-formed item using each
+        # schema-declared kind must not be rejected by the runtime validator.
+        for kind in schema_kinds:
+            item = minimal_baseline_item()
+            item["kind"] = kind
+            entry = minimal_baseline()
+            entry["items"] = [item]
+            findings = dashboard.validate_baseline(entry, 0, source="test")
+            self.assertFalse(
+                any("invalid kind" in finding for finding in findings),
+                f"kind {kind!r} from the schema enum was rejected by the runtime validator",
+            )
+
+    def test_schema_baseline_item_state_enum_matches_runtime_validator(self) -> None:
+        schema_states = set(self.item_schema["properties"]["state"]["enum"])
+        self.assertEqual(schema_states, dashboard.BASELINE_ITEM_STATES)
+        for state in schema_states:
+            item = minimal_baseline_item()
+            item["state"] = state
+            entry = minimal_baseline()
+            entry["items"] = [item]
+            findings = dashboard.validate_baseline(entry, 0, source="test")
+            self.assertFalse(
+                any("invalid state" in finding for finding in findings),
+                f"state {state!r} from the schema enum was rejected by the runtime validator",
+            )
+
+
 class CrossLedgerIntegrityTests(unittest.TestCase):
     def project_ledger(self) -> dict:
         data = minimal_ledger()
@@ -1400,6 +1672,45 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
         data["records"] = [minimal_record()]
         data["sequences"]["PROP"] = 1
         self.assertEqual(dashboard.validate_collection([("only", data)]), [])
+
+    def test_baseline_id_above_sequence_is_reported(self) -> None:
+        # A BASE identifier is just another identifier holder: sequences.BASE
+        # must cover a baselines[] entry's id exactly as it covers a record's.
+        data = minimal_ledger()
+        baseline = minimal_baseline()
+        baseline["id"] = "BASE-2026-004"
+        data["baselines"] = [baseline]
+        data["sequences"]["BASE"] = 4
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertTrue(any("sequences.BASE" in finding for finding in findings))
+
+    def test_baseline_id_within_sequence_is_accepted(self) -> None:
+        data = minimal_ledger()
+        baseline = minimal_baseline()
+        baseline["id"] = "BASE-2026-004"
+        data["baselines"] = [baseline]
+        data["sequences"]["BASE"] = 5
+        self.assertEqual(dashboard.validate_collection([("only", data)]), [])
+
+    def test_authority_sequences_must_cover_a_siblings_baseline(self) -> None:
+        authority = minimal_ledger()
+        authority["sequences"]["BASE"] = 0
+        project = self.project_ledger()
+        baseline = minimal_baseline()
+        baseline["id"] = "BASE-2026-000"
+        project["baselines"] = [baseline]
+        project["sequences"]["BASE"] = 1
+
+        findings = dashboard.validate_collection(
+            [("global.json", authority), ("project.json", project)]
+        )
+
+        self.assertTrue(
+            any(
+                "sequences.BASE" in finding and "global.json" in finding
+                for finding in findings
+            )
+        )
 
     def test_provisional_id_requires_the_reconciliation_flag(self) -> None:
         data = self.project_ledger()

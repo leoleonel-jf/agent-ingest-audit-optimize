@@ -230,7 +230,8 @@
                     "type": ["string", "null"],
                     "pattern": "^sha256:[0-9a-f]{64}$"
                   },
-                  "reversible": { "type": "boolean" }
+                  "reversible": { "type": "boolean" },
+                  "portable": { "type": "boolean" }
                 },
                 "if": {
                   "properties": { "reversible": { "const": false } }
@@ -271,7 +272,57 @@
         }
       }
     },
-    "baselines": { "type": "array", "items": { "type": "object" } },
+    "baselines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "captured_on", "client", "adapter_version", "items"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^BASE-\\d{4}-\\d{3}(-P)?$" },
+          "captured_on": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "client": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "adapter_version": { "type": "integer", "minimum": 1 },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["kind", "name", "anchor", "digest", "attributes", "origin", "state"],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "instruction-file",
+                    "skill",
+                    "plugin",
+                    "agent",
+                    "command",
+                    "hook",
+                    "mcp-server",
+                    "permission-rule",
+                    "model-setting",
+                    "env-var-name"
+                  ]
+                },
+                "name": { "type": "string", "minLength": 1, "pattern": "\\S" },
+                "anchor": { "type": "string", "minLength": 1, "pattern": "\\S" },
+                "digest": {
+                  "type": ["string", "null"],
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "attributes": { "type": "object" },
+                "origin": {
+                  "anyOf": [
+                    { "const": "pre-existing" },
+                    { "type": "string", "pattern": "^PROP-\\d{4}-\\d{3}(-P)?$" }
+                  ]
+                },
+                "state": { "enum": ["present", "not_present"] },
+                "portable": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    },
     "backlog": {
       "type": "array",
       "items": {
