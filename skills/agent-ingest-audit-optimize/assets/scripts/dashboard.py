@@ -343,6 +343,16 @@ def validate_run(record: dict, *, label: str) -> list[str]:
         not isinstance(item, str) for item in reported
     ):
         findings.append(f"{label} self_reported must be an array of strings")
+    elif "targets" not in reported:
+        # Every target's shape is checked; the array's coverage cannot be.
+        # Nothing in a ledger says how many files a run was supposed to touch,
+        # so a RUN can name three targets for a fourteen-file change and pass.
+        # The record must say so in the field built for exactly that admission.
+        findings.append(
+            f"{label} self_reported must name 'targets': verify checks each "
+            "target's shape and can never check that the array covers what the "
+            "run changed"
+        )
 
     return findings
 

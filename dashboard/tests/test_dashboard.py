@@ -738,7 +738,7 @@ def minimal_run() -> dict:
                 "file": "records/RUN-2026-000.rollback.md",
                 "tested": "NOT_TESTED",
             },
-            "self_reported": ["tests"],
+            "self_reported": ["targets", "tests"],
         }
     )
     return record
@@ -785,6 +785,23 @@ class RunEntryTests(unittest.TestCase):
         self.assertTrue(
             any("self_reported" in finding for finding in self.check(record))
         )
+
+    def test_run_must_name_targets_in_self_reported(self) -> None:
+        record = minimal_run()
+        record["self_reported"] = ["backup", "result"]
+        findings = self.check(record)
+        self.assertTrue(
+            any(
+                "self_reported" in finding and "targets" in finding
+                for finding in findings
+            )
+        )
+
+    def test_run_naming_targets_in_self_reported_is_accepted(self) -> None:
+        record = minimal_run()
+        record["self_reported"] = ["targets", "backup", "result"]
+        findings = self.check(record)
+        self.assertFalse(any("self_reported" in finding for finding in findings))
 
     def test_non_run_records_do_not_require_run_fields(self) -> None:
         self.assertEqual(self.check(minimal_record()), [])
@@ -979,6 +996,30 @@ class RunSchemaAlignmentTests(unittest.TestCase):
         self.assertEqual(
             set(target_schema["required"]), dashboard.REQUIRED_TARGET_FIELDS
         )
+
+    def test_schema_self_reported_contains_matches_runtime_validator(self) -> None:
+        # There is no jsonschema library here (standard library only), so this
+        # does not execute the schema's `contains` keyword directly. Instead
+        # it reads the required value out of the schema and feeds it through
+        # the real validate_run(), on both a record that satisfies it and one
+        # that does not -- so a schema/runtime drift on the *value* (e.g. the
+        # schema requiring "targets" while the runtime checks a different
+        # string) is caught, not just a structural presence-of-key check.
+        self_reported_schema = self.record_schema["then"]["properties"][
+            "self_reported"
+        ]
+        required_value = self_reported_schema["contains"]["const"]
+
+        satisfying = minimal_run()
+        satisfying["self_reported"] = [required_value]
+        self.assertEqual(
+            dashboard.validate_run(satisfying, label="RUN-2026-000"), []
+        )
+
+        violating = minimal_run()
+        violating["self_reported"] = ["something-else"]
+        findings = dashboard.validate_run(violating, label="RUN-2026-000")
+        self.assertTrue(any("self_reported" in finding for finding in findings))
 
     def test_schema_proposal_pattern_matches_record_id_pattern(self) -> None:
         self.assertEqual(
