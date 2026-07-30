@@ -3139,6 +3139,45 @@ class ResolveAnchoredTests(unittest.TestCase):
                 dashboard.resolve_anchored("$R/f.txt/...", {"R": root})
             self.assertNotIsInstance(ctx.exception, OSError)
 
+    def test_symlink_loop_is_refused_instead_of_leaking_runtime_error(self) -> None:
+        # The exact defect this commit fixes, reproduced on Ubuntu 24.04 /
+        # Python 3.12.3: root/a -> root/b and root/b -> root/a form a
+        # symlink loop, and non-strict Path.resolve() detects that loop
+        # itself -- in Python, not via the OS -- and raises a bare
+        # RuntimeError ("Symlink loop from '<path>'"), not an OSError.
+        # _resolve_or_raise's original `except OSError` let that sail
+        # straight through uncaught. This is the same class of gap I1 and
+        # I5 closed for a NUL byte and a trailing dot/space segment
+        # respectively: a non-PathSafetyError escaping a layer whose whole
+        # contract is that callers catch exactly one exception type, which
+        # matters because scan (0.2.4) walks real client configuration
+        # directories, where a symlink loop is entirely plausible, and must
+        # report one finding and keep walking rather than abort.
+        #
+        # POSIX-only in practice: creating a symlink needs no elevation
+        # there, but on Windows it needs developer mode or an elevated
+        # process, so this follows the same try/except OSError skip idiom
+        # as test_symlink_leaving_anchor_is_refused_even_if_final_path_
+        # returns_inside above, rather than a hard os.name check -- on a
+        # default, non-elevated Windows account (this sandbox included)
+        # os.symlink itself is what raises and skips the test.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            link_a = root / "a"
+            link_b = root / "b"
+            try:
+                os.symlink(link_b, link_a)
+                os.symlink(link_a, link_b)
+            except OSError as exc:
+                self.skipTest(
+                    f"cannot create a symlink on this platform (needs developer "
+                    f"mode or elevation on Windows): {exc}"
+                )
+            with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                dashboard.resolve_anchored("$R/a", {"R": root})
+            self.assertIn("$R/a", str(ctx.exception))
+            self.assertEqual(ctx.exception.reason, "resolve_failed")
+
     def test_hardlinked_regular_file_is_refused(self) -> None:
         # I4: a hardlink has no symlink target for rules 4/5 to follow, so
         # neither can see it -- writing through root/hard.txt writes through

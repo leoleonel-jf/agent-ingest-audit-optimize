@@ -396,10 +396,24 @@ def _resolve_or_raise(path: Path, stored: str) -> Path:
     Shared by `resolve_anchored` and `anchor_path` (I2): both resolve a path
     at the point they touch the filesystem, and both must give the identical
     guarantee that only `PathSafetyError` ever escapes.
+
+    I6: a symlink loop (`root/a` -> `root/b`, `root/b` -> `root/a`) makes
+    `Path.resolve()` raise a bare `RuntimeError` -- "Symlink loop from
+    '<path>'" -- not an `OSError`. Non-strict `resolve()` detects ELOOP
+    itself, in Python, rather than letting the OS's ELOOP surface as an
+    `OSError`, and it reports the loop it found via `RuntimeError`
+    deliberately. That is invisible on Windows, which has no equivalent
+    construct, but entirely plausible in a real client configuration
+    directory `scan` (0.2.4) will walk, so it is caught here exactly like
+    `OSError` and given the same `resolve_failed` reason: both describe the
+    identical failure -- the filesystem call inside `resolve()` did not
+    produce a usable path -- so a caller checking `reason` need not learn a
+    second key for what is, from `resolve_anchored`'s contract, the same
+    outcome.
     """
     try:
         return path.resolve()
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         raise PathSafetyError(
             f"path could not be resolved: {stored!r}: {exc}", reason="resolve_failed"
         ) from exc
@@ -426,6 +440,18 @@ def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
     reaches `_refuse_if_hardlinked`'s `path.stat()`, which raises a bare
     `ValueError` -- `stat: embedded null character in path` -- that is not an
     `OSError` and was not caught there.
+
+    I6: every filesystem-touching call this function makes -- resolving the
+    anchor root, resolving each prefix while checking rule 5, resolving the
+    final candidate, and inspecting it for a hardlink -- is routed through
+    `_resolve_or_raise` or `_refuse_if_hardlinked`, both of which now also
+    catch `RuntimeError`: a symlink loop (`root/a` -> `root/b`, `root/b` ->
+    `root/a`) makes `Path.resolve()` raise `RuntimeError`, not `OSError`,
+    POSIX-only and invisible on Windows. Without this, a loop reachable from
+    a real client configuration directory would abort `scan` (0.2.4) mid-walk
+    instead of producing one finding and continuing -- exactly the failure
+    mode I1 and I5 already closed for a NUL byte and a trailing dot/space
+    segment, respectively.
     """
     if not isinstance(stored, str) or not stored.strip():
         raise PathSafetyError(
@@ -557,12 +583,21 @@ def _refuse_if_hardlinked(path: Path, stored: str) -> None:
     `ValueError` (not an `OSError`) for a NUL byte in a path, so this
     function does not rely solely on a caller's upstream check to keep that
     exception from escaping as something other than `PathSafetyError`.
+
+    I6: `RuntimeError` is caught here too, for the same defensive reason --
+    `path` here has already been through `_resolve_or_raise` in this
+    function's one current caller, so a symlink loop is normally refused
+    there first and this function never sees one. `stat()` itself follows
+    symlinks via a single OS syscall rather than pathlib's own Python-level
+    loop detection, so it is not expected to raise `RuntimeError` for a loop
+    the way `resolve()` does -- but this is not relied upon; the same
+    conversion is applied here rather than assumed unreachable.
     """
     try:
         info = path.stat()
     except FileNotFoundError:
         return
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         raise PathSafetyError(
             f"path could not be inspected: {stored!r}: {exc}",
             reason="path_inspect_failed",

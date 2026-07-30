@@ -133,9 +133,12 @@ during a security review but never previously brought into this document:
     unchanged;
 12. **resolve failed** — resolving a path (the anchor root itself, or any prefix while checking
     rule 5) raised an `OSError` from the filesystem — most concretely, a trailing dot/space
-    segment following an existing file component raises `NotADirectoryError` on Windows. Wrapped
-    rather than allowed to escape, so a caller need only ever catch `PathSafetyError`, never a raw
-    `OSError`, and `scan` (0.2.4) can report a finding and keep walking instead of aborting;
+    segment following an existing file component raises `NotADirectoryError` on Windows — or,
+    since 0.2.4, a bare `RuntimeError`: a symlink loop (`root/a` -> `root/b`, `root/b` -> `root/a`)
+    makes non-strict `Path.resolve()` raise `RuntimeError("Symlink loop from ...")` rather than an
+    `OSError`, a POSIX-only case invisible to a Windows-only test run. Both are wrapped rather than
+    allowed to escape, so a caller need only ever catch `PathSafetyError`, never a raw `OSError` or
+    `RuntimeError`, and `scan` (0.2.4) can report a finding and keep walking instead of aborting;
 13. **path resolves to a hardlinked file** — the resolved path names an existing regular file with
     more than one hard link. A hardlink needs no elevation to create (`mklink /H` on Windows, `ln`
     on POSIX) and has no symlink target for rules 4/5 to follow, so it defeats every rule above by
@@ -146,7 +149,9 @@ during a security review but never previously brought into this document:
     across projects — will see this refusal;
 14. **inspect failed** — inspecting the resolved path for rule 13 raised an `OSError`, or,
     defensively, a `ValueError` (the same NUL-byte failure mode rule 8 already refuses earlier, in
-    case one ever reached this point by some other route). Wrapped for the same reason as rule 12.
+    case one ever reached this point by some other route) or a `RuntimeError` (the same symlink-loop
+    failure mode rule 12 refuses earlier, kept here too rather than assumed unreachable). Wrapped
+    for the same reason as rule 12.
 
 None of this changes how `verify` itself operates: it still reads only the paths a caller names on
 its own command line, and it still never dereferences a path that arrived as ledger content rather
