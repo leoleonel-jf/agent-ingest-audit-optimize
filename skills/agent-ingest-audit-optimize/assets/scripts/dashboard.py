@@ -147,6 +147,12 @@ REQUIRED_PROJECT_FIELDS = {
 }
 
 ANCHOR_REFERENCE = re.compile(r"^\$([A-Z_]+)(?:/(.*))?$")
+ANCHOR_NAME = re.compile(r"^[A-Z_]+$")
+# CON, PRN, AUX, NUL, COM1-9, LPT1-9, with or without an extension. Reserved
+# on Windows regardless of extension or case; refused on every platform
+# because a ledger written on Windows may be validated on Linux and must get
+# the same answer either way.
+DEVICE_NAME = re.compile(r"(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?", re.IGNORECASE)
 
 
 class LedgerError(RuntimeError):
@@ -195,6 +201,25 @@ def _path_key(value: str) -> str:
     return os.path.normcase(os.path.normpath(value))
 
 
+def _validate_anchor_names(roots: dict[str, Path]) -> None:
+    """Refuse a roots mapping containing a key that is not a valid anchor name.
+
+    A key must match the same `[A-Z_]+` grammar `ANCHOR_REFERENCE` uses. Two
+    concrete dangers motivate checking every key, not just the one a given
+    call happens to look up: a key containing '/' (e.g. "A/B") can steal a
+    prefix of another key's namespace -- a stored form like "$A/B/x" is
+    parsed as anchor "A" with tail "B/x", silently redirecting into whatever
+    root "A" names instead of the "A/B" root that produced the string. And
+    any other malformed key (lowercase, digits, hyphens, empty) produces a
+    stored form `resolve_anchored` can never parse back, since `ANCHOR_REFERENCE`
+    would not match it either -- a silent dead end for a plausible adapter
+    name, rather than a loud rejection at the point the mapping was built.
+    """
+    for name in roots:
+        if not ANCHOR_NAME.fullmatch(name):
+            raise PathSafetyError(f"anchor name is not a valid identifier: {name!r}")
+
+
 def anchor_path(path: Path, roots: dict[str, Path]) -> tuple[str, bool]:
     """Store a path relative to the anchor that contains it.
 
@@ -206,8 +231,17 @@ def anchor_path(path: Path, roots: dict[str, Path]) -> tuple[str, bool]:
     project nested inside a user configuration root anchors to $PROJECT rather
     than $USER_CONFIG. The design spec does not state this; the more specific
     anchor is the only choice that keeps both meaningful.
+
+    `path` is always resolved before matching, even when it is already
+    absolute: an absolute path can still carry a fabricated `..` segment
+    (e.g. `root/../outside/secret.txt`), and `relative_to` matches such a
+    path against `root` textually, since `root`'s components remain a
+    literal prefix of it. Resolving first collapses `..` (and any symlink)
+    to where the path actually points, so a path that truly lands outside
+    every anchor is matched -- and stored -- honestly, per design spec 7.1.
     """
-    absolute = path if path.is_absolute() else path.resolve()
+    _validate_anchor_names(roots)
+    absolute = path.resolve()
     best: tuple[int, str, Path] | None = None
     for name, root in roots.items():
         try:
@@ -239,6 +273,22 @@ def check_glob(pattern: str) -> None:
         raise PathSafetyError(f"glob is absolute: {pattern!r}")
 
 
+def _resolve_or_raise(path: Path, stored: str) -> Path:
+    """Resolve `path`, turning any `OSError` into a `PathSafetyError`.
+
+    Some inputs make the filesystem itself raise -- a trailing-dot/space
+    segment following an existing file component raises `NotADirectoryError`
+    on Windows, for instance. Design spec section 3.2 says a `PathSafetyError`
+    carries the offending path and the rule that refused it, and callers
+    (`scan`, eventually) report it as a finding; a raw `OSError` escaping here
+    would instead abort a caller mid-walk on a ledger-supplied string.
+    """
+    try:
+        return path.resolve()
+    except OSError as exc:
+        raise PathSafetyError(f"path could not be resolved: {stored!r}: {exc}") from exc
+
+
 def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
     """Resolve an anchored path, refusing anything that escapes its anchor.
 
@@ -246,9 +296,16 @@ def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
     and reject symlinks that escape an anchor. The `..` check is textual and
     runs before any normalization, so a path that normalizes back inside the
     root is still refused -- the form is the problem, not just the destination.
+
+    The returned path is validated at resolution time only. A caller that
+    resolves many paths over time -- rather than resolving one path and
+    immediately acting on it -- must re-check per use rather than trust a
+    single resolution done once per root: nothing here can see a link
+    created after this call returns.
     """
     if not isinstance(stored, str) or not stored.strip():
         raise PathSafetyError(f"path must be a non-empty string: {stored!r}")
+    _validate_anchor_names(roots)
     normalized = stored.replace("\\", "/")
     if any(part == ".." for part in normalized.split("/")):
         raise PathSafetyError(f"path contains a '..' segment: {stored!r}")
@@ -260,7 +317,7 @@ def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
     if root is None:
         raise PathSafetyError(f"path names an unknown anchor ${name}: {stored!r}")
 
-    base = root.resolve()
+    base = _resolve_or_raise(root, stored)
     candidate = base if not tail else base.joinpath(*tail.split("/"))
 
     # Rule 5 before rule 4: this does not ask whether a component IS a link --
@@ -279,14 +336,25 @@ def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
     # and simply is not yet outside anything.
     walked = base
     for part in (tail.split("/") if tail else []):
+        # Textual, component-level refusals: these run before the prefix is
+        # ever resolved, since a DOS device name or an alternate data stream
+        # is a property of the component itself, not of where it resolves.
+        if DEVICE_NAME.fullmatch(part):
+            raise PathSafetyError(
+                f"path contains a reserved device name {part!r}: {stored!r}"
+            )
+        if ":" in part:
+            raise PathSafetyError(
+                f"path component contains ':': {stored!r}"
+            )
         walked = walked / part
-        resolved_prefix = walked.resolve()
+        resolved_prefix = _resolve_or_raise(walked, stored)
         if not _is_within(resolved_prefix, base):
             raise PathSafetyError(
                 f"path crosses a link that leaves its anchor: {stored!r}"
             )
 
-    final = candidate.resolve()
+    final = _resolve_or_raise(candidate, stored)
     if not _is_within(final, base):
         raise PathSafetyError(f"path resolves outside its anchor: {stored!r}")
     return final

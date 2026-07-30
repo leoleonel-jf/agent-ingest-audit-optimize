@@ -2275,6 +2275,33 @@ class AnchorPathTests(unittest.TestCase):
         self.assertEqual(stored, str(path_bc))
         self.assertFalse(portable)
 
+    def test_dotdot_escape_is_resolved_before_matching_and_stored_absolute(self) -> None:
+        # C1 (CRITICAL): a fabricated '..' escape must not be matched against
+        # a root just because the root's parts are a literal prefix of the
+        # unresolved path. root/../outside/secret.txt actually points at
+        # .../outside/secret.txt, which is NOT under root -- resolving first
+        # (unconditionally, even though the input is already absolute) finds
+        # that out and stores the honest absolute path, flagged not portable,
+        # per design spec 7.1: "anything outside an anchor is stored absolute
+        # and flagged portable: false".
+        root = ANCHOR_BASE / "root"
+        escaping = root / ".." / "outside" / "secret.txt"
+        stored, portable = dashboard.anchor_path(escaping, {"R": root})
+        self.assertEqual(stored, str(escaping.resolve()))
+        self.assertNotIn("..", stored)
+        self.assertFalse(portable)
+
+    def test_rejects_malformed_root_names(self) -> None:
+        # I2: a root name that does not match the ANCHOR_REFERENCE grammar
+        # ([A-Z_]+) must be refused outright -- not silently accepted and
+        # later produce a stored form resolve_anchored can never parse back.
+        root = ANCHOR_BASE / "project"
+        for bad_name in ("r", "R2", "USER_CONFIG2", "MY-ROOT", "", "A/B"):
+            with self.subTest(bad_name=bad_name):
+                with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                    dashboard.anchor_path(root / "file.txt", {bad_name: root})
+                self.assertIn(repr(bad_name), str(ctx.exception))
+
 
 class ResolveAnchoredTests(unittest.TestCase):
     def test_unknown_anchor_is_refused(self) -> None:
@@ -2470,6 +2497,119 @@ class ResolveAnchoredTests(unittest.TestCase):
             target.write_text("x", encoding="utf-8")
             resolved = dashboard.resolve_anchored("$PROJECT/src/main.py", {"PROJECT": root})
             self.assertEqual(resolved, target.resolve())
+
+    def test_rejects_malformed_root_names(self) -> None:
+        # I2: every key in the roots mapping is validated, not only the one
+        # the stored string happens to name -- a malformed key elsewhere in
+        # the mapping is refused just as loudly.
+        root = ANCHOR_BASE / "project"
+        for bad_name in ("r", "R2", "USER_CONFIG2", "MY-ROOT", "", "A/B"):
+            with self.subTest(bad_name=bad_name):
+                with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                    dashboard.resolve_anchored(
+                        "$PROJECT/file.txt", {bad_name: root, "PROJECT": root}
+                    )
+                self.assertIn(repr(bad_name), str(ctx.exception))
+
+    def test_slash_containing_root_name_cannot_redirect_to_a_different_root(self) -> None:
+        # I2's concrete exploit: roots {"A": rootA, "A/B": rootB}. Without
+        # validation, "$A/B/decoy.txt" -- produced by anchor_path against the
+        # "A/B" root -- is parsed by ANCHOR_REFERENCE as anchor "A" (which
+        # only matches [A-Z_]+) with tail "B/decoy.txt", silently resolving
+        # into rootA/B/decoy.txt instead of the rootB/decoy.txt the string
+        # was meant to name. Validating every key up front refuses this
+        # mapping outright, before any such confusion can happen.
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve()
+            root_a = base / "rootA"
+            root_b = base / "rootB"
+            root_a.mkdir()
+            root_b.mkdir()
+            roots = {"A": root_a, "A/B": root_b}
+            with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                dashboard.resolve_anchored("$A/B/decoy.txt", roots)
+            self.assertIn("A/B", str(ctx.exception))
+
+    def test_dos_device_name_component_is_refused(self) -> None:
+        # I3: a component that is a reserved Windows device name resolves
+        # "inside" the anchor on Windows but does not behave like an
+        # ordinary file (writes vanish, reads return empty, exists() lies).
+        # Refused on every platform since a ledger written on Windows may be
+        # validated on Linux.
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("$R/NUL", {"R": root})
+        self.assertIn("device name", str(ctx.exception))
+
+    def test_dos_device_name_with_extension_is_refused(self) -> None:
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("$R/NUL.txt", {"R": root})
+        self.assertIn("device name", str(ctx.exception))
+
+    def test_dos_device_name_is_refused_case_insensitively(self) -> None:
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("$R/nul", {"R": root})
+        self.assertIn("device name", str(ctx.exception))
+
+    def test_dos_device_name_as_a_mid_path_component_is_refused(self) -> None:
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("$R/sub/con/file.txt", {"R": root})
+        self.assertIn("device name", str(ctx.exception))
+
+    def test_com_and_lpt_device_names_are_refused(self) -> None:
+        root = ANCHOR_BASE / "project"
+        for name in ("COM1", "COM9", "LPT1", "LPT9"):
+            with self.subTest(name=name):
+                with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                    dashboard.resolve_anchored(f"$R/{name}", {"R": root})
+                self.assertIn("device name", str(ctx.exception))
+
+    def test_device_shaped_but_not_reserved_names_are_accepted(self) -> None:
+        # COM10/LPT10 are not reserved (only 1-9 are), and CONSOLE/NULL are
+        # ordinary names that merely start with a reserved one -- none of
+        # these may be refused.
+        root = ANCHOR_BASE / "project"
+        for name in ("COM10", "LPT10", "CONSOLE", "NULL"):
+            with self.subTest(name=name):
+                dashboard.resolve_anchored(f"$PROJECT/{name}", {"PROJECT": root})
+
+    def test_alternate_data_stream_component_is_refused(self) -> None:
+        # M12: a colon inside a path COMPONENT (after the anchor prefix is
+        # stripped) opens an NTFS alternate data stream -- writing there is
+        # invisible to a directory listing and leaves the visible file
+        # unchanged.
+        root = ANCHOR_BASE / "project"
+        with self.assertRaises(dashboard.PathSafetyError) as ctx:
+            dashboard.resolve_anchored("$R/sub/in.txt:hidden", {"R": root})
+        self.assertIn("':'", str(ctx.exception))
+
+    def test_trailing_dot_space_segment_raising_oserror_becomes_path_safety_error(
+        self,
+    ) -> None:
+        # I5: resolving "f.txt/. ." -- a trailing dot/space segment
+        # following an existing FILE component -- raises a raw
+        # NotADirectoryError ([WinError 267]) from the filesystem. That must
+        # never escape resolve_anchored as an OSError: it must become a
+        # PathSafetyError naming the path, so a caller like `scan` can
+        # report it as a finding instead of aborting mid-walk.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            (root / "f.txt").write_text("x", encoding="utf-8")
+            with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                dashboard.resolve_anchored("$R/f.txt/. .", {"R": root})
+            self.assertNotIsInstance(ctx.exception, OSError)
+            self.assertIn("$R/f.txt/. .", str(ctx.exception))
+
+    def test_trailing_dots_segment_raising_oserror_becomes_path_safety_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            (root / "f.txt").write_text("x", encoding="utf-8")
+            with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                dashboard.resolve_anchored("$R/f.txt/...", {"R": root})
+            self.assertNotIsInstance(ctx.exception, OSError)
 
 
 class CheckGlobTests(unittest.TestCase):
