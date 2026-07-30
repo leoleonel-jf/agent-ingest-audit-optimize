@@ -54,5 +54,5 @@
     { "kind": "mcp-server", "scope": "project", "path": "$PROJECT/.mcp.json",
       "parse": "json", "pointer": "/mcpServers" }
   ],
-  "sensitive_key_patterns": ["*token*", "*key*", "*secret*", "*password*", "*credential*", "*auth*", "env", "headers"]
+  "sensitive_key_patterns": ["*token*", "*key*", "*secret*", "*password*", "*credential*", "*auth*", "env", "headers", "args", "*url*"]
 }

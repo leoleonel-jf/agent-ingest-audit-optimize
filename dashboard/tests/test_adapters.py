@@ -1374,5 +1374,35 @@ class DogfoodCorrectionTests(unittest.TestCase):
                 self.assertIn(key, patterns)
 
 
+class ReviewRedactionCorrectionTests(unittest.TestCase):
+    """The two key names a review found carrying secrets past redaction.
+
+    Redaction matches key names, so a secret is protected by where it sits.
+    A reviewer built the document below against the shipped claude-code.json
+    patterns and watched both secrets survive into a baseline verbatim:
+
+        {"mcpServers": {"x": {"args": ["--api-key", "sk-live-SECRET1"],
+                              "url": "https://example.test/mcp?token=SECRET2"}}}
+
+    `env` was protected and neither of these was. `args` is where an MCP
+    server conventionally receives a credential as a positional argument, and
+    a URL is where a query-string token hides. Both are digested now.
+
+    `generic.json` is deliberately not covered: it declares no probes, so it
+    parses nothing and has nothing to redact.
+    """
+
+    @staticmethod
+    def adapter(name: str) -> dict:
+        return json.loads((ADAPTERS_DIR / name).read_text(encoding="utf-8"))
+
+    def test_both_client_adapters_redact_argument_lists_and_urls(self) -> None:
+        for name in ("claude-code.json", "codex.json"):
+            patterns = self.adapter(name)["sensitive_key_patterns"]
+            for pattern in ("args", "*url*"):
+                with self.subTest(adapter=name, pattern=pattern):
+                    self.assertIn(pattern, patterns)
+
+
 if __name__ == "__main__":
     unittest.main()

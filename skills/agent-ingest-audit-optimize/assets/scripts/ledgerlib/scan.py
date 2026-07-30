@@ -63,6 +63,7 @@ SCAN_REASONS = frozenset(
         "missing",
         "inaccessible",
         "directory",
+        "not_regular_file",
         "unreadable",
         "pointer_unresolved",
     }
@@ -201,23 +202,39 @@ def run_probe(
     looks clean, which is the worst output this tool can produce.
 
     The security rule this function exists to enforce: **every** path, whether
-    expanded from a glob or named literally, is re-checked with
-    `resolve_anchored` on its anchored form before it is opened. `check_glob`
-    ran at load time against the pattern and says nothing about what the
-    filesystem holds now -- a symlinked or junctioned directory inside
+    expanded from a glob or named literally, is re-checked before it is opened,
+    and the anchor it is checked against is **the one its own probe named**.
+    `check_glob` ran at load time against the pattern and says nothing about
+    what the filesystem holds now -- a symlinked or junctioned directory inside
     `$USER_CONFIG/skills/` can carry a match clean out of the anchor between
     the adapter being validated and this walk running. A refusal becomes one
     item with `state: "not_present"` and the `PathSafetyError` reason in
     `attributes`, and the scan continues: refusing to look at one path is not
     a reason to abandon the baseline.
 
-    The stored form always comes from `anchor_path`, never from string
-    concatenation. That function owns the longest-anchor rule -- a project
-    nested inside a user configuration root anchors to `$PROJECT` -- and it
-    resolves before matching, so a match that truly lands outside every anchor
-    comes back absolute and `portable: false`. Feeding that absolute form to
-    `resolve_anchored` is what turns the escape into a refusal: an anchored
-    form that is not anchored is exactly the thing rule 3 rejects.
+    "Its own probe's anchor" is the whole of it, and asking the weaker question
+    -- is this inside *some* anchor -- is a hole rather than a shortcut. An
+    adapter declares several anchors and one of them is usually enormous:
+    `claude-code.json` declares `$HOME: ["~"]`, so every path a user owns is
+    inside an anchor. A junction at `$USER_CONFIG/skills/evil` pointing at
+    `~/.ssh` lands a match that `anchor_path` will happily store as
+    `$HOME/.ssh/...` with `portable: true`, and a check that only asked
+    whether the anchored form re-resolves would accept it -- reading, digesting
+    and recording a file the probe never named. `own_root` below is therefore
+    passed down and re-checked in `_probe_one`: a match that lands under a
+    *different* anchor has still escaped the one it was probed under.
+
+    The stored form still comes from `anchor_path`, never from string
+    concatenation, and it keeps the longest-anchor rule that function owns -- a
+    project nested inside a user configuration root is recorded against
+    `$PROJECT`, which is the more useful of the two true statements about where
+    it lives. That is a question about *how to write the path down*, and it is
+    deliberately not the question about *whether the path may be opened*: a
+    second anchor may relabel a path, and may never launder one out of the
+    first. A match that truly lands outside every anchor comes back absolute
+    and `portable: false`; feeding that absolute form to `resolve_anchored` is
+    what turns that escape into a refusal, since an anchored form that is not
+    anchored is exactly the thing rule 3 rejects.
 
     Glob results are sorted by their anchored path. `Path.glob` yields
     whatever order the directory index hands back, which differs by filesystem
@@ -248,15 +265,38 @@ def run_probe(
                       reason="unresolved_anchor")]
 
     if not is_glob:
-        return _probe_one(probe, spec, roots, patterns)
+        return _probe_one(probe, spec, roots, patterns, own_root=root)
 
     tail = reference.group(2) or ""
     try:
         matches = [root] if not tail else list(root.glob(tail))
-    except (OSError, ValueError, IndexError, RecursionError) as exc:
+    except (
+        OSError,
+        ValueError,
+        IndexError,
+        RecursionError,
+        NotImplementedError,
+    ) as exc:
         # `Path.glob` raises ValueError for a pattern it will not accept and
         # OSError for a tree it cannot walk. Neither is a reason to abandon
         # the whole scan, and neither may escape this function.
+        #
+        # `NotImplementedError` is named explicitly, and the tuple is NOT
+        # widened to its base `RuntimeError`. `Path.glob` raises it -- "Non-
+        # relative patterns are unsupported" -- for a tail that is not
+        # relative, which `check_glob` cannot refuse: `$USER_CONFIG//Windows/
+        # *.ini` has no `..` segment and is not itself absolute, yet its tail
+        # `/Windows/*.ini` is, and so is `C:/...` on Windows. That is probe
+        # data reaching a documented refusal, exactly like the `ValueError`
+        # beside it, and a user `local.json` can carry it. Bare `RuntimeError`
+        # is a different animal: CPython raises it for genuine defects -- a
+        # container mutated during iteration, an interpreter invariant broken
+        # -- and catching it here would convert a bug in this tool into a
+        # `glob_failed` item saying the probe found nothing. Neither `pathlib`
+        # nor `glob` raises a bare `RuntimeError` on this path (a symlink loop
+        # reaches this module through `resolve_anchored`, which converts it to
+        # `PathSafetyError`), so nothing is lost by leaving it uncaught, and a
+        # traceback naming the real fault is the right answer if one appears.
         del exc
         return [_item(probe, name=spec, anchor=spec, state="not_present",
                       reason="glob_failed")]
@@ -269,7 +309,11 @@ def run_probe(
             items.append(_item(probe, name=_leaf(str(match)), anchor=str(match),
                                state="not_present", reason=exc.reason))
             continue
-        items.extend(_probe_one(probe, stored, roots, patterns, portable=portable))
+        items.extend(
+            _probe_one(
+                probe, stored, roots, patterns, own_root=root, portable=portable
+            )
+        )
 
     if not items:
         # The probe's own pattern is the name, so the baseline records *what*
@@ -287,6 +331,7 @@ def _probe_one(
     roots: dict[str, Path],
     patterns: Sequence[str],
     *,
+    own_root: Path | None = None,
     portable: bool | None = None,
 ) -> list[dict]:
     """The items for one anchored path, re-checking it before opening it.
@@ -296,6 +341,18 @@ def _probe_one(
     into one `mcp-server` item per server. Without `parse` the list holds
     exactly one item and this function behaves as it always has.
 
+    `own_root` is the resolved root of the anchor the **probe** named, and it
+    is the containment test that actually matters. `resolve_anchored` answers
+    "does this stored form stay inside the anchor the *stored form* names",
+    which is the right question only when the two anchors are the same one.
+    For a glob match the stored form was re-derived by `anchor_path` across
+    every root, so a link out of `$USER_CONFIG` that lands under `$HOME` comes
+    back as a perfectly well-formed `$HOME/...` that `resolve_anchored`
+    accepts. Re-checking the resolved path against `own_root` is what makes a
+    second anchor unable to launder a path out of the first. It is `None` only
+    for a caller that has no probe anchor to offer, in which case the older,
+    weaker check is all there is.
+
     `portable` is what `anchor_path` already reported for a glob match, kept
     only so a refusal can still record it: design spec 7.1 stores a path
     outside every anchor absolute and flagged `portable: false`, and that flag
@@ -304,6 +361,11 @@ def _probe_one(
     """
     try:
         resolved = resolve_anchored(stored, roots)
+        if own_root is not None and not _within(resolved, own_root):
+            raise PathSafetyError(
+                f"path resolves outside the anchor its probe named: {stored!r}",
+                reason="path_resolves_outside_anchor",
+            )
         anchor, portable = anchor_path(resolved, roots)
     except PathSafetyError as exc:
         return [_item(probe, name=_leaf(stored), anchor=stored,
@@ -326,6 +388,20 @@ def _probe_one(
         return [_item(probe, name=name, anchor=anchor, state="present",
                       reason="directory", portable=portable)]
 
+    if not stat.S_ISREG(info.st_mode):
+        # Everything that is neither a directory nor a regular file, recorded
+        # the same way a directory is: present, no digest, and a reason. This
+        # is not tidiness. `file_digest` reads the whole file, and `open()` on
+        # a FIFO blocks until a writer appears -- which, for a scan nobody is
+        # feeding, is forever. `claude-code.json` probes
+        # `$USER_CONFIG/agents/*`, which matches any name, so a FIFO, socket,
+        # or device node anywhere under a configuration directory is inside
+        # the probe's own anchor and passes every path-safety rule; nothing
+        # before this asked what *kind* of file it was. Only a regular file is
+        # opened, and the item still says the thing exists.
+        return [_item(probe, name=name, anchor=anchor, state="present",
+                      reason="not_regular_file", portable=portable)]
+
     try:
         digest = file_digest(resolved)
     except (OSError, ValueError, MemoryError):
@@ -347,6 +423,21 @@ def _probe_one(
         portable=portable,
         patterns=patterns,
     )
+
+
+def _within(path: Path, root: Path) -> bool:
+    """Whether an already-resolved `path` lies inside an already-resolved root.
+
+    Purely a comparison of components -- `relative_to` never touches the
+    filesystem -- so it says nothing on its own about links. It is sound here
+    because both sides arrive resolved: `root` from `resolve_anchor_roots` and
+    `path` from `resolve_anchored`, which is where the link-following happened.
+    """
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def _parse_format(probe: object) -> str | None:
@@ -775,7 +866,7 @@ def _coverage_findings(
     captured_on: str,
     selection: Mapping[str, object],
 ) -> list[str]:
-    """The three ways a baseline can look clean because it looked at nothing.
+    """The four ways a baseline can look clean, or safe, without being either.
 
     All are findings and none is an error: the scan runs, the entry is
     emitted, and the exit code says the output is not to be trusted as a
@@ -798,6 +889,18 @@ def _coverage_findings(
     (`docs/validation/scan-dogfood-0.2.5.md` finding 1) showed it is a coverage
     failure, because a machine with two supported clients installed answered
     the default invocation with `"items": []` and exit `0`.
+
+    The fourth is the odd one out: it is about safety rather than coverage, and
+    it is here because it has the same shape -- a run that looks fine and is
+    not. An adapter whose `sensitive_key_patterns` is empty makes `redact` the
+    identity function, so if any of its probes carries `parse`, every value
+    read out of those documents is copied into the baseline exactly as written.
+    A user `local.json` overriding a bundled adapter by client name is enough
+    to arrange that, and before this the run printed nothing and exited `0`
+    while dumping the parsed file verbatim. It is deliberately conditional on a
+    `parse` probe existing: an adapter that parses nothing reads no values at
+    all, so empty patterns are the correct configuration for it -- which is
+    what `generic.json` ships, and it must stay clean.
     """
     client = document["client"]
     findings: list[str] = []
@@ -851,6 +954,24 @@ def _coverage_findings(
             f"${USER_CONFIG_ANCHOR}: no candidate root for it exists on this "
             "machine, so every probe beneath it is recorded not_present rather "
             "than looked at, and this baseline covers nothing under it"
+        )
+
+    parsing = sum(
+        1
+        for probe in document["probes"]
+        if isinstance(probe, dict) and _parse_format(probe) is not None
+    )
+    if parsing and not document["sensitive_key_patterns"]:
+        findings.append(
+            f"adapter for client {client!r} has {parsing} probe(s) with parse "
+            "but an empty sensitive_key_patterns: redaction matches key names, "
+            "so an empty list redacts nothing and every value read out of "
+            "those documents is copied into this baseline exactly as the file "
+            "wrote it -- API tokens and MCP env blocks included. Add the key "
+            "names that carry secrets for this client, for example "
+            '["*token*", "*key*", "*secret*", "*password*", "*credential*", '
+            '"*auth*", "env", "headers"], or drop parse from those probes to '
+            "record the files by digest alone"
         )
 
     return findings

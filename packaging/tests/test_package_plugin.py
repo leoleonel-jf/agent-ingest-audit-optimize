@@ -51,6 +51,30 @@ def source_script_relative_paths() -> list[str]:
     )
 
 
+def source_data_relative_paths() -> list[str]:
+    """Every shipping ``*.json`` under the Skill's adapter and schema directories.
+
+    Walked from the source tree for the same reason
+    ``source_script_relative_paths`` is: a hardcoded list names the files that
+    exist today and says nothing about the one a later task adds. The two
+    directories are the data half of what ``scan`` needs to run at all -- an
+    adapter names the files to probe, and the schema states the adapter format
+    -- and until this walk existed a packager change that dropped either would
+    have passed every test in this file, because the extract-and-run test only
+    exercised ``verify``, which needs neither.
+    """
+    directories = (
+        SKILL_DIR / "assets" / "adapters",
+        SKILL_DIR / "assets" / "schemas",
+    )
+    return sorted(
+        path.relative_to(SKILL_DIR).as_posix()
+        for directory in directories
+        for path in directory.rglob("*.json")
+        if path.is_file() and "__pycache__" not in path.parts
+    )
+
+
 def minimal_ledger() -> dict:
     """The smallest ledger `verify` accepts. Shape copied from the dashboard suite."""
     return {
@@ -174,6 +198,96 @@ class PackagePluginTests(unittest.TestCase):
         ]
         self.assertEqual(missing_from_plugin, [], "plugin archive is missing script modules")
         self.assertEqual(missing_from_skill, [], "Skill archive is missing script modules")
+
+    def test_archives_ship_every_adapter_and_schema_in_the_source_tree(self) -> None:
+        relative_paths = source_data_relative_paths()
+        self.assertIn("assets/adapters/generic.json", relative_paths)
+        self.assertIn("assets/schemas/adapter.schema.json", relative_paths)
+
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp)
+            plugin_archive, skill_archive, _ = package_plugin.build(output)
+            with zipfile.ZipFile(plugin_archive) as archive:
+                plugin_names = set(archive.namelist())
+            with zipfile.ZipFile(skill_archive) as archive:
+                skill_names = set(archive.namelist())
+
+        missing_from_plugin = [
+            relative
+            for relative in relative_paths
+            if f"skills/{SKILL_NAME}/{relative}" not in plugin_names
+        ]
+        missing_from_skill = [
+            relative
+            for relative in relative_paths
+            if f"{SKILL_NAME}/{relative}" not in skill_names
+        ]
+        self.assertEqual(missing_from_plugin, [], "plugin archive is missing adapter or schema data")
+        self.assertEqual(missing_from_skill, [], "Skill archive is missing adapter or schema data")
+
+    def _assert_extracted_dashboard_scans(self, archive_path: Path, script_prefix: str) -> None:
+        """The extracted bundle must be able to scan, not merely to contain files.
+
+        ``verify`` reads only the ledger handed to it and touches no bundled
+        data, so an archive missing every adapter still passes the verify
+        run below. ``scan`` loads an adapter out of the extracted tree before
+        it does anything else, which is what makes this the test that fails
+        when ``assets/adapters/`` is dropped.
+
+        ``--client generic`` rather than a detected client: generic declares
+        no probes and its only anchor is ``$PROJECT``, so the run depends on
+        nothing installed on the host and exits ``0`` on any machine. A
+        detected client would make this test pass or fail according to whose
+        laptop it ran on.
+        """
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            extracted = root / "extracted"
+            elsewhere = root / "elsewhere"
+            elsewhere.mkdir()
+            with zipfile.ZipFile(archive_path) as archive:
+                archive.extractall(extracted)
+
+            dashboard = extracted / script_prefix / "assets" / "scripts" / "dashboard.py"
+            self.assertTrue(dashboard.is_file(), f"archive did not ship {script_prefix}/assets/scripts/dashboard.py")
+
+            environment = os.environ.copy()
+            environment.pop("PYTHONPATH", None)
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(dashboard),
+                    "scan",
+                    "--id",
+                    "BASE-2026-000",
+                    "--client",
+                    "generic",
+                ],
+                cwd=elsewhere,
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(
+            completed.returncode,
+            0,
+            f"extracted dashboard.py could not scan:\nstdout: {completed.stdout}\nstderr: {completed.stderr}",
+        )
+        entry = json.loads(completed.stdout)
+        self.assertEqual(entry["id"], "BASE-2026-000")
+        self.assertEqual(entry["client"], "generic")
+
+    def test_extracted_plugin_archive_runs_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            plugin_archive, _, _ = package_plugin.build(Path(temp))
+            self._assert_extracted_dashboard_scans(plugin_archive, f"skills/{SKILL_NAME}")
+
+    def test_extracted_skill_archive_runs_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            _, skill_archive, _ = package_plugin.build(Path(temp))
+            self._assert_extracted_dashboard_scans(skill_archive, SKILL_NAME)
 
     def _assert_extracted_dashboard_verifies(self, archive_path: Path, script_prefix: str) -> None:
         with tempfile.TemporaryDirectory() as temp:

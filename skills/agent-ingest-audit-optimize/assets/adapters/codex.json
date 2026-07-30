@@ -25,5 +25,5 @@
       "parse": "toml" },
     { "kind": "skill", "scope": "system", "glob": "$SYSTEM_CONFIG/skills/*/SKILL.md" }
   ],
-  "sensitive_key_patterns": ["*token*", "*key*", "*secret*", "*password*", "*credential*", "*auth*", "env", "headers", "set", "projects"]
+  "sensitive_key_patterns": ["*token*", "*key*", "*secret*", "*password*", "*credential*", "*auth*", "env", "headers", "set", "projects", "args", "*url*"]
 }

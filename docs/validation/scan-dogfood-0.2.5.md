@@ -344,3 +344,40 @@ python -m unittest discover -s dashboard/tests    Ran 621 tests    OK (skipped=2
 python -m unittest discover -s packaging/tests    Ran 20 tests     OK (skipped=1)
 python -m unittest discover -s evals/tests        Ran 11 tests     OK
 ```
+
+## 2026-07-30, third run — after the review round
+
+Two adversarial reviews were run against the branch before release. The security review found a
+containment hole this dogfood could not have surfaced: `run_probe` checked a match against *any*
+anchor rather than against the anchor its probe named, and `claude-code.json` declares `$HOME` as
+`~`, so a junction under `$USER_CONFIG/skills/` into any other part of the home directory was read
+and digested without a refusal. The existing escape test passed only because its fixture held a
+single anchor — the one configuration in which the hole cannot open. It is fixed, and the
+replacement test uses a multi-anchor mapping, which is the shape the shipped adapters actually have.
+
+Three more came out of the same pass: a glob shape that `check_glob` accepts but `Path.glob`
+refuses with `NotImplementedError` crashed `scan` with a traceback; three of the nine `SCAN_REASONS`
+were unreachable by the suite, which is why that crash shipped; and an adapter with `parse` probes
+and an empty `sensitive_key_patterns` was accepted in silence, which a user adapter could have used
+to dump a parsed file verbatim at exit `0`. All four are fixed, each with a named test and an
+ablation.
+
+The re-run, after all of it:
+
+| command | exit | items | present / not_present |
+|---|---|---|---|
+| `--client claude-code` | 0 | 114 | 96 / 18 |
+| `--client codex` | 0 | 12 | 3 / 9 |
+| `--client generic` | 0 | 0 | — |
+
+No finding on any of the three, which is correct: a named client is not a fallback, and generic
+asked for by name is not one either. A secret sweep over both non-empty outputs matched nothing but
+`sha256:` digests and the forty-character git commit identifiers that `installed_plugins.json`
+records for each installed plugin — configuration content, not credentials, and exactly the verbatim
+copying `PRIVACY.md` now discloses rather than denies.
+
+```text
+python -m unittest discover -s dashboard/tests    Ran 688 tests    OK (skipped=3)
+python -m unittest discover -s packaging/tests    Ran 23 tests     OK (skipped=1)
+python -m unittest discover -s evals/tests        Ran 11 tests     OK
+```

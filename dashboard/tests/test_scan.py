@@ -23,6 +23,7 @@ import json
 import os
 import re
 import shutil
+import stat as stat_module
 import subprocess
 import sys
 import tempfile
@@ -54,7 +55,9 @@ from ledgerlib.constants import (  # noqa: E402
     REQUIRED_BASELINE_FIELDS,
     REQUIRED_BASELINE_ITEM_FIELDS,
 )
+from ledgerlib.adapters import validate_adapter  # noqa: E402
 from ledgerlib.errors import LedgerError, PATH_SAFETY_REASONS  # noqa: E402
+from ledgerlib.paths import check_glob  # noqa: E402
 from ledgerlib import scan as scan_module  # noqa: E402
 from ledgerlib.scan import (  # noqa: E402
     BASELINE_PREFIX,
@@ -2299,6 +2302,449 @@ class ScanWritesNothingTests(ScanTestCase):
         present = [item for item in entry["items"] if item["state"] == "present"]
         self.assertTrue(present)
         self.assertTrue(any(item["digest"] for item in present))
+
+
+class MultiAnchorEscapeTests(EscapeTests):
+    """The shipped shape: several anchors, so a second can launder a path.
+
+    `EscapeTests` builds a `roots` mapping holding exactly one anchor, which is
+    the single configuration in which a match carried out of the probe's own
+    anchor cannot land inside another one. `claude-code.json` declares three --
+    `$USER_CONFIG`, `$HOME` (`~`), and `$PROJECT` -- and `$HOME` contains
+    everything. Here `$HOME` is the whole temporary tree, so the directory the
+    junction points at is inside it, and "is this inside *some* anchor" answers
+    yes for a path the probe never named.
+
+    Inheriting the single-anchor class is deliberate twice over: every
+    assertion it makes must still hold with a second anchor present, and the
+    two tests it already owns run again here against the mapping that has the
+    hole in it.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.roots = {"USER_CONFIG": self.user_config, "HOME": self.tmp}
+
+    def probe_the_skills(self) -> list[dict]:
+        self.build_escape()
+        return run_probe(
+            {"kind": "skill", "glob": "$USER_CONFIG/skills/*/SKILL.md"},
+            self.roots,
+            [],
+        )
+
+    def test_a_match_laundered_into_a_second_anchor_is_still_refused(self) -> None:
+        items = self.probe_the_skills()
+        refused = [item for item in items if item["state"] == "not_present"]
+        self.assertEqual(len(refused), 1, items)
+        self.assertIn(refused[0]["attributes"].get("reason"), PATH_SAFETY_REASONS)
+        self.assertIsNone(refused[0]["digest"])
+
+    def test_nothing_under_an_anchor_the_probe_never_named_is_read(self) -> None:
+        """The refusal still records `$HOME/...` -- that is what it refused.
+
+        What must not exist is a *present* item there: an anchor the probe
+        never named may label a path in a refusal, and may never be the reason
+        one was opened.
+        """
+        items = self.probe_the_skills()
+        laundered = [
+            item
+            for item in items
+            if item["anchor"].startswith("$HOME") and item["state"] == "present"
+        ]
+        self.assertEqual(laundered, [], items)
+        self.assertTrue(
+            all(
+                item["digest"] is None
+                for item in items
+                if item["anchor"].startswith("$HOME")
+            ),
+            items,
+        )
+
+    def test_a_path_probe_is_held_to_its_own_anchor_too(self) -> None:
+        """Not only globs. A literal `path` through the same junction escapes."""
+        self.build_escape()
+        items = run_probe(
+            {"kind": "skill", "path": "$USER_CONFIG/skills/evil/SKILL.md"},
+            self.roots,
+            [],
+        )
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "not_present")
+        self.assertNotIn("PLAINTEXT-OUTSIDE-9a3f", json.dumps(items))
+
+
+class GlobFailureTests(ProbeTestCase):
+    """A glob `check_glob` accepts that `Path.glob` refuses at expansion.
+
+    `Path.glob` raises `NotImplementedError` ("Non-relative patterns are
+    unsupported") for a tail that is not relative. That is a `RuntimeError`
+    subclass, so it is none of `OSError`, `ValueError`, `IndexError`, or
+    `RecursionError`, and `scan_command` catches only `LedgerError`: before
+    this it left `run_probe` as a traceback on a probe a user `local.json`
+    could carry.
+    """
+
+    NON_RELATIVE = "$USER_CONFIG//Windows/*.ini"
+    DRIVE_RELATIVE = "$USER_CONFIG/C:/Windows/*.ini"
+
+    def adapter_with(self, pattern: str) -> dict:
+        return {
+            "adapter_version": 1,
+            "client": "local",
+            "expires_on": "2099-01-01",
+            "anchors": {"$USER_CONFIG": ["~"]},
+            "probes": [{"kind": "skill", "glob": pattern}],
+            "sensitive_key_patterns": ["*token*"],
+        }
+
+    def test_the_pattern_is_one_the_load_time_checks_accept(self) -> None:
+        """The premise. If either check refused it, `run_probe` never sees it."""
+        check_glob(self.NON_RELATIVE)
+        self.assertEqual(
+            validate_adapter(self.adapter_with(self.NON_RELATIVE), source="local.json"),
+            [],
+        )
+
+    def test_a_non_relative_glob_tail_is_one_glob_failed_item(self) -> None:
+        items = run_probe(
+            {"kind": "skill", "glob": self.NON_RELATIVE}, self.roots, []
+        )
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "not_present")
+        self.assertIsNone(items[0]["digest"])
+        self.assertEqual(items[0]["attributes"]["reason"], "glob_failed")
+        self.assertIn("glob_failed", SCAN_REASONS)
+
+    def test_a_drive_relative_glob_tail_does_not_raise_either(self) -> None:
+        # Only Windows treats `C:/...` as non-relative; on POSIX it is an
+        # ordinary directory name that simply matches nothing. Both answers are
+        # one item, which is the contract being asserted.
+        items = run_probe(
+            {"kind": "skill", "glob": self.DRIVE_RELATIVE}, self.roots, []
+        )
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "not_present")
+        self.assertIn(items[0]["attributes"]["reason"], SCAN_REASONS)
+
+
+class ScanReasonCoverageTests(ProbeTestCase):
+    """The reasons no test named. An unnamed reason is an untested branch."""
+
+    def test_a_probe_with_no_target_records_malformed_probe(self) -> None:
+        items = run_probe({"kind": "skill"}, self.roots, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["attributes"]["reason"], "malformed_probe")
+        self.assertIn("malformed_probe", SCAN_REASONS)
+
+    def test_a_probe_whose_target_is_not_a_string_records_malformed_probe(
+        self,
+    ) -> None:
+        items = run_probe({"kind": "skill", "glob": 7}, self.roots, [])
+        self.assertEqual(items[0]["attributes"]["reason"], "malformed_probe")
+
+    def test_a_stat_that_fails_after_the_path_check_records_inaccessible(self) -> None:
+        """`inaccessible` is only reachable through a race, so inject the race.
+
+        `resolve_anchored` ends by calling `Path.stat()` on the very path
+        `_probe_one` is about to `os.stat`, and turns any failure into a
+        `PathSafetyError`. A file that cannot be stat'ed at all is therefore
+        refused by the path layer and never reaches `_probe_one`'s own
+        `except`. What does reach it is the TOCTOU window between the two
+        calls -- a file whose permissions change in between -- and that is
+        exactly what is armed here: stat succeeds for the path layer and fails
+        immediately afterwards.
+        """
+        target = self.write(self.user_config / "settings.json", "{}\n")
+        real_stat = os.stat
+        real_resolve_anchored = scan_module.resolve_anchored
+        armed: dict[str, bool] = {"on": False}
+
+        def arm(*arguments: object, **keywords: object) -> object:
+            result = real_resolve_anchored(*arguments, **keywords)
+            armed["on"] = True
+            return result
+
+        def stat_after_the_check(path, *arguments, **keywords):
+            if armed["on"] and Path(path) == target:
+                raise PermissionError(13, "Permission denied")
+            return real_stat(path, *arguments, **keywords)
+
+        with mock.patch.object(scan_module, "resolve_anchored", arm), \
+                mock.patch.object(scan_module.os, "stat", stat_after_the_check):
+            items = run_probe(
+                {"kind": "mcp-server", "path": "$USER_CONFIG/settings.json"},
+                self.roots,
+                [],
+            )
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "not_present")
+        self.assertIsNone(items[0]["digest"])
+        self.assertEqual(items[0]["attributes"]["reason"], "inaccessible")
+        self.assertIn("inaccessible", SCAN_REASONS)
+
+
+class NonRegularFileTests(ProbeTestCase):
+    """Only a regular file is digested. `file_digest` does a whole read.
+
+    `claude-code.json` probes `$USER_CONFIG/agents/*`, which matches any name.
+    A FIFO created under it makes `read_bytes()`'s `open()` block until a
+    writer appears -- forever, for a scan nobody is feeding. A directory was
+    already excluded before this; nothing else was.
+    """
+
+    def stat_as(self, target: Path, mode: int):
+        """Report `target` with `mode`'s file type, everything else untouched."""
+        real_stat = os.stat
+
+        def stat_with_mode(path, *arguments, **keywords):
+            info = real_stat(path, *arguments, **keywords)
+            if Path(path) == target:
+                fields = list(info)
+                fields[0] = mode
+                return os.stat_result(fields)
+            return info
+
+        return mock.patch.object(scan_module.os, "stat", stat_with_mode)
+
+    def test_a_non_regular_file_is_present_with_a_reason_and_no_digest(self) -> None:
+        target = self.write(
+            self.user_config / "agents" / "pipe", "PLAINTEXT-FIFO-4c1d\n"
+        )
+        with self.stat_as(target, stat_module.S_IFIFO | 0o600):
+            items = run_probe(
+                {"kind": "agent", "glob": "$USER_CONFIG/agents/*"}, self.roots, []
+            )
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "present")
+        self.assertIsNone(items[0]["digest"])
+        self.assertEqual(items[0]["attributes"]["reason"], "not_regular_file")
+        self.assertIn("not_regular_file", SCAN_REASONS)
+        self.assertNotIn("PLAINTEXT-FIFO-4c1d", json.dumps(items))
+
+    def test_a_regular_file_beside_it_is_still_digested(self) -> None:
+        target = self.write(self.user_config / "agents" / "pipe", "x\n")
+        ordinary = self.write(self.user_config / "agents" / "real.md", "# agent\n")
+        with self.stat_as(target, stat_module.S_IFIFO | 0o600):
+            items = run_probe(
+                {"kind": "agent", "glob": "$USER_CONFIG/agents/*"}, self.roots, []
+            )
+        digested = [item for item in items if item["digest"] is not None]
+        self.assertEqual(len(digested), 1, items)
+        self.assertEqual(digested[0]["digest"], self.digest_of(ordinary))
+
+    @unittest.skipUnless(
+        hasattr(os, "mkfifo"), "platform has no os.mkfifo; a FIFO cannot be built"
+    )
+    def test_a_real_fifo_is_recorded_without_blocking_on_a_read(self) -> None:
+        import signal
+
+        fifo = self.user_config / "agents" / "pipe"
+        fifo.parent.mkdir(parents=True, exist_ok=True)
+        os.mkfifo(fifo)
+
+        def give_up(signum: int, frame: object) -> None:
+            raise AssertionError("run_probe blocked opening a FIFO")
+
+        previous = signal.signal(signal.SIGALRM, give_up)
+        self.addCleanup(signal.signal, signal.SIGALRM, previous)
+        signal.alarm(10)
+        self.addCleanup(signal.alarm, 0)
+        items = run_probe(
+            {"kind": "agent", "glob": "$USER_CONFIG/agents/*"}, self.roots, []
+        )
+        signal.alarm(0)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["state"], "present")
+        self.assertIsNone(items[0]["digest"])
+        self.assertEqual(items[0]["attributes"]["reason"], "not_regular_file")
+
+
+class SensitivePatternCoverageTests(ScanTestCase):
+    """An adapter that parses documents with no patterns redacts nothing.
+
+    `redact` with an empty pattern list is the identity function, so every
+    value a `parse` probe reads is copied into the baseline verbatim. That is
+    a legitimate configuration for an adapter that parses nothing -- and
+    `generic.json` is exactly that -- so it is a finding rather than a refusal,
+    and it is conditioned on a probe actually carrying `parse`.
+    """
+
+    NO_PARSE_PROBES = [
+        {"kind": "instruction-file", "scope": "user", "path": "$USER_CONFIG/CLAUDE.md"},
+        {"kind": "skill", "scope": "user", "glob": "$USER_CONFIG/skills/*/SKILL.md"},
+    ]
+
+    def unredacted(self) -> list[str]:
+        self.populate()
+        _, findings, self.code = self.do_scan(
+            adapter=self.write_adapter(sensitive_key_patterns=[])
+        )
+        return [
+            finding for finding in findings if "sensitive_key_patterns" in finding
+        ]
+
+    def test_a_parsing_adapter_with_no_patterns_is_a_finding(self) -> None:
+        self.assertTrue(self.unredacted())
+        self.assertEqual(self.code, 1)
+
+    def test_the_finding_names_the_client_and_says_what_to_add(self) -> None:
+        finding = self.unredacted()[0]
+        self.assertIn("'test-client'", finding)
+        self.assertIn("parse", finding)
+        self.assertIn("*token*", finding)
+
+    def test_the_baseline_is_still_emitted(self) -> None:
+        self.populate()
+        entry, _, _ = self.do_scan(
+            adapter=self.write_adapter(sensitive_key_patterns=[])
+        )
+        self.assertEqual(validate_baseline(entry, 0, source="scan"), [])
+        self.assertTrue(entry["items"])
+
+    def test_an_adapter_with_patterns_produces_no_such_finding(self) -> None:
+        self.populate()
+        _, findings, code = self.do_scan()
+        self.assertFalse(
+            [f for f in findings if "sensitive_key_patterns" in f], findings
+        )
+        self.assertEqual(code, 0)
+
+    def test_no_parse_probe_and_no_patterns_is_no_finding(self) -> None:
+        self.populate()
+        _, findings, code = self.do_scan(
+            adapter=self.write_adapter(
+                probes=self.NO_PARSE_PROBES, sensitive_key_patterns=[]
+            )
+        )
+        self.assertFalse(
+            [f for f in findings if "sensitive_key_patterns" in f], findings
+        )
+        self.assertEqual(code, 0)
+
+    def test_the_bundled_generic_adapter_stays_clean(self) -> None:
+        """`generic.json` ships `[]` patterns and `[]` probes, and must not fire."""
+        _, findings, code = self.do_scan(adapter=ADAPTERS_DIR / "generic.json")
+        self.assertFalse(
+            [f for f in findings if "sensitive_key_patterns" in f], findings
+        )
+        self.assertEqual(code, 0)
+
+    def test_every_bundled_adapter_stays_clean(self) -> None:
+        for path in sorted(ADAPTERS_DIR.glob("*.json")):
+            with self.subTest(adapter=path.name):
+                _, findings, _ = self.do_scan(adapter=path)
+                self.assertFalse(
+                    [f for f in findings if "sensitive_key_patterns" in f], findings
+                )
+
+
+class EnvAnchorScanTests(ScanTestCase):
+    """A `$env:` anchor candidate drives a whole scan, not just resolution.
+
+    `$env:CLAUDE_CONFIG_DIR` is the first candidate `claude-code.json` names
+    and the one the research says relocates everything. Until this, it was
+    proven only at `resolve_anchor_roots`; the `scan -> resolve_anchor_roots
+    (environ=...)` wiring was not exercised end to end, so a scan could have
+    read the default tree while the tests passed.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.relocated = self.tmp / "relocated"
+        self.write(self.relocated / "CLAUDE.md", "# relocated memory\n")
+        self.write(self.relocated / "skills" / "one" / "SKILL.md", "relocated\n")
+
+    def env_adapter(self, **overrides: object) -> Path:
+        return self.write_adapter(
+            anchors={"$USER_CONFIG": ["$env:CLAUDE_CONFIG_DIR"], "$PROJECT": ["."]},
+            **overrides,
+        )
+
+    def digest_of(self, path: Path) -> str:
+        return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def memory_item(self, entry: dict) -> dict:
+        found = [
+            item
+            for item in entry["items"]
+            if item["anchor"] == "$USER_CONFIG/CLAUDE.md"
+        ]
+        self.assertEqual(len(found), 1, entry["items"])
+        return found[0]
+
+    def test_the_scan_reads_the_tree_the_environment_variable_names(self) -> None:
+        self.populate()  # a *different* CLAUDE.md in the default user_config
+        entry, _, code = self.do_scan(
+            adapter=self.env_adapter(),
+            environ={"CLAUDE_CONFIG_DIR": str(self.relocated)},
+        )
+        item = self.memory_item(entry)
+        self.assertEqual(item["state"], "present")
+        self.assertEqual(item["digest"], self.digest_of(self.relocated / "CLAUDE.md"))
+        self.assertNotEqual(
+            item["digest"], self.digest_of(self.user_config / "CLAUDE.md")
+        )
+        self.assertEqual(code, 0)
+
+    def test_a_glob_beneath_the_env_anchor_expands_in_that_tree(self) -> None:
+        self.populate()
+        entry, _, _ = self.do_scan(
+            adapter=self.env_adapter(),
+            environ={"CLAUDE_CONFIG_DIR": str(self.relocated)},
+        )
+        skills = [item for item in entry["items"] if item["kind"] == "skill"]
+        self.assertEqual(
+            [item["anchor"] for item in skills],
+            ["$USER_CONFIG/skills/one/SKILL.md"],
+        )
+
+    def test_the_same_adapter_with_the_variable_unset_resolves_nothing(self) -> None:
+        """The control: without the variable the anchor is unresolved."""
+        entry, findings, code = self.do_scan(adapter=self.env_adapter(), environ={})
+        self.assertTrue([f for f in findings if "unresolved" in f], findings)
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            self.memory_item(entry)["attributes"]["reason"], "unresolved_anchor"
+        )
+
+    def test_the_cli_passes_the_process_environment_through(self) -> None:
+        """`scan_command` takes no `environ`; it must reach `os.environ`."""
+        self.populate()
+        adapter = self.env_adapter()
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.relocated)}):
+            code, stdout, stderr = self.run_cli(*self.cli_arguments(adapter))
+        self.assertEqual(code, 0, stderr)
+        item = self.memory_item(json.loads(stdout))
+        self.assertEqual(item["digest"], self.digest_of(self.relocated / "CLAUDE.md"))
+
+
+class ScanNeverTracebacksTests(ScanTestCase):
+    """Probe data reaches `scan` from a user `local.json`; none of it may raise."""
+
+    HOSTILE_PROBES = [
+        {"kind": "skill", "scope": "user", "glob": "$USER_CONFIG//Windows/*.ini"},
+        {"kind": "skill", "scope": "user", "glob": "$USER_CONFIG/C:/Windows/*.ini"},
+    ]
+
+    def test_a_glob_the_expander_refuses_does_not_escape_scan(self) -> None:
+        self.populate()
+        entry, _, code = self.do_scan(
+            adapter=self.write_adapter(probes=self.HOSTILE_PROBES)
+        )
+        self.assertEqual(len(entry["items"]), 2)
+        self.assertEqual(validate_baseline(entry, 0, source="scan"), [])
+        self.assertEqual(code, 0)
+
+    def test_the_cli_exits_zero_rather_than_tracebacking(self) -> None:
+        self.populate()
+        adapter = self.write_adapter(probes=self.HOSTILE_PROBES)
+        code, stdout, stderr = self.run_cli(*self.cli_arguments(adapter))
+        self.assertEqual(code, 0, stderr)
+        self.assertNotIn("Traceback", stderr)
+        self.assertEqual(len(json.loads(stdout)["items"]), 2)
 
 
 if __name__ == "__main__":

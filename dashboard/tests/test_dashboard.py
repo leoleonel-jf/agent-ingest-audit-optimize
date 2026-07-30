@@ -3580,6 +3580,21 @@ class KnownGapDocumentationTests(unittest.TestCase):
         text = _collapsed(REFERENCE)
         self.assertIn("POSIX-only and cannot be declared optional", text)
 
+    def test_reference_records_the_key_name_only_redaction_gap(self) -> None:
+        # Both halves, because the paragraph makes two claims and either one
+        # alone would read as the whole story: redaction is blind to a secret
+        # whose key name matches nothing, and closing the two known shapes
+        # cost the baseline the detail it used to carry.
+        text = _collapsed(REFERENCE)
+        self.assertIn("Redaction matches names and never values", text)
+        self.assertIn("no longer records what they were", text)
+        self.assertIn("merely contains those three letters", text)
+
+    def test_reference_records_the_empty_pattern_list_gap(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("is a finding, not a refusal", text)
+        self.assertIn("dump a parsed settings file verbatim", text)
+
 
 class AdapterFieldAlignmentTests(unittest.TestCase):
     """The documented adapter fields must equal the enforced ones, both ways.
@@ -3686,6 +3701,23 @@ class PrivacyDocumentTests(unittest.TestCase):
         self.assertIn(
             "apply to an item's recorded location, not to a parsed value", text
         )
+
+    def test_privacy_states_redaction_matches_names_rather_than_values(self) -> None:
+        # The mechanism, stated so the limit below reads as a consequence of
+        # it rather than as an exception to it.
+        text = _collapsed(PRIVACY)
+        self.assertIn("Redaction matches on key names and never on values", text)
+
+    def test_privacy_admits_a_secret_under_an_unmatched_key_is_copied(self) -> None:
+        # The claim this document used to get wrong. It said tokens, keys and
+        # secrets "are never copied", which is false for a credential passed
+        # as a positional argument or carried in a URL query string. A privacy
+        # document that overstates its protection is worse than one that
+        # admits a limit, so the limit and the user's remedy are both pinned.
+        text = _collapsed(PRIVACY)
+        self.assertIn("copied into the baseline in full", text)
+        self.assertIn("add a pattern for that key to their own adapter", text)
+        self.assertNotIn("are never copied", text)
 
 
 class UnknownClientWorkflowTests(unittest.TestCase):
