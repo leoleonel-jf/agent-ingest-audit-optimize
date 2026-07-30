@@ -49,7 +49,7 @@ The first path is a local Codex development-tool path and may differ on another 
 ## Version pins
 
 `.claude-plugin/plugin.json` → `version` is the single source of truth for the plugin version.
-Six other places restate it, and `packaging/tests/test_version_consistency.py` is the
+Eight other places restate it, and `packaging/tests/test_version_consistency.py` is the
 authoritative list — it fails when any of them drifts, naming the file that did:
 
 | Pin | Form |
@@ -61,6 +61,7 @@ authoritative list — it fails when any of them drifts, naming the file that di
 | `README.md` → the Skill asset filename | contains the version |
 | `docs/SUBMISSION.md` → the `**Version:**` line | the version |
 | `CHANGELOG.md` → the first `## x.y.z` heading | the version |
+| `docs/releases/v<version>.md` → the `--ref` argument | `v` + the version |
 
 Run it with the rest of the packaging suite:
 

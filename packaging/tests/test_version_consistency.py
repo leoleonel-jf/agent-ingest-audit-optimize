@@ -16,6 +16,7 @@ AGENTS_MARKETPLACE = REPO_ROOT / ".agents" / "plugins" / "marketplace.json"
 README = REPO_ROOT / "README.md"
 SUBMISSION = REPO_ROOT / "docs" / "SUBMISSION.md"
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
+RELEASES_DIR = REPO_ROOT / "docs" / "releases"
 
 SEMVER = r"\d+\.\d+\.\d+"
 
@@ -96,6 +97,15 @@ class VersionConsistencyTests(unittest.TestCase):
 
     def test_changelog_newest_entry_matches(self) -> None:
         found = first_match(rf"^## ({SEMVER})", read_text(CHANGELOG), CHANGELOG)
+        self.assertEqual(found, self.version)
+
+    def test_release_document_exists_and_ref_matches(self) -> None:
+        release_doc = RELEASES_DIR / f"v{self.version}.md"
+        if not release_doc.is_file():
+            raise AssertionError(f"Missing release document: {release_doc}")
+        found = single_match(
+            rf"--ref v({SEMVER})", read_text(release_doc), release_doc
+        )
         self.assertEqual(found, self.version)
 
 

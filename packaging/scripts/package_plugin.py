@@ -35,6 +35,7 @@ DEFAULT_OUTPUT = REPO_ROOT / "dist"
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 FRONTMATTER_NAME = re.compile(r"(?m)^name:\s*([A-Za-z0-9_-]+)\s*$")
 FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
+COMPILED_SUFFIXES = (".pyc", ".pyo", ".pyd")
 
 
 class PackagingError(RuntimeError):
@@ -104,9 +105,17 @@ def validate_sources() -> tuple[str, str, Path]:
     return name, version, skill_dir
 
 
+def is_compiled_artifact(path: Path) -> bool:
+    return "__pycache__" in path.parts or path.suffix in COMPILED_SUFFIXES
+
+
 def iter_files(root: Path) -> list[Path]:
     return sorted(
-        (path for path in root.rglob("*") if path.is_file()),
+        (
+            path
+            for path in root.rglob("*")
+            if path.is_file() and not is_compiled_artifact(path)
+        ),
         key=lambda path: path.relative_to(REPO_ROOT).as_posix(),
     )
 
