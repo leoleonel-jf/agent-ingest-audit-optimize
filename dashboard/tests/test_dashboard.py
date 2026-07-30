@@ -1562,5 +1562,27 @@ class ProvisionalIdSchemaAlignmentTests(unittest.TestCase):
         )
 
 
+REFERENCE = (
+    REPO_ROOT
+    / "skills"
+    / "agent-ingest-audit-optimize"
+    / "references"
+    / "LEDGER.md"
+)
+
+
+class ReferenceTests(unittest.TestCase):
+    def test_reference_documents_every_classification_rule(self) -> None:
+        text = REFERENCE.read_text(encoding="utf-8")
+        for classification in dashboard.BACKLOG_CLASSIFICATIONS:
+            self.assertIn(classification, text)
+        for classification in dashboard.TERMINAL_CLASSIFICATIONS:
+            self.assertIn(classification, text)
+
+    def test_reference_documents_the_verify_command(self) -> None:
+        text = REFERENCE.read_text(encoding="utf-8")
+        self.assertIn("dashboard.py verify", text)
+
+
 if __name__ == "__main__":
     unittest.main()
