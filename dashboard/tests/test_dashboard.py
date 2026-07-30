@@ -6,10 +6,12 @@ import io
 import json
 import os
 import re
+import stat
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -2610,6 +2612,75 @@ class ResolveAnchoredTests(unittest.TestCase):
             with self.assertRaises(dashboard.PathSafetyError) as ctx:
                 dashboard.resolve_anchored("$R/f.txt/...", {"R": root})
             self.assertNotIsInstance(ctx.exception, OSError)
+
+    def test_hardlinked_regular_file_is_refused(self) -> None:
+        # I4: a hardlink has no symlink target for rules 4/5 to follow, so
+        # neither can see it -- writing through root/hard.txt writes through
+        # to whatever else the same file is linked from. os.link needs no
+        # elevation on Windows (unlike os.symlink), so this runs here.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            original = root / "original.txt"
+            original.write_text("x", encoding="utf-8")
+            hard = root / "hard.txt"
+            os.link(original, hard)
+            with self.assertRaises(dashboard.PathSafetyError) as ctx:
+                dashboard.resolve_anchored("$R/hard.txt", {"R": root})
+            self.assertIn("hardlink", str(ctx.exception))
+
+    def test_regular_file_with_a_single_link_is_accepted(self) -> None:
+        # An ordinary file (nlink == 1) must not be refused -- only multiple
+        # links are suspicious.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            target = root / "solo.txt"
+            target.write_text("x", encoding="utf-8")
+            resolved = dashboard.resolve_anchored("$R/solo.txt", {"R": root})
+            self.assertEqual(resolved, target.resolve())
+
+
+class RefuseIfHardlinkedTests(unittest.TestCase):
+    def test_directory_is_never_refused_regardless_of_link_count(self) -> None:
+        # I4 explicitly excludes directories: a directory's link count is an
+        # ordinary filesystem property, not evidence of a hardlink escape.
+        # Directories can't be hardlinked on this platform to produce a real
+        # nlink > 1, so this patches stat() (scoped to this one path only,
+        # falling through to the real stat() for everything else) to report
+        # an implausibly high nlink and confirms the directory branch is
+        # still never refused.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            sub = root / "sub"
+            sub.mkdir()
+            real_stat = sub.stat()
+            fake_stat = os.stat_result(
+                (
+                    stat.S_IFDIR | 0o755,
+                    real_stat.st_ino,
+                    real_stat.st_dev,
+                    5,
+                    real_stat.st_uid,
+                    real_stat.st_gid,
+                    real_stat.st_size,
+                    real_stat.st_atime_ns,
+                    real_stat.st_mtime_ns,
+                    real_stat.st_ctime_ns,
+                )
+            )
+            original_stat = Path.stat
+
+            def fake(self, *args, **kwargs):
+                if self == sub:
+                    return fake_stat
+                return original_stat(self, *args, **kwargs)
+
+            with mock.patch.object(Path, "stat", fake):
+                dashboard._refuse_if_hardlinked(sub, "$R/sub")  # must not raise
+
+    def test_nonexistent_path_is_not_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            missing = Path(temp).resolve() / "does-not-exist.txt"
+            dashboard._refuse_if_hardlinked(missing, "$R/does-not-exist.txt")
 
 
 class CheckGlobTests(unittest.TestCase):

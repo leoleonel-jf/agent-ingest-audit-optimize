@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -354,9 +355,19 @@ def resolve_anchored(stored: str, roots: dict[str, Path]) -> Path:
                 f"path crosses a link that leaves its anchor: {stored!r}"
             )
 
+    # Rule 4 is not an ordinary backstop -- for any non-empty tail it looks at
+    # exactly the same prefix rule 5's last loop iteration already resolved,
+    # so in a single deterministic pass it never fires first. What it actually
+    # is: a re-check against a TOCTOU window. `candidate.resolve()` here is a
+    # LATER syscall than the loop's last `walked.resolve()` above, so between
+    # that call and this one a component could change (a directory replaced
+    # by a symlink or junction, for instance) and this is what would catch it.
+    # Keep it ordered after rule 5, with its own message, precisely because it
+    # covers a different moment in time, not a different path.
     final = _resolve_or_raise(candidate, stored)
     if not _is_within(final, base):
         raise PathSafetyError(f"path resolves outside its anchor: {stored!r}")
+    _refuse_if_hardlinked(final, stored)
     return final
 
 
@@ -366,6 +377,35 @@ def _is_within(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _refuse_if_hardlinked(path: Path, stored: str) -> None:
+    """Refuse a resolved path that names an existing hardlinked regular file.
+
+    I4: a hardlink defeats every rule above by construction -- it needs no
+    elevation to create (`mklink /H` on Windows, `ln` on POSIX), and it has
+    no symlink target for rules 4/5 to follow, so they cannot see it at all.
+    Writing through it writes through to whatever else the same file is
+    linked from, wherever that is.
+
+    Directories are deliberately excluded: a directory's link count is an
+    ordinary filesystem property, not evidence of anything, and refusing on
+    it would misfire on perfectly normal directories.
+
+    This is a heuristic on link count, not a proof of where the other links
+    point, and it has a real limit: it only catches a hardlink that EXISTS
+    at the moment of resolution. A hardlink created after this call returns
+    is invisible to it, the same TOCTOU limit documented on
+    `resolve_anchored` itself.
+    """
+    try:
+        info = path.stat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise PathSafetyError(f"path could not be inspected: {stored!r}: {exc}") from exc
+    if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
+        raise PathSafetyError(f"path resolves to a hardlinked file: {stored!r}")
 
 
 def validate_ledger(data: dict, *, source: str) -> list[str]:
