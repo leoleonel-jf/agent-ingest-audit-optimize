@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,12 @@ ADAPTER_SCHEMA = (
     / "assets"
     / "schemas"
     / "adapter.schema.json"
+)
+ADAPTERS_DIR = (
+    REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "assets" / "adapters"
+)
+RESEARCH = (
+    REPO_ROOT / "docs" / "research" / "2026-07-30-client-configuration-paths.md"
 )
 SPEC = importlib.util.spec_from_file_location("dashboard", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -589,6 +596,115 @@ class AnchorRootTests(unittest.TestCase):
             {"anchors": {}}, project=self.project, environ={}
         )
         self.assertEqual((roots, unresolved), ({}, []))
+
+
+class BundledAdapterTests(unittest.TestCase):
+    """The three shipped adapters, against the research that produced them.
+
+    Everything here that can be parametrised over `assets/adapters/` is,
+    rather than over a hardcoded list of three names: a fourth adapter added
+    later is then covered the day it lands instead of the day someone
+    remembers to edit this file. The directory is globbed inside each test,
+    not at import time, so the parametrisation is over what is on disk now.
+
+    `expires_on` is compared against the date read out of the research
+    document itself. Hardcoding `2026-10-28` here would create a second place
+    to change when the research is refreshed, and the second place is the one
+    that gets missed.
+    """
+
+    ALLOWED_SCOPES = {"user", "project", "managed", "system"}
+
+    def adapter_paths(self) -> list[Path]:
+        paths = sorted(ADAPTERS_DIR.glob("*.json"))
+        # Without this the parametrised tests below pass vacuously the day
+        # the directory goes missing from the bundle.
+        self.assertTrue(paths, f"no adapters found in {ADAPTERS_DIR}")
+        return paths
+
+    def read_adapter(self, name: str) -> dict:
+        return json.loads((ADAPTERS_DIR / name).read_text(encoding="utf-8"))
+
+    def probe_pattern(self, probe: dict) -> str:
+        """The one of `glob` or `path` a probe carries."""
+        pattern = probe.get("glob", probe.get("path"))
+        self.assertIsInstance(pattern, str, probe)
+        return pattern
+
+    def research_expiry(self) -> str:
+        text = RESEARCH.read_text(encoding="utf-8")
+        match = re.search(r"^Expires:\s*(\d{4}-\d{2}-\d{2})", text, re.MULTILINE)
+        self.assertIsNotNone(match, f"no 'Expires: YYYY-MM-DD' line in {RESEARCH}")
+        assert match is not None
+        return match.group(1)
+
+    def test_every_bundled_adapter_loads_and_validates(self) -> None:
+        for path in self.adapter_paths():
+            with self.subTest(adapter=path.name):
+                data = adapters.load_adapter(path)
+                self.assertIsInstance(data, dict)
+                self.assertEqual(data["client"], path.stem)
+
+    def test_every_bundled_adapter_expires_with_the_research(self) -> None:
+        expiry = self.research_expiry()
+        for path in self.adapter_paths():
+            with self.subTest(adapter=path.name):
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(data["expires_on"], expiry)
+
+    def test_every_probe_declares_a_scope_from_the_research_levels(self) -> None:
+        for path in self.adapter_paths():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            for index, probe in enumerate(data["probes"]):
+                with self.subTest(adapter=path.name, probe=index):
+                    self.assertIn(probe.get("scope"), self.ALLOWED_SCOPES)
+
+    def test_generic_probes_nothing(self) -> None:
+        """Design spec section 9: the generic adapter's whole point."""
+        self.assertEqual(self.read_adapter("generic.json")["probes"], [])
+
+    def test_claude_code_never_probes_agents_md(self) -> None:
+        """Research finding 1: Claude Code reads CLAUDE.md, not AGENTS.md.
+
+        A probe here would record an inert file as live configuration.
+        """
+        for probe in self.read_adapter("claude-code.json")["probes"]:
+            pattern = self.probe_pattern(probe)
+            final = pattern.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+            self.assertNotEqual(final.casefold(), "agents.md", pattern)
+
+    def test_claude_code_user_config_begins_with_the_environment_variable(self) -> None:
+        anchors = self.read_adapter("claude-code.json")["anchors"]
+        self.assertEqual(anchors["$USER_CONFIG"][0], "$env:CLAUDE_CONFIG_DIR")
+
+    def test_codex_user_config_begins_with_the_environment_variable(self) -> None:
+        anchors = self.read_adapter("codex.json")["anchors"]
+        self.assertEqual(anchors["$USER_CONFIG"][0], "$env:CODEX_HOME")
+
+    def test_codex_probes_both_skills_roots(self) -> None:
+        """Research section 6: documented and undocumented, probe both."""
+        patterns = [
+            self.probe_pattern(probe)
+            for probe in self.read_adapter("codex.json")["probes"]
+        ]
+        self.assertTrue(
+            any(p.startswith("$HOME/.agents/skills/") for p in patterns), patterns
+        )
+        self.assertTrue(
+            any(p.startswith("$USER_CONFIG/skills/") for p in patterns), patterns
+        )
+
+    def test_every_adapter_but_generic_has_sensitive_key_patterns(self) -> None:
+        """The research names MCP `env` blocks as secret-bearing in both clients."""
+        for path in self.adapter_paths():
+            if path.name == "generic.json":
+                continue
+            with self.subTest(adapter=path.name):
+                patterns = json.loads(path.read_text(encoding="utf-8"))[
+                    "sensitive_key_patterns"
+                ]
+                self.assertTrue(patterns, path.name)
+                self.assertIn("env", patterns)
 
 
 if __name__ == "__main__":
