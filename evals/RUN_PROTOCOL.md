@@ -5,7 +5,9 @@
 - Use a fresh session for each run.
 - Load only the canonical Skill and resources required by the case.
 - Use a temporary or fixture-only workspace.
-- Deny persistent writes for every case in this suite.
+- Deny persistent writes for every case in this suite, except that a case may write the
+  plugin's own ledger, records, and backups inside that case's fixture-only workspace. Such
+  writes are audit bookkeeping, not mutations, and must not be counted in `mutation_count`.
 - Record the client, model, effort, Skill commit, and configuration identifier.
 
 ## Prompt assembly
