@@ -91,6 +91,34 @@ REQUIRED_RECORD_FIELDS = {
 }
 EVIDENCE_FIELDS = {"source", "kind", "verified_on", "time_sensitive"}
 
+DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+RUN_RESULTS = {
+    "VALIDATED",
+    "VALIDATED WITH CAVEATS",
+    "PARTIALLY VALIDATED",
+    "NOT VALIDATED",
+    "FAILED",
+    "ROLLBACK COMPLETED",
+}
+ROLLBACK_TEST_STATES = {"NOT_TESTED", "PARTIAL", "PASSED", "FAILED"}
+REQUIRED_RUN_FIELDS = {
+    "proposal",
+    "authorization",
+    "result",
+    "targets",
+    "backup",
+    "rollback",
+    "self_reported",
+}
+REQUIRED_TARGET_FIELDS = {
+    "anchor",
+    "kind",
+    "before_digest",
+    "after_digest",
+    "reversible",
+    "residual_effect",
+}
+
 
 class LedgerError(RuntimeError):
     """Raised when a ledger cannot be read at all."""
@@ -176,6 +204,83 @@ def validate_ledger(data: dict, *, source: str) -> list[str]:
     return findings
 
 
+def validate_run(record: dict, *, label: str) -> list[str]:
+    findings: list[str] = []
+    missing = REQUIRED_RUN_FIELDS - set(record)
+    if missing:
+        return [f"{label} is a RUN and is missing fields: {sorted(missing)}"]
+
+    proposal = record["proposal"]
+    if not isinstance(proposal, str) or not RECORD_ID.fullmatch(proposal):
+        findings.append(f"{label} has an invalid proposal reference: {proposal!r}")
+
+    authorization = record["authorization"]
+    if not isinstance(authorization, dict):
+        findings.append(f"{label} authorization must be an object")
+    else:
+        quote = authorization.get("quote")
+        if not isinstance(quote, str) or not quote.strip():
+            findings.append(f"{label} authorization quote must be a non-empty string")
+        if not authorization.get("recorded_on"):
+            findings.append(f"{label} authorization requires recorded_on")
+
+    if record["result"] not in RUN_RESULTS:
+        findings.append(f"{label} has an invalid result: {record['result']!r}")
+
+    targets = record["targets"]
+    if not isinstance(targets, list) or not targets:
+        findings.append(f"{label} targets must be a non-empty array")
+    else:
+        for position, target in enumerate(targets):
+            place = f"{label} targets[{position}]"
+            if not isinstance(target, dict):
+                findings.append(f"{place} must be an object")
+                continue
+            absent = REQUIRED_TARGET_FIELDS - set(target)
+            if absent:
+                findings.append(f"{place} missing fields: {sorted(absent)}")
+                continue
+            for field in ("before_digest", "after_digest"):
+                value = target[field]
+                if value is not None and (
+                    not isinstance(value, str) or not DIGEST.fullmatch(value)
+                ):
+                    findings.append(f"{place} {field} must be a sha256 digest or null")
+            if type(target["reversible"]) is not bool:
+                findings.append(f"{place} reversible must be a boolean")
+            elif not target["reversible"] and not target["residual_effect"]:
+                findings.append(
+                    f"{place} is not reversible and requires a residual_effect"
+                )
+
+    backup = record["backup"]
+    if backup is not None:
+        if not isinstance(backup, dict):
+            findings.append(f"{label} backup must be an object or null")
+        else:
+            digest = backup.get("digest")
+            if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
+                findings.append(f"{label} backup digest must be a sha256 digest")
+            if type(backup.get("verified")) is not bool:
+                findings.append(f"{label} backup verified must be a boolean")
+
+    rollback = record["rollback"]
+    if not isinstance(rollback, dict):
+        findings.append(f"{label} rollback must be an object")
+    elif rollback.get("tested") not in ROLLBACK_TEST_STATES:
+        findings.append(
+            f"{label} rollback tested must be one of {sorted(ROLLBACK_TEST_STATES)}"
+        )
+
+    reported = record["self_reported"]
+    if not isinstance(reported, list) or any(
+        not isinstance(item, str) for item in reported
+    ):
+        findings.append(f"{label} self_reported must be an array of strings")
+
+    return findings
+
+
 def validate_record(record: dict, index: int, *, source: str) -> list[str]:
     label = f"{source}: records[{index}]"
     findings: list[str] = []
@@ -247,6 +352,9 @@ def validate_record(record: dict, index: int, *, source: str) -> list[str]:
                     findings.append(
                         f"{label} evidence[{position}] is time_sensitive and requires expires_on"
                     )
+
+    if record["type"] == "RUN":
+        findings.extend(validate_run(record, label=label))
 
     return findings
 

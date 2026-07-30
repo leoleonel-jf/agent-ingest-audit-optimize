@@ -612,5 +612,268 @@ class RecordSchemaAlignmentTests(unittest.TestCase):
         self.assertEqual(set(evidence_schema["required"]), dashboard.EVIDENCE_FIELDS)
 
 
+def minimal_run() -> dict:
+    record = minimal_record()
+    record.update(
+        {
+            "id": "RUN-2026-000",
+            "type": "RUN",
+            "status": "VALIDATED",
+            "classification": "ADOPT GLOBALLY",
+            "file": "records/RUN-2026-000.md",
+            "proposal": "PROP-2026-000",
+            "authorization": {
+                "quote": "Implement proposal PROP-2026-000",
+                "recorded_on": "2026-07-29",
+            },
+            "result": "VALIDATED",
+            "targets": [
+                {
+                    "anchor": "$USER_CONFIG/settings.json",
+                    "kind": "json-key",
+                    "key": "permissions.allow",
+                    "before_digest": "sha256:" + "0" * 64,
+                    "after_digest": "sha256:" + "1" * 64,
+                    "reversible": True,
+                    "residual_effect": None,
+                }
+            ],
+            "backup": {
+                "path": "backups/RUN-2026-000/",
+                "digest": "sha256:" + "2" * 64,
+                "verified": True,
+            },
+            "rollback": {
+                "file": "records/RUN-2026-000.rollback.md",
+                "tested": "NOT_TESTED",
+            },
+            "self_reported": ["tests"],
+        }
+    )
+    return record
+
+
+class RunEntryTests(unittest.TestCase):
+    def check(self, record: dict) -> list[str]:
+        return dashboard.validate_record(record, 0, source="test")
+
+    def test_minimal_run_has_no_findings(self) -> None:
+        self.assertEqual(self.check(minimal_run()), [])
+
+    def test_run_requires_a_proposal_reference(self) -> None:
+        record = minimal_run()
+        del record["proposal"]
+        self.assertTrue(any("proposal" in finding for finding in self.check(record)))
+
+    def test_authorization_quote_must_be_present(self) -> None:
+        record = minimal_run()
+        record["authorization"]["quote"] = "   "
+        self.assertTrue(any("quote" in finding for finding in self.check(record)))
+
+    def test_target_digest_must_be_sha256(self) -> None:
+        record = minimal_run()
+        record["targets"][0]["after_digest"] = "md5:abc"
+        self.assertTrue(any("digest" in finding for finding in self.check(record)))
+
+    def test_irreversible_target_requires_a_residual_effect(self) -> None:
+        record = minimal_run()
+        record["targets"][0]["reversible"] = False
+        record["targets"][0]["residual_effect"] = None
+        self.assertTrue(
+            any("residual_effect" in finding for finding in self.check(record))
+        )
+
+    def test_unknown_rollback_test_state_is_reported(self) -> None:
+        record = minimal_run()
+        record["rollback"]["tested"] = "MAYBE"
+        self.assertTrue(any("tested" in finding for finding in self.check(record)))
+
+    def test_self_reported_must_be_a_list_of_strings(self) -> None:
+        record = minimal_run()
+        record["self_reported"] = "tests"
+        self.assertTrue(
+            any("self_reported" in finding for finding in self.check(record))
+        )
+
+    def test_non_run_records_do_not_require_run_fields(self) -> None:
+        self.assertEqual(self.check(minimal_record()), [])
+
+    def test_malformed_proposal_reference_is_reported(self) -> None:
+        record = minimal_run()
+        record["proposal"] = "PROP-26-0"
+        self.assertTrue(
+            any("invalid proposal reference" in finding for finding in self.check(record))
+        )
+
+    def test_authorization_must_be_an_object(self) -> None:
+        record = minimal_run()
+        record["authorization"] = "not-an-object"
+        self.assertTrue(
+            any(
+                "authorization must be an object" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_authorization_requires_recorded_on(self) -> None:
+        record = minimal_run()
+        del record["authorization"]["recorded_on"]
+        self.assertTrue(any("recorded_on" in finding for finding in self.check(record)))
+
+    def test_invalid_result_is_reported(self) -> None:
+        record = minimal_run()
+        record["result"] = "MAYBE"
+        self.assertTrue(any("invalid result" in finding for finding in self.check(record)))
+
+    def test_empty_targets_array_is_reported(self) -> None:
+        record = minimal_run()
+        record["targets"] = []
+        self.assertTrue(
+            any(
+                "targets must be a non-empty array" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_non_object_target_is_reported(self) -> None:
+        record = minimal_run()
+        record["targets"][0] = "not-an-object"
+        self.assertTrue(any("targets[0]" in finding for finding in self.check(record)))
+
+    def test_target_missing_fields_is_reported(self) -> None:
+        record = minimal_run()
+        del record["targets"][0]["anchor"]
+        self.assertTrue(
+            any("targets[0] missing fields" in finding for finding in self.check(record))
+        )
+
+    def test_before_digest_must_be_sha256(self) -> None:
+        record = minimal_run()
+        record["targets"][0]["before_digest"] = "md5:abc"
+        self.assertTrue(
+            any("before_digest" in finding for finding in self.check(record))
+        )
+
+    def test_null_digests_are_accepted(self) -> None:
+        record = minimal_run()
+        record["targets"][0]["before_digest"] = None
+        record["targets"][0]["after_digest"] = None
+        self.assertEqual(self.check(record), [])
+
+    def test_reversible_must_be_a_boolean(self) -> None:
+        record = minimal_run()
+        record["targets"][0]["reversible"] = "yes"
+        self.assertTrue(
+            any(
+                "reversible must be a boolean" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_irreversible_target_with_residual_effect_is_accepted(self) -> None:
+        record = minimal_run()
+        record["targets"][0]["reversible"] = False
+        record["targets"][0]["residual_effect"] = "permission entry remains until reviewed"
+        self.assertEqual(self.check(record), [])
+
+    def test_backup_must_be_an_object_or_null(self) -> None:
+        record = minimal_run()
+        record["backup"] = "not-an-object"
+        self.assertTrue(
+            any(
+                "backup must be an object or null" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_null_backup_is_accepted(self) -> None:
+        record = minimal_run()
+        record["backup"] = None
+        self.assertEqual(self.check(record), [])
+
+    def test_backup_digest_must_be_sha256(self) -> None:
+        record = minimal_run()
+        record["backup"]["digest"] = "md5:abc"
+        self.assertTrue(
+            any("backup digest" in finding for finding in self.check(record))
+        )
+
+    def test_backup_verified_must_be_a_boolean(self) -> None:
+        record = minimal_run()
+        record["backup"]["verified"] = "yes"
+        self.assertTrue(
+            any(
+                "backup verified must be a boolean" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_rollback_must_be_an_object(self) -> None:
+        record = minimal_run()
+        record["rollback"] = "not-an-object"
+        self.assertTrue(
+            any(
+                "rollback must be an object" in finding for finding in self.check(record)
+            )
+        )
+
+    def test_self_reported_item_must_be_a_string(self) -> None:
+        record = minimal_run()
+        record["self_reported"] = [123]
+        self.assertTrue(
+            any("self_reported" in finding for finding in self.check(record))
+        )
+
+
+class RunSchemaAlignmentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        self.record_schema = schema["properties"]["records"]["items"]
+
+    def test_schema_run_required_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.record_schema["then"]["required"]),
+            dashboard.REQUIRED_RUN_FIELDS,
+        )
+
+    def test_schema_run_result_enum_matches_runtime_validator(self) -> None:
+        self.assertEqual(
+            set(self.record_schema["properties"]["result"]["enum"]),
+            dashboard.RUN_RESULTS,
+        )
+
+    def test_schema_rollback_tested_enum_matches_runtime_validator(self) -> None:
+        rollback_schema = self.record_schema["properties"]["rollback"]
+        self.assertEqual(
+            set(rollback_schema["properties"]["tested"]["enum"]),
+            dashboard.ROLLBACK_TEST_STATES,
+        )
+
+    def test_schema_target_required_matches_runtime_validator(self) -> None:
+        target_schema = self.record_schema["properties"]["targets"]["items"]
+        self.assertEqual(
+            set(target_schema["required"]), dashboard.REQUIRED_TARGET_FIELDS
+        )
+
+    def test_schema_proposal_pattern_matches_record_id_pattern(self) -> None:
+        self.assertEqual(
+            self.record_schema["properties"]["proposal"]["pattern"],
+            dashboard.RECORD_ID.pattern,
+        )
+
+    def test_schema_digest_pattern_matches_runtime_validator(self) -> None:
+        target_schema = self.record_schema["properties"]["targets"]["items"]
+        for field in ("before_digest", "after_digest"):
+            self.assertEqual(
+                target_schema["properties"][field]["pattern"], dashboard.DIGEST.pattern
+            )
+        self.assertEqual(
+            self.record_schema["properties"]["backup"]["properties"]["digest"][
+                "pattern"
+            ],
+            dashboard.DIGEST.pattern,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
