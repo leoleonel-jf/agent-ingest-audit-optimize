@@ -198,6 +198,29 @@ backlog.
 Read [references/LEDGER.md](references/LEDGER.md) for the storage layout, scope routing,
 identifier rules, evidence expiry, and the validation command.
 
+## Capture a baseline of an unknown client
+
+`dashboard.py scan` reads one client's configuration and prints a single baseline entry. It is
+read-only, writes nothing, and executes nothing a configuration file names. Take its `BASE`
+identifier from the ID authority first; the command allocates none.
+
+When no bundled adapter covers the client, `scan` falls back to the `generic` adapter, which probes
+nothing and emits an empty baseline. Never read that as a clean environment. Instead:
+
+1. Ask the user where that client keeps its configuration: the user-level root, the environment
+   variable that relocates it if one exists, and which files under it are worth recording. Never
+   infer a path, never carry one over from a client that resembles this one, and never write a path
+   the user did not give. A guessed path yields a baseline that looks clean for a tree nothing
+   looked at, which is worse than no baseline.
+2. Show the adapter you intend to write in full and write
+   `<user-config>/agent-ingest-audit-optimize/adapters/local.json` only after the user confirms it.
+   That file is a change to the user's environment, not ledger bookkeeping.
+3. Re-run `scan` with `--user-config`, and report what it found and what it did not.
+
+A user adapter is validated exactly like a bundled one and is refused, not routed around, when it is
+invalid. Correct it with the user; never drop `--user-config` to make the error go away, which
+leaves them reading a baseline from the very adapter they meant to replace.
+
 ## Report clearly
 
 Communicate with the user in the user's language: match the language of the user's request in all prose, summaries, questions, and reports, unless the user asks otherwise. Keep operating states, status labels, classification labels, and record IDs in their canonical English form regardless of the conversation language.

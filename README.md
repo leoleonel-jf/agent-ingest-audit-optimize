@@ -132,6 +132,18 @@ python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify <pa
 Exit codes: `0` clean, `1` findings, `2` the ledger could not be read. The tool requires
 Python 3.9 or later and uses the standard library only.
 
+Capture what a client currently has configured with `scan`, which reads that client's
+configuration and prints one baseline entry on standard output for the agent to place in a
+ledger:
+
+```text
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py scan --id BASE-YYYY-NNN [--client NAME]
+```
+
+`scan` is read-only: it writes no file and runs nothing a configuration file names. Exit codes:
+`0` clean, `1` findings, `2` a tool error. See
+[PRIVACY.md](PRIVACY.md) for what it reads and what a baseline can contain.
+
 See [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md) for the
 record model, and [assets/schemas/ledger.schema.json](skills/agent-ingest-audit-optimize/assets/schemas/ledger.schema.json)
 for the contract the validator enforces.

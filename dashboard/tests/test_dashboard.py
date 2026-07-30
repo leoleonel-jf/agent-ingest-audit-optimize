@@ -36,6 +36,13 @@ assert SPEC is not None and SPEC.loader is not None
 dashboard = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(dashboard)
 
+# Loading `dashboard.py` above put the bundle's script directory on
+# `sys.path`, so this resolves to the bundle's own copy. Imported here rather
+# than reached through `dashboard`, which re-exports no adapter name: the
+# documentation-agreement tests below compare `LEDGER.md` against the field
+# sets the loader actually enforces.
+from ledgerlib import adapters  # noqa: E402
+
 
 def _capture_verify(paths: list[Path]) -> tuple[int, str, str]:
     """Call verify() and capture stdout/stderr. Returns (exit_code, stdout, stderr)."""
@@ -3409,6 +3416,312 @@ class PathSafetyReasonAlignmentTests(unittest.TestCase):
 
     def test_documented_set_equals_the_runtime_set(self) -> None:
         self.assertEqual(self._documented_reasons(), dashboard.PATH_SAFETY_REASONS)
+
+
+PRIVACY = REPO_ROOT / "PRIVACY.md"
+README = REPO_ROOT / "README.md"
+
+
+def _collapsed(path: Path) -> str:
+    """A document with every whitespace run collapsed to one space.
+
+    Prose in these files wraps, so a multi-word anchor phrase can straddle a
+    line break; collapsing first means a test is neither satisfied nor
+    defeated by where Markdown happened to wrap a line. The same helper
+    `ReferenceTests._normalized` provides, hoisted to module scope because the
+    classes below span four documents rather than one.
+    """
+    return re.sub(r"\s+", " ", path.read_text(encoding="utf-8"))
+
+
+# Every phrase asserted below was grepped against its target document before
+# the test was written and occurs there exactly once, in the paragraph the
+# test guards. This is not a formality: 0.2.2 shipped a documentation test
+# that stayed green against a deleted paragraph because its anchor phrase
+# already occurred elsewhere in the same file. A phrase that survives its
+# paragraph's deletion is the wrong phrase, and the phrase is what changes.
+
+
+class ScanDocumentationTests(unittest.TestCase):
+    """references/LEDGER.md documents the `scan` command."""
+
+    def test_reference_documents_the_scan_command_and_that_it_writes_nothing(
+        self,
+    ) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("dashboard.py scan --id BASE-2026-000", text)
+        self.assertIn("it writes no file and creates no directory anywhere", text)
+        self.assertIn(
+            "recorded as a name and a digest like every other value", text
+        )
+
+    def test_reference_documents_every_scan_argument(self) -> None:
+        text = _collapsed(REFERENCE)
+        for phrase in (
+            "the `BASE` identifier the emitted entry carries",
+            "detected when omitted",
+            "the root `$PROJECT` anchors to",
+            "overriding selection entirely and validated like any other",
+            "that directory is never read when omitted",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
+    def test_reference_documents_why_id_is_required(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("does not get a second, private implementation of it", text)
+
+    def test_reference_documents_where_the_emitted_entry_goes(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "append the emitted object to the target ledger's `baselines[]` array", text
+        )
+
+    def test_reference_documents_the_scan_exit_codes(self) -> None:
+        # `Exit codes: 0 clean, 1 findings` alone would be satisfied by the
+        # Validation section's line for `verify`, which predates this
+        # paragraph. Anchor on the wording only scan's can carry.
+        text = _collapsed(REFERENCE)
+        self.assertIn("`0` clean, `1` findings, `2` a tool error", text)
+        self.assertIn("The entry still reaches stdout at `1`", text)
+
+
+class AdapterFormatDocumentationTests(unittest.TestCase):
+    """references/LEDGER.md documents the adapter format field by field."""
+
+    def test_reference_documents_the_anchor_candidate_rule(self) -> None:
+        text = _collapsed(REFERENCE)
+        for phrase in (
+            "Anchor candidates are tried in order and the first that exists wins",
+            "unset and empty are the same thing",
+            "one that exists as a file does not",
+            "every `$env:` candidate is written ahead of the default it overrides",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
+    def test_reference_documents_the_two_extension_anchors(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("two anchors beyond the design spec's three", text)
+        self.assertIn("cannot be written as a probe at all", text)
+        self.assertIn("against the home directory itself rather than", text)
+
+    def test_reference_documents_parse_and_pointer(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "one item per key, which is what turns one `settings.json`", text
+        )
+        self.assertIn("A pointer that does not resolve is one `not_present` item", text)
+
+    def test_reference_documents_scope_as_recorded_not_resolved(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("`scope` is recorded and never resolved", text)
+
+    def test_reference_documents_sensitive_key_patterns(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("matches the key `env` without matching `environment`", text)
+        self.assertIn("Recursion stops at the match", text)
+
+    def test_reference_documents_adapter_expiry(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("inherit its expiry", text)
+
+
+class UnknownClientDocumentationTests(unittest.TestCase):
+    """references/LEDGER.md documents detection and the user adapter."""
+
+    def test_reference_documents_the_generic_fallback_as_a_finding(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "Reaching `generic` by falling back and asking for it by name", text
+        )
+
+    def test_reference_documents_the_user_adapter_path(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "<user-config>/agent-ingest-audit-optimize/adapters/local.json", text
+        )
+        self.assertIn("not defaulted to the home directory", text)
+
+    def test_reference_documents_user_adapter_precedence_and_refusal(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "a user adapter beats a bundled one declaring the same client", text
+        )
+        self.assertIn("validated exactly as a bundled one is, and refused the same way", text)
+
+
+class KnownGapDocumentationTests(unittest.TestCase):
+    """references/LEDGER.md records what this release deliberately omits.
+
+    Each of these came out of the adapter work or the first real run of
+    `scan` (docs/validation/scan-dogfood-0.2.5.md). A gap nobody wrote down
+    is indistinguishable from a gap nobody noticed, and the next release
+    reads this file rather than that transcript.
+    """
+
+    def test_reference_records_the_credential_file_gap(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("an eleventh kind to record it under", text)
+
+    def test_reference_records_the_hook_script_gap(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("only their registrations", text)
+
+    def test_reference_records_the_managed_policy_gap(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("platform-specific policy directory", text)
+
+    def test_reference_records_the_precedence_gap(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("Per-subsystem precedence is not expressible", text)
+
+    def test_reference_records_the_system_config_gap(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("POSIX-only and cannot be declared optional", text)
+
+
+class AdapterFieldAlignmentTests(unittest.TestCase):
+    """The documented adapter fields must equal the enforced ones, both ways.
+
+    Driven from `adapters.ADAPTER_FIELDS` and `adapters.PROBE_FIELDS` and
+    from the machine-checked blocks in LEDGER.md, never from a list written
+    out here: a field added to the loader without being documented fails one
+    direction, and a field documented that the loader does not know fails the
+    other. Following the pattern PathSafetyReasonAlignmentTests established,
+    for the same reason -- a test that merely counts rows cannot catch drift.
+    """
+
+    ADAPTER_START = "<!-- ADAPTER_FIELDS_START -->"
+    ADAPTER_END = "<!-- ADAPTER_FIELDS_END -->"
+    PROBE_START = "<!-- PROBE_FIELDS_START -->"
+    PROBE_END = "<!-- PROBE_FIELDS_END -->"
+
+    # The first cell of a table row, and only that. A rule column names
+    # `json`, `toml`, and `check_glob` in backticks too, and sweeping those
+    # up would make the stale-field direction fail for text that documents
+    # nothing.
+    ROW_FIELD = re.compile(r"^\|\s*`([a-z_]+)`\s*\|", re.MULTILINE)
+
+    def _documented(self, start: str, end: str) -> set[str]:
+        text = REFERENCE.read_text(encoding="utf-8")
+        block = text[text.index(start) : text.index(end)]
+        return set(self.ROW_FIELD.findall(block))
+
+    def test_field_block_markers_are_present(self) -> None:
+        # Without this, deleting both markers of a pair would raise a
+        # ValueError from index() rather than reporting the drift -- and
+        # deleting the table between them would compare two empty sets and
+        # pass for the wrong reason.
+        text = REFERENCE.read_text(encoding="utf-8")
+        for marker in (
+            self.ADAPTER_START,
+            self.ADAPTER_END,
+            self.PROBE_START,
+            self.PROBE_END,
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
+
+    def test_every_adapter_field_is_documented(self) -> None:
+        documented = self._documented(self.ADAPTER_START, self.ADAPTER_END)
+        missing = adapters.ADAPTER_FIELDS - documented
+        self.assertFalse(
+            missing,
+            f"validate_adapter knows the top-level fields {sorted(missing)}, "
+            "which references/LEDGER.md's adapter field table does not name",
+        )
+
+    def test_no_documented_adapter_field_is_stale(self) -> None:
+        documented = self._documented(self.ADAPTER_START, self.ADAPTER_END)
+        extra = documented - adapters.ADAPTER_FIELDS
+        self.assertFalse(
+            extra,
+            f"references/LEDGER.md documents the top-level fields {sorted(extra)}, "
+            "which validate_adapter does not know and would reject as unknown",
+        )
+
+    def test_every_probe_field_is_documented(self) -> None:
+        documented = self._documented(self.PROBE_START, self.PROBE_END)
+        missing = adapters.PROBE_FIELDS - documented
+        self.assertFalse(
+            missing,
+            f"validate_adapter knows the probe fields {sorted(missing)}, which "
+            "references/LEDGER.md's probe field table does not name",
+        )
+
+    def test_no_documented_probe_field_is_stale(self) -> None:
+        documented = self._documented(self.PROBE_START, self.PROBE_END)
+        extra = documented - adapters.PROBE_FIELDS
+        self.assertFalse(
+            extra,
+            f"references/LEDGER.md documents the probe fields {sorted(extra)}, "
+            "which validate_adapter does not know and would reject as unknown",
+        )
+
+
+class PrivacyDocumentTests(unittest.TestCase):
+    """PRIVACY.md states what `scan` reads and what a baseline can hold."""
+
+    def test_privacy_states_what_scan_reads(self) -> None:
+        text = _collapsed(PRIVACY)
+        self.assertIn("computes a SHA-256 digest of each file's bytes", text)
+
+    def test_privacy_states_scan_executes_and_writes_nothing(self) -> None:
+        text = _collapsed(PRIVACY)
+        self.assertIn("It executes nothing", text)
+        self.assertIn("It writes nothing at all", text)
+
+    def test_privacy_states_sensitive_values_are_kept_only_as_digests(self) -> None:
+        text = _collapsed(PRIVACY)
+        self.assertIn("The key name is kept and the value is replaced by a digest", text)
+
+    def test_privacy_states_other_parsed_values_are_copied_verbatim(self) -> None:
+        # The point of the whole section, and the one thing a reader is most
+        # likely to assume the opposite of: anchoring protects the recorded
+        # location, never the parsed value.
+        text = _collapsed(PRIVACY)
+        self.assertIn("is copied into the baseline verbatim", text)
+        self.assertIn("thirteen absolute local paths", text)
+        self.assertIn(
+            "apply to an item's recorded location, not to a parsed value", text
+        )
+
+
+class UnknownClientWorkflowTests(unittest.TestCase):
+    """SKILL.md carries the workflow half of the unknown-client flow."""
+
+    def test_skill_states_the_generic_fallback_is_not_a_clean_environment(self) -> None:
+        text = _collapsed(SKILL)
+        self.assertIn(
+            "falls back to the `generic` adapter, which probes nothing", text
+        )
+
+    def test_skill_forbids_inventing_a_path(self) -> None:
+        text = _collapsed(SKILL)
+        self.assertIn("Never infer a path", text)
+
+    def test_skill_requires_confirmation_before_writing_local_json(self) -> None:
+        text = _collapsed(SKILL)
+        self.assertIn(
+            "<user-config>/agent-ingest-audit-optimize/adapters/local.json", text
+        )
+        self.assertIn("only after the user confirms it", text)
+
+    def test_skill_states_a_broken_user_adapter_is_refused_not_routed_around(
+        self,
+    ) -> None:
+        text = _collapsed(SKILL)
+        self.assertIn("refused, not routed around", text)
+
+
+class ReadmeScanTests(unittest.TestCase):
+    def test_readme_documents_scan_beside_verify(self) -> None:
+        text = _collapsed(README)
+        self.assertIn("dashboard.py scan --id BASE-YYYY-NNN", text)
+        self.assertIn(
+            "writes no file and runs nothing a configuration file names", text
+        )
 
 
 if __name__ == "__main__":

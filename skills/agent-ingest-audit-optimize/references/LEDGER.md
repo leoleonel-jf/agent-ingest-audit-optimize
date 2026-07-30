@@ -75,9 +75,11 @@ writing convention, not something `verify` checks — `verify` only checks that 
 
 ## Path anchors
 
-Three anchors exist: `$USER_CONFIG` is the client's user-level configuration root, `$PROJECT` is
-the project root of the ledger that owns the record, and `$PLUGIN` is the installed bundle root.
-`anchor_path` supplies the roots the caller has in hand; this release decides none of them itself.
+The design spec names three anchors: `$USER_CONFIG` is the client's user-level configuration root,
+`$PROJECT` is the project root of the ledger that owns the record, and `$PLUGIN` is the installed
+bundle root. `anchor_path` supplies the roots the caller has in hand; the path layer decides none
+of them itself. An adapter may declare anchors beyond these three — the shipped ones do, and
+The adapter format below says which and why.
 
 A path that falls under an anchor is stored anchored, never absolute: the stored form is
 `$NAME/rest` for a path under the root, or bare `$NAME` when the path names the root itself.
@@ -169,8 +171,9 @@ than a command-line argument.
 - **absolute** — the pattern is absolute (either the POSIX `/...` form or a Windows drive-letter
   form).
 
-No probe field may contain a glob that escapes its anchor. This release only validates the
-pattern; nothing here expands a glob — expansion arrives with `scan` in 0.2.4.
+No probe field may contain a glob that escapes its anchor. This check validates the pattern, at the
+moment an adapter is loaded and before anything is expanded. Expansion is `scan`'s, and every path
+it yields is checked again against its anchor before the file is opened.
 
 ## Path-safety refusal reasons
 
@@ -393,6 +396,227 @@ a name and no readable value — so `null` already means something else.
 `portable`, on a baseline item or on a run target, is a boolean when present and is never required.
 Requiring it would invalidate every RUN record written before this release, including this
 repository's own, none of which ever carried it.
+
+## Capturing a baseline with `scan`
+
+```text
+python assets/scripts/dashboard.py scan --id BASE-2026-000 [--client NAME] [--project PATH]
+                                        [--adapter FILE] [--user-config PATH]
+```
+
+`scan` reads one client's configuration and emits exactly one `baselines[]` entry, as JSON, on
+stdout. It opens files, hashes their bytes, and parses JSON and TOML; it writes no file and creates
+no directory anywhere, so stdout is the only thing it produces. It never runs anything a
+configuration file names: a settings key whose value is a shell command that mints a credential is
+recorded as a name and a digest like every other value.
+
+| Argument | Meaning |
+|---|---|
+| `--id` | required; the `BASE` identifier the emitted entry carries |
+| `--client` | the client to scan; detected when omitted, see The unknown client below |
+| `--project` | the root `$PROJECT` anchors to; the process working directory when omitted |
+| `--adapter` | one adapter file to run, overriding selection entirely and validated like any other |
+| `--user-config` | the configuration root user adapters are read from; that directory is never read when omitted |
+
+`--id` is required because allocation is a ledger concern and `scan` does not get a second, private
+implementation of it. The rules about sequences, provisional suffixes, and cross-scope collision are
+stated once, in Identifiers above, and they need a ledger to apply; `scan` opens no ledger. It checks
+only that what it was handed is a well-formed `BASE` identifier, before the adapter is opened, so a
+typo costs no walk over anyone's configuration.
+
+Placing the entry is the agent's work, not the command's: take the next free `BASE` number under the
+Identifiers rules — from the global ID authority, or as a `-P` provisional identifier when the
+authority is unreachable — pass it as `--id`, and append the emitted object to the target ledger's
+`baselines[]` array. A baseline identifier is spent when the entry is placed, exactly as a record's
+is.
+
+Exit codes: `0` clean, `1` findings, `2` a tool error — a malformed `--id`, an adapter that does not
+validate, an unknown `--client`. The entry still reaches stdout at `1`; nothing reaches it at `2`.
+Selection notes and findings go to stderr, so stdout parses as one JSON document whatever the
+outcome.
+
+A finding here means the baseline may be reporting a clean machine when it in fact looked at almost
+nothing, and three raise one: the adapter is past its `expires_on`; its `$USER_CONFIG` resolved to no
+directory on this machine, so every probe beneath it is `not_present` rather than looked at; or
+selection fell back to `generic`, which probes nothing. Any other unresolved anchor is still recorded
+on each probe beneath it, as `reason: "unresolved_anchor"` in the item's attributes, but does not
+move the exit code — `codex.json`'s `$SYSTEM_CONFIG` can never resolve on Windows, and a finding an
+operator can never clear teaches them to ignore the exit code, which costs every other finding its
+meaning.
+
+## The adapter format
+
+An adapter is data, one JSON document per client, and `scan` knows nothing about any client except
+what it reads from one. `assets/schemas/adapter.schema.json` states the format for humans and
+external tools; the bundle carries no JSON Schema library, so the loader's own validator is what
+actually runs, and a test compares the two in both directions. A single finding refuses the whole
+document. Unlike a ledger's findings, which are reported and counted, an adapter's are fatal: every
+probe beneath a broken adapter is suspect, and continuing would produce a baseline that looks clean
+because it scanned nothing.
+
+Every top-level field is required, and any other field is a finding:
+
+<!-- ADAPTER_FIELDS_START -->
+| Field | Rule |
+|---|---|
+| `adapter_version` | integer, at least 1; copied onto the emitted entry so a baseline records which generation of the adapter produced it |
+| `client` | non-empty string matching `[a-z0-9-]+`. This, not the file name, is the adapter's identity: `--client` resolves against it, and a user adapter overrides a bundled one by matching it |
+| `expires_on` | `YYYY-MM-DD` |
+| `anchors` | object; each key an anchor name in `$NAME` form, each value a non-empty array of candidate roots |
+| `probes` | array, and it may be empty — an adapter that probes nothing is the entire point of `generic.json` |
+| `sensitive_key_patterns` | array of non-empty strings; required, and may be empty |
+<!-- ADAPTER_FIELDS_END -->
+
+**Anchor candidates are tried in order and the first that exists wins.** A candidate is either
+`$env:NAME` — the value of that environment variable, where unset and empty are the same thing and
+both are skipped, because an empty variable is what a shell leaves behind after `export NAME=` — or a
+filesystem path, with a leading `~` expanded and a relative candidate resolved against `--project`
+rather than against the process working directory. A candidate qualifies only when it resolves to an
+existing **directory**; one that exists as a file does not, since joining a probe's tail onto a file
+yields paths that can never resolve. When no candidate qualifies the anchor is *unresolved*: it is
+absent from the roots rather than guessed at, and every probe beneath it is recorded `not_present`.
+Guessing the vendor's default instead is the failure the research names outright — `CLAUDE_CONFIG_DIR`
+and `CODEX_HOME` relocate everything, and an adapter that scans the default tree anyway reports a
+clean baseline for a configuration it never looked at. This is why every `$env:` candidate is written
+ahead of the default it overrides.
+
+The shipped adapters declare two anchors beyond the design spec's three, and they are extensions
+rather than part of that design:
+
+- `$SYSTEM_CONFIG`, declared by `codex.json` with the single candidate `/etc/codex`, exists because
+  that location cannot be written as a probe at all: `check_glob` refuses an absolute pattern, so a
+  system path can only reach an adapter as an anchor root.
+- `$HOME`, declared as `~` by both client adapters, exists because the research places
+  `<home>/.claude.json` and `<home>/.agents/skills/` against the home directory itself rather than
+  under the relocatable user configuration root. `CLAUDE_CONFIG_DIR` moves `$USER_CONFIG` and does
+  not move `~/.claude.json`, so anchoring that file to `$USER_CONFIG` would probe a path that stops
+  existing the moment the root is relocated.
+
+Nothing in the path layer treats either name specially: a path found under one is stored anchored,
+and the longest-anchor rule decides between them like any other pair.
+
+**Probes.** Each requires `kind` and exactly one of `glob` or `path` — both is a finding, neither is
+a finding:
+
+<!-- PROBE_FIELDS_START -->
+| Field | Rule |
+|---|---|
+| `kind` | required; one of the ten `items[].kind` values in Baselines above, imported from the same closed enum rather than restated |
+| `glob` | anchored pattern, expanded under its resolved anchor, one item per match and one `not_present` item when it matches nothing |
+| `path` | anchored path, yielding exactly one item |
+| `scope` | optional non-empty string, copied onto the item's attributes |
+| `parse` | optional `json` or `toml`, and only alongside `path` |
+| `pointer` | optional RFC 6901 JSON pointer, and only alongside `parse` |
+<!-- PROBE_FIELDS_END -->
+
+`glob` and `path` both pass `check_glob` at **load** time, under the rules in Adapter glob safety
+above, so an adapter carrying a `..` segment or an absolute form is refused before a single probe
+runs. That check is about the pattern; every path a probe actually produces is re-checked against its
+anchor before it is opened, because a symlinked directory can carry a match out of the tree between
+the adapter being validated and the walk running.
+
+`parse` reads the file, and `pointer` selects a sub-document within it: the location a pointer names
+becomes one item per key, which is what turns one `settings.json` into one `mcp-server` item per
+server. `parse` pairs only with `path` because parsing is per-document and a glob yields many
+documents against one pointer. A pointer that does not resolve is one `not_present` item, not an
+error — a client with no MCP servers configured has no `mcpServers` key, and the baseline has to
+record that it looked. A file that will not parse is `present`, with its digest and a stable
+`parse_error`; a `toml` probe under an interpreter without `tomllib` is `present`, with its digest and
+`parse_unavailable`, never a crash and never a pretence that the file held nothing.
+
+`scope` is recorded and never resolved. It names the layer an item came from — the shipped adapters
+use `user`, `project`, and `system` — and `scan` computes no precedence winner from it; see
+What a baseline does not cover below for why.
+
+`sensitive_key_patterns` are `fnmatch` patterns matched case-insensitively against key names in a
+parsed document, so `*key*` and the literal `env` both work, and `env` matches the key `env` without
+matching `environment`. A matching key keeps its name; its value is replaced by
+`{"redacted": true, "digest": "sha256:…"}` whatever its type, because an object and an array carry
+secrets as readily as a string. Recursion stops at the match: nothing beneath a redacted value is
+walked or recorded, which is why the single pattern `env` protects an entire MCP `env` block without
+enumerating what is inside it. The digest is there so drift can tell "the token changed" from "the
+token is gone" without ever having held either. The patterns live in adapter data rather than in code
+because the key name a vendor invents next is not something the code can know.
+
+`expires_on` exists because a vendor path is time-sensitive evidence, under the same rule Evidence
+above states for every other claim: the shipped adapters were built from one research document and
+inherit its expiry. Running an adapter past that date is a finding rather than an error, and the scan
+still produces its baseline, because an adapter whose paths have quietly gone stale is exactly the
+case that produces a clean-looking baseline of nothing.
+
+## The unknown client
+
+Without `--client`, `scan` detects: an adapter matches when at least one of its `$USER_CONFIG`
+candidates resolves, under the candidate rules above and no others, so an adapter is detected on
+exactly the conditions its probes would later run under. Exactly one match selects that adapter. Two
+or more, or none, selects `generic`, which declares no probes and therefore emits an entry whose
+`items` array is empty. Detection never guesses between two plausible clients silently.
+
+Reaching `generic` by falling back and asking for it by name are deliberately different outcomes.
+`--client generic` is an answer, and it exits `0`. A fallback is not an answer; it is a scan that
+covered nothing while looking clean, so it is a finding that names the clients weighed and points at
+`--client`. The two are told apart by structured data carried out of selection, never by matching on
+the wording of a note.
+
+A client no bundled adapter covers is served by a user adapter, at:
+
+```text
+<user-config>/agent-ingest-audit-optimize/adapters/local.json
+```
+
+`<user-config>` is what `--user-config` names, and without it that directory is never opened — not
+defaulted to the home directory. The tool cannot know which client's configuration root is meant on a
+machine that may have several, and reading a directory the user did not name is the thing the whole
+path boundary exists to prevent.
+
+A user adapter is keyed by its `client` value like every other adapter, and a user adapter beats a
+bundled one declaring the same client, with a note recording the override and naming both files. Two
+adapters in the *same* directory declaring one client is refused outright: whichever won would be
+decided by sort order, and the loser would be invisible — including to the user who edited it and saw
+nothing change.
+
+A user adapter is validated exactly as a bundled one is, and refused the same way. It is never
+silently skipped in favour of the bundled file it was written to replace: routing around a broken
+override leaves the user reading a baseline from the adapter they thought they had overridden.
+`SKILL.md` owns the other half of this — how the agent asks for the paths and what it may write.
+
+## What a baseline does not cover
+
+`scan` reads less than the configuration it walks, and each of these is a decision rather than an
+oversight. They are recorded because a gap nobody wrote down is indistinguishable from a gap nobody
+noticed.
+
+**Credential files are not probed at all.** Codex's `auth.json` and Claude Code's credentials file
+are the two highest-risk files the research names, and nothing looks at either — not even for a
+digest and a `present`/`not_present` state, which would hold no secret. The obstacle is the `kind`
+enum: it is closed by the design spec, all ten values name a kind of configuration, and none of them
+fits a credential store. The cost is a drift signal one would very much want, because a credentials
+file appearing where there was none says the store moved from the OS keyring onto the disk. Deferred
+until there is an eleventh kind to record it under.
+
+**Hook scripts are not digested, only their registrations.** A `hook` item records that a hook is
+registered under a settings file's `hooks` key; the script it runs is not opened and not hashed, so
+rewriting that script produces an identical baseline. This is deliberate and not an oversight:
+resolving a path read out of a configuration file would cross the boundary drawn in 0.2.2, which
+`verify` states as never dereferencing a path that arrived as content rather than as an argument.
+A probe naming a hooks directory outright would be a different thing and is allowed by the format;
+none is shipped.
+
+**Managed and enterprise policy is not probed.** The research gives no path for it, only
+"platform-specific policy directory", and no path ships that was not verified. Managed policy is the
+highest-precedence settings layer there is, so a baseline missing it is incomplete in the one layer
+that overrides all the others.
+
+**Per-subsystem precedence is not expressible.** Settings and skills resolve in different orders
+inside one client — Claude Code resolves settings managed, local, project, user, and skills
+enterprise, personal, project — so a single "which layer wins" answer computed at scan time would be
+wrong for half the kinds. `scan` therefore records the layer each item came from in `attributes.scope`
+and computes no winner. The adapter format has nowhere to state an ordering, so `drift` will need
+that ordering from somewhere and it is currently nowhere in the shipped data.
+
+**`$SYSTEM_CONFIG` is POSIX-only and cannot be declared optional.** Its only candidate is
+`/etc/codex`, and the format has no way to mark an anchor as absent by design on a platform, so on
+Windows it is permanently unresolved and its probes are permanently `not_present`.
 
 ## Language
 
