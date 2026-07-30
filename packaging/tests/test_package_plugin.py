@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
+import re
 import tempfile
 import unittest
 import zipfile
@@ -97,6 +99,15 @@ class PackagePluginTests(unittest.TestCase):
             for names in (plugin_names, skill_names):
                 self.assertFalse(any("__pycache__" in name for name in names))
                 self.assertFalse(any(name.endswith((".pyc", ".pyo", ".pyd")) for name in names))
+
+    def test_submission_states_the_real_evaluation_case_count(self) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        suite = json.loads((repo_root / "evals" / "suite.json").read_text(encoding="utf-8"))
+        submission = (repo_root / "docs" / "SUBMISSION.md").read_text(encoding="utf-8")
+        stated = re.findall(r"(\d+)-case evaluation suite", submission)
+
+        self.assertEqual(len(stated), 1, "expected exactly one case-count claim")
+        self.assertEqual(int(stated[0]), len(suite["cases"]))
 
 
 if __name__ == "__main__":

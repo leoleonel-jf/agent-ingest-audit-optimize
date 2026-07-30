@@ -9,6 +9,9 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# These paths intentionally duplicate the ones in packaging/scripts/package_plugin.py
+# rather than importing them. This module is the drift check; deriving its paths from
+# the packager would let one path bug mask another.
 CLAUDE_MANIFEST = REPO_ROOT / ".claude-plugin" / "plugin.json"
 CODEX_MANIFEST = REPO_ROOT / ".codex-plugin" / "plugin.json"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
@@ -70,12 +73,14 @@ class VersionConsistencyTests(unittest.TestCase):
         self.assertEqual(load_json(CODEX_MANIFEST)["version"], self.version)
 
     def test_claude_marketplace_version_matches(self) -> None:
-        entry = load_json(CLAUDE_MARKETPLACE)["plugins"][0]
-        self.assertEqual(entry["version"], self.version)
+        plugins = load_json(CLAUDE_MARKETPLACE)["plugins"]
+        self.assertEqual(len(plugins), 1, "a second entry would go unchecked")
+        self.assertEqual(plugins[0]["version"], self.version)
 
     def test_agents_marketplace_ref_matches(self) -> None:
-        entry = load_json(AGENTS_MARKETPLACE)["plugins"][0]
-        self.assertEqual(entry["source"]["ref"], f"v{self.version}")
+        plugins = load_json(AGENTS_MARKETPLACE)["plugins"]
+        self.assertEqual(len(plugins), 1, "a second entry would go unchecked")
+        self.assertEqual(plugins[0]["source"]["ref"], f"v{self.version}")
 
     def test_readme_codex_ref_matches(self) -> None:
         found = single_match(rf"--ref v({SEMVER})", read_text(README), README)

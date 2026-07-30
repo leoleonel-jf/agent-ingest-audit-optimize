@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Validate the agent-ingest-audit-optimize governance ledger.
 
-Phase 0.2.0 implements the `verify` command only. Scanning, drift detection,
-rollback preview, and dashboard rendering arrive in later phases.
+`verify` is the only command implemented. Scanning, drift detection, rollback
+preview, and dashboard rendering arrive in later phases.
 """
 
 from __future__ import annotations
