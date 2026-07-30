@@ -138,7 +138,7 @@ one-file-per-version convention.
 Global scope, at the Claude Code user configuration root:
 
 ```text
-C:\Users\leole\.claude\agent-ingest-audit-optimize\
+~/.claude/agent-ingest-audit-optimize/
 ├── ledger.json
 └── records/
 ```
@@ -225,7 +225,7 @@ cross-ledger checks execute:
 
 ```text
 python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify \
-  "C:\Users\leole\.claude\agent-ingest-audit-optimize\ledger.json" \
+  "~/.claude/agent-ingest-audit-optimize/ledger.json" \
   ".agent-audit/ledger.json"
 ```
 

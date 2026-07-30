@@ -154,7 +154,7 @@ if __name__ == "__main__":
 Run:
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && python -m unittest discover -s packaging/tests -v
+python -m unittest discover -s packaging/tests -v
 ```
 
 Expected: 12 tests run, 8 pass, **exactly 4 failures**, and they are these and only these:
@@ -171,7 +171,7 @@ If any other test fails, stop: either a regex is wrong or a pin drifted that the
 The test is committed while still failing, so the defect it catches is visible in history.
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && git add packaging/tests/test_version_consistency.py && git commit -m "test: assert every version pin derives from one source of truth
+git add packaging/tests/test_version_consistency.py && git commit -m "test: assert every version pin derives from one source of truth
 
 The packager cross-checks only .codex-plugin/plugin.json against
 .claude-plugin/plugin.json, no test asserted any version, and there is no CI,
@@ -283,7 +283,7 @@ Insert immediately above the `## 0.2.0 - 2026-07-30` heading:
 - [ ] **Step 6: Run the version test to verify it passes**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && python -m unittest discover -s packaging/tests -v
+python -m unittest discover -s packaging/tests -v
 ```
 
 Expected: 12 tests, **OK**, zero failures.
@@ -291,7 +291,7 @@ Expected: 12 tests, **OK**, zero failures.
 - [ ] **Step 7: Run the packager to verify the manifests still agree**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && python packaging/scripts/package_plugin.py build && python packaging/scripts/package_plugin.py verify
+python packaging/scripts/package_plugin.py build && python packaging/scripts/package_plugin.py verify
 ```
 
 Expected: build writes `dist/agent-ingest-audit-optimize-0.2.1-plugin.zip`, `-0.2.1-skill.zip`, and `SHA256SUMS`; verify prints `VALID` and the `dist` path. `dist/` is git-ignored, so nothing is staged from it.
@@ -299,7 +299,7 @@ Expected: build writes `dist/agent-ingest-audit-optimize-0.2.1-plugin.zip`, `-0.
 - [ ] **Step 8: Commit**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && git add .claude-plugin .codex-plugin .agents README.md docs/SUBMISSION.md CHANGELOG.md && git commit -m "release: v0.2.1 -- restore Codex installability and lock the version pins
+git add .claude-plugin .codex-plugin .agents README.md docs/SUBMISSION.md CHANGELOG.md && git commit -m "release: v0.2.1 -- restore Codex installability and lock the version pins
 
 .agents/plugins/marketplace.json is the OpenAI Codex marketplace manifest,
 documented at developers.openai.com, and its ref still pinned v0.1.3. A pinned
@@ -346,7 +346,7 @@ Same structure. Release name: "Codex installability and version-pin release." Th
 The checksums come from the build in Task 2 Step 7 — read them, do not invent them:
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && cat dist/SHA256SUMS
+cat dist/SHA256SUMS
 ```
 
 - [ ] **Step 3: Add the pin list to `packaging/README.md`**
@@ -393,7 +393,7 @@ re-clone on every auto-upgrade pass.
 - [ ] **Step 4: Run the packaging suite to confirm nothing broke**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && python -m unittest discover -s packaging/tests
+python -m unittest discover -s packaging/tests
 ```
 
 Expected: **OK**.
@@ -401,7 +401,7 @@ Expected: **OK**.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && git add docs/releases packaging/README.md && git commit -m "docs: add the 0.2.0 and 0.2.1 release documents and the version-pin list
+git add docs/releases packaging/README.md && git commit -m "docs: add the 0.2.0 and 0.2.1 release documents and the version-pin list
 
 docs/releases/ had one file per version through v0.1.3 and then stopped; 0.2.0
 shipped without one. Write both, and give packaging/README.md a section naming
@@ -420,7 +420,7 @@ Creates both ledgers empty and validating, before any record exists. This is boo
 **Files:**
 - Modify: `.gitignore`
 - Create: `.agent-audit/ledger.json`, `.agent-audit/records/` (untracked)
-- Create: `C:\Users\leole\.claude\agent-ingest-audit-optimize\ledger.json` and `records\` (outside the repository)
+- Create: `~/.claude/agent-ingest-audit-optimize/ledger.json` and `records/` (outside the repository)
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
@@ -436,12 +436,12 @@ Append to `.gitignore`:
 
 - [ ] **Step 2: Create the global ledger**
 
-Create `C:\Users\leole\.claude\agent-ingest-audit-optimize\records\` (empty) and `C:\Users\leole\.claude\agent-ingest-audit-optimize\ledger.json`:
+Create `~/.claude/agent-ingest-audit-optimize/records/` (empty) and `~/.claude/agent-ingest-audit-optimize/ledger.json`:
 
 ```json
 {
   "schema_version": "1.0",
-  "ledger_id": "global-claude-code-leole",
+  "ledger_id": "global-claude-code",
   "scope": "global",
   "language": "pt-BR",
   "client": "claude-code",
@@ -488,7 +488,7 @@ Create `.agent-audit/records/` (empty) and `.agent-audit/ledger.json`:
 Compute the real digest of the project ledger:
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && python -c "import hashlib,pathlib;print('sha256:'+hashlib.sha256(pathlib.Path('.agent-audit/ledger.json').read_bytes()).hexdigest())"
+python -c "import hashlib,pathlib;print('sha256:'+hashlib.sha256(pathlib.Path('.agent-audit/ledger.json').read_bytes()).hexdigest())"
 ```
 
 Put that exact value into the global ledger's `known_projects`, replacing the empty array:
@@ -496,8 +496,8 @@ Put that exact value into the global ledger's `known_projects`, replacing the em
 ```json
   "known_projects": [
     {
-      "project_root": "C:\\Users\\leole\\source\\repos\\agent-ingest-audit-optimize",
-      "ledger_path": "C:\\Users\\leole\\source\\repos\\agent-ingest-audit-optimize\\.agent-audit\\ledger.json",
+      "project_root": "C:/Users/x/proj",
+      "ledger_path": "C:/Users/x/proj/.agent-audit/ledger.json",
       "last_seen": "2026-07-30",
       "last_digest": "<the sha256: value printed above>",
       "status": "OK"
@@ -508,7 +508,7 @@ Put that exact value into the global ledger's `known_projects`, replacing the em
 - [ ] **Step 5: Verify both ledgers in one invocation**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify "C:/Users/leole/.claude/agent-ingest-audit-optimize/ledger.json" ".agent-audit/ledger.json"; echo "exit=$?"
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify "~/.claude/agent-ingest-audit-optimize/ledger.json" ".agent-audit/ledger.json"; echo "exit=$?"
 ```
 
 Expected: a line reporting two validated ledgers, no findings, `exit=0`.
@@ -519,7 +519,7 @@ for this release; a genuine validator defect is written down in Task 6, not patc
 - [ ] **Step 6: Confirm nothing is staged**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && git status --short
+git status --short
 ```
 
 Expected: `.gitignore` modified, and **no** `.agent-audit` path listed.
@@ -527,7 +527,7 @@ Expected: `.gitignore` modified, and **no** `.agent-audit` path listed.
 - [ ] **Step 7: Commit the ignore rule only**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && git add .gitignore && git commit -m "chore: keep this repository's own ledger out of git
+git add .gitignore && git commit -m "chore: keep this repository's own ledger out of git
 
 The ledger records identifiers minted by a global ledger that exists only on
 one machine. 0.1.2 removed author-local record IDs from public files so fresh
@@ -547,7 +547,7 @@ computed rather than reconstructed.
 **Files:**
 - Modify: `.agent-audit/ledger.json` (untracked)
 - Create: `.agent-audit/records/MAT-2026-000.md`, `PROP-2026-000.md`, `ADR-2026-000.md`, `RUN-2026-000.md` (untracked)
-- Modify: `C:\Users\leole\.claude\agent-ingest-audit-optimize\ledger.json` (sequences and `last_digest`)
+- Modify: `~/.claude/agent-ingest-audit-optimize/ledger.json` (sequences and `last_digest`)
 
 **Interfaces:**
 - Consumes: both ledgers from Task 4; the committed 0.2.1 changes from Tasks 2 and 3.
@@ -572,7 +572,7 @@ For every file the 0.2.1 change touched, capture the digest before and after. `b
 git, `after` from the working tree:
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && for f in .agents/plugins/marketplace.json README.md docs/SUBMISSION.md; do
+for f in .agents/plugins/marketplace.json README.md docs/SUBMISSION.md; do
   before=$(git show v0.2.0:"$f" | python -c "import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())")
   after=$(python -c "import hashlib,pathlib,sys;print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())" "$f")
   echo "$f before=sha256:$before after=sha256:$after"
@@ -803,7 +803,7 @@ The project ledger changed, so its recorded digest is now stale. Recompute and u
 `known_projects[0].last_digest`:
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && python -c "import hashlib,pathlib;print('sha256:'+hashlib.sha256(pathlib.Path('.agent-audit/ledger.json').read_bytes()).hexdigest())"
+python -c "import hashlib,pathlib;print('sha256:'+hashlib.sha256(pathlib.Path('.agent-audit/ledger.json').read_bytes()).hexdigest())"
 ```
 
 `verify` checks that this field has the shape `sha256:<64 hex>`, never that it matches the ledger
@@ -813,7 +813,7 @@ Task 6 writes it up.
 - [ ] **Step 7: Verify both ledgers**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify "C:/Users/leole/.claude/agent-ingest-audit-optimize/ledger.json" ".agent-audit/ledger.json"; echo "exit=$?"
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify "~/.claude/agent-ingest-audit-optimize/ledger.json" ".agent-audit/ledger.json"; echo "exit=$?"
 ```
 
 Expected: two ledgers validated, no findings, `exit=0`.
@@ -824,13 +824,13 @@ A clean run alone does not show the validator works. Break one field on purpose,
 finding, then restore it:
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && cp .agent-audit/ledger.json /tmp/ledger.bak && python -c "
+cp .agent-audit/ledger.json /tmp/ledger.bak && python -c "
 import json,pathlib
 p=pathlib.Path('.agent-audit/ledger.json')
 d=json.loads(p.read_text(encoding='utf-8'))
 d['id_authority']=True
 p.write_text(json.dumps(d,indent=2,ensure_ascii=False),encoding='utf-8')
-" && python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify "C:/Users/leole/.claude/agent-ingest-audit-optimize/ledger.json" ".agent-audit/ledger.json"; echo "exit=$?"; cp /tmp/ledger.bak .agent-audit/ledger.json
+" && python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify "~/.claude/agent-ingest-audit-optimize/ledger.json" ".agent-audit/ledger.json"; echo "exit=$?"; cp /tmp/ledger.bak .agent-audit/ledger.json
 ```
 
 Expected: `exit=1`, with findings naming both the project ledger's `scope`/`id_authority`
@@ -840,7 +840,7 @@ state where Step 7's command exits `0` — re-run it to confirm.
 - [ ] **Step 9: Confirm nothing is staged**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && git status --short
+git status --short
 ```
 
 Expected: empty. No `.agent-audit` path, no ledger file. There is nothing to commit in this task
@@ -871,9 +871,10 @@ Expected: empty. No `.agent-audit` path, no ledger file. There is nothing to com
   `known_projects[].last_digest` is shape-checked but never compared against the ledger it names,
   so it goes stale silently after any project-ledger write;
 - whether `sequences` was ambiguous in practice. `references/LEDGER.md` calls it "the next free
-  number" while `verify` checks it is "high enough to cover the highest number already used" —
-  after allocating `-000`, both `0` and `1` satisfy the check, and the plan chose `1`. Say
-  plainly whether that ambiguity is worth closing;
+  number," but `verify` only enforces a floor: after allocating `-000`, anything at or above the
+  next-free value of `1` passes, and only a value below it — `0` — is flagged. The plan chose `1`.
+  Say plainly whether the gap between that floor and `references/LEDGER.md`'s stricter "next free
+  number" phrasing is worth closing;
 - anything else that felt wrong while writing a ledger by hand.
 
 Findings are recorded and scheduled, never fixed here. `verify` is out of scope for 0.2.1.
@@ -881,7 +882,7 @@ Findings are recorded and scheduled, never fixed here. `verify` is out of scope 
 - [ ] **Step 2: Run every check one last time**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && python -m unittest discover -s dashboard/tests && python -m unittest discover -s evals/tests && python -m unittest discover -s packaging/tests && python evals/scripts/eval_suite.py validate && python packaging/scripts/package_plugin.py verify
+python -m unittest discover -s dashboard/tests && python -m unittest discover -s evals/tests && python -m unittest discover -s packaging/tests && python evals/scripts/eval_suite.py validate && python packaging/scripts/package_plugin.py verify
 ```
 
 Expected: 203 dashboard tests OK; 11 evals tests OK; 12 packaging tests OK (4 pre-existing plus
@@ -891,7 +892,7 @@ and 7 task categories; `VALID` with the `dist` path.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd "C:/Users/leole/source/repos/agent-ingest-audit-optimize" && git add docs/validation/ledger-dogfood-0.2.1.md && git commit -m "docs: record what the first real ledger exercise found
+git add docs/validation/ledger-dogfood-0.2.1.md && git commit -m "docs: record what the first real ledger exercise found
 
 0.2.0 shipped the ledger machinery but nothing had ever written a ledger by
 hand for real work -- verify had only ever run against test fixtures. This
