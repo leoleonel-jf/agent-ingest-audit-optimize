@@ -2,6 +2,39 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.4 - 2026-07-30
+
+A patch release for a real defect in the shipped path-safety layer, found by running the test
+suite on Ubuntu for the first time -- until now it had only ever run on Windows.
+
+- fixes `resolve_anchored` leaking a raw `RuntimeError` out of the path-safety layer instead of
+  refusing with `PathSafetyError`, when a stored path crosses a symlink loop
+  (`root/a -> root/b -> root/a`). `pathlib`'s own `Path.resolve()` detects the loop in Python and
+  raises a bare `RuntimeError` for it, not an `OSError`, so `_resolve_or_raise`'s `except OSError`
+  let it pass straight through uncaught; the guard was invisible on Windows because Windows has no
+  equivalent construct and the `pathlib` code path that raises it does not exist on that platform.
+  `_resolve_or_raise` now also catches `RuntimeError`, under the existing `resolve_failed` reason;
+  `_refuse_if_hardlinked`'s `stat()` catches it too now, defensively, for symmetry;
+- fixes two tests that encoded Windows-only filesystem assumptions, found by the same Ubuntu run,
+  so each now asserts what is actually correct on its own platform instead of a Windows-only
+  outcome: `test_oserror_from_resolve_becomes_path_safety_error` skips on POSIX, where no
+  construct reliably provokes the `OSError` this guard exists to wrap (non-strict
+  `Path.resolve()` accepts a trailing dot/space segment silently instead of raising); and
+  `test_path_key_normalizes_separator_and_case` now asserts a digest finding on Windows and a
+  clean exit with no finding on POSIX, since a differently-cased path is a genuinely different
+  file on a case-sensitive filesystem rather than "the same path, not compared";
+- scopes `test_release_document_checksums_match_a_real_build` to skip, with its reasoning stated,
+  when no release document exists yet for the current version, rather than going red for the
+  entire development cycle every time packaged content changes before the release document for
+  that version has been written.
+
+**Compatibility:** additive and corrective; no ledger or public interface changes. The
+cross-platform build was verified byte-identical -- the same commit's archives carry identical
+SHA-256 checksums whether built on Windows or on the Ubuntu 24.04 host that surfaced these
+platform differences, because `package_plugin.py` fixes archive timestamps and uses POSIX-style
+paths regardless of the host OS. Only the POSIX-only failure mode changes; already-passing
+behavior on either platform is unaffected.
+
 ## 0.2.3 - 2026-07-30
 
 The first of three increments toward the design spec's 0.3.0 (`docs/specs/2026-07-30-anchors-and-path-safety.md`).
