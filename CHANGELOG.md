@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.2 - 2026-07-30
+
+- compares `known_projects[].last_digest` against the referenced ledger when that ledger is passed
+  in the same invocation, closing a gap where a wrong-but-well-formed digest was indistinguishable
+  from a correct one; the comparison never opens a path read out of ledger content, so it cannot be
+  steered by a crafted `ledger_path`;
+- checks the `id_authority` ledger's `sequences` against every record in the verified set rather
+  than only its own, since the ledger designated as sole ID authority normally holds no records and
+  was therefore the one ledger whose allocation counter nothing validated;
+- defines a backlog entry's `id` as a back-reference to the record whose evidence produced the
+  finding, deliberately not unique, and checks that it resolves to a record that exists;
+- requires every RUN record to name `targets` in `self_reported`, because `verify` checks each
+  target's shape and can never check that the array covers what the run changed;
+- states in `references/LEDGER.md` that a digest is taken from the referenced ledger's final
+  on-disk bytes, and that the sequence check is a floor rather than the equality the prose implied;
+- guards the marketplace plugin-entry count and the evaluation-case count stated in
+  `docs/SUBMISSION.md`, neither of which had a check.
+
+**Compatibility:** a ledger that validated clean under 0.2.1 may now produce findings. The new
+checks describe conditions that were always wrong and merely unobserved. One is a hard requirement
+rather than a detection: add `"targets"` to every RUN record's `self_reported` array.
+
 ## 0.2.1 - 2026-07-30
 
 - corrects `.agents/plugins/marketplace.json`, the OpenAI Codex marketplace manifest, whose
