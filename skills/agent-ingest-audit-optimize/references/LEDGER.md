@@ -108,16 +108,94 @@ distinct, named reason whenever:
    can re-point later, so it is refused on that basis alone, independent of where it happens to
    lead today.
 
+Nine further refusals close the gap between this list and what the code actually enforces — added
+during a security review but never previously brought into this document:
+
+6. **invalid anchor name** — the `roots` mapping itself contains a key that is not a valid
+   `[A-Z_]+` identifier. Checked before any path is resolved: a malformed key could otherwise
+   produce a stored form this function can never parse back, or let a key containing `/` steal a
+   prefix of another key's namespace;
+7. **empty path** — the stored value is missing or is not a non-empty string;
+8. **embedded NUL byte** — the stored path contains a NUL byte, refused before anything touches
+   the filesystem. Without this check the NUL survives every other textual check (it is not a
+   `..` segment, not absolute, not an unknown anchor) and would otherwise reach the hardlink
+   check's `stat()` call, which raises a bare `ValueError` rather than an `OSError` — the same
+   NUL-byte guard `check_glob` applies to a probe pattern, see Adapter glob safety below;
+9. **malformed anchor reference** — the path does not parse as `$NAME/...` at all, and was not
+   already refused as absolute;
+10. **reserved device name** — a path component is a Windows-reserved device name (`CON`, `PRN`,
+    `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, with or without an extension), refused on every
+    platform because a ledger written on Windows may be validated on Linux, and a reserved name
+    resolves "inside" the anchor there without behaving like an ordinary file: writes vanish,
+    reads return empty, `exists()` lies;
+11. **alternate data stream** — a path component contains a `:`, which opens an NTFS alternate
+    data stream; writing there is invisible to a directory listing and leaves the visible file
+    unchanged;
+12. **resolve failed** — resolving a path (the anchor root itself, or any prefix while checking
+    rule 5) raised an `OSError` from the filesystem — most concretely, a trailing dot/space
+    segment following an existing file component raises `NotADirectoryError` on Windows. Wrapped
+    rather than allowed to escape, so a caller need only ever catch `PathSafetyError`, never a raw
+    `OSError`, and `scan` (0.2.4) can report a finding and keep walking instead of aborting;
+13. **path resolves to a hardlinked file** — the resolved path names an existing regular file with
+    more than one hard link. A hardlink needs no elevation to create (`mklink /H` on Windows, `ln`
+    on POSIX) and has no symlink target for rules 4/5 to follow, so it defeats every rule above by
+    construction: writing through it writes through to whatever else the same file is linked from,
+    wherever that is. Directories are excluded — a directory's link count is an ordinary
+    filesystem property, not evidence of anything. **Operational consequence:** a user whose
+    instruction file is hardlinked between two client roots — a routine setup for sharing one file
+    across projects — will see this refusal;
+14. **inspect failed** — inspecting the resolved path for rule 13 raised an `OSError`, or,
+    defensively, a `ValueError` (the same NUL-byte failure mode rule 8 already refuses earlier, in
+    case one ever reached this point by some other route). Wrapped for the same reason as rule 12.
+
 None of this changes how `verify` itself operates: it still reads only the paths a caller names on
 its own command line, and it still never dereferences a path that arrived as ledger content rather
 than a command-line argument.
 
 ## Adapter glob safety
 
-`check_glob` refuses an adapter probe glob that contains a `..` segment or that is absolute
-(either the POSIX `/...` form or a Windows drive-letter form). No probe field may contain a glob
-that escapes its anchor. This release only validates the pattern; nothing here expands a glob —
-expansion arrives with `scan` in 0.2.4.
+`check_glob` refuses an adapter probe glob, each with its own named reason:
+
+- **not a string** — the pattern is missing or not a non-empty string;
+- **NUL byte** — the pattern contains a NUL byte;
+- **`..` segment** — the pattern contains a `..` segment, including dot/space variants (`...`,
+  `.. `, `. .`, and similar) that collapse to one, mirroring how `ntpath.realpath` normalizes a
+  path built from this glob later;
+- **absolute** — the pattern is absolute (either the POSIX `/...` form or a Windows drive-letter
+  form).
+
+No probe field may contain a glob that escapes its anchor. This release only validates the
+pattern; nothing here expands a glob — expansion arrives with `scan` in 0.2.4.
+
+## Path-safety refusal reasons
+
+Every `PathSafetyError` raised anywhere in `dashboard.py` — by `resolve_anchored`, `anchor_path`,
+or `check_glob` — carries a stable `reason` key in addition to the prose above. The block below is
+the ground truth an alignment test in `dashboard/tests/test_dashboard.py` checks against: it
+asserts this exact set of keys equals `dashboard.PATH_SAFETY_REASONS` in both directions, so a
+refusal added to the code without being named here fails the test, and a name removed from here
+that the code can still raise fails it too.
+
+<!-- PATH_SAFETY_REASONS_START -->
+- `invalid_anchor_name`
+- `glob_not_string`
+- `glob_nul_byte`
+- `glob_dotdot_segment`
+- `glob_absolute`
+- `resolve_failed`
+- `path_empty`
+- `path_embedded_nul`
+- `path_dotdot_segment`
+- `path_absolute`
+- `path_malformed_anchor_reference`
+- `path_unknown_anchor`
+- `path_reserved_device_name`
+- `path_alternate_data_stream`
+- `path_link_crosses_anchor`
+- `path_resolves_outside_anchor`
+- `path_inspect_failed`
+- `path_hardlinked`
+<!-- PATH_SAFETY_REASONS_END -->
 
 ## Identifiers
 

@@ -31,6 +31,16 @@ consume, and gives `baselines[]` a real field schema.
 - documents all of it in `references/LEDGER.md`: Path anchors, Path safety, Adapter glob safety,
   the `BASE`-identifier sequence rule, and the Baselines field tables, each guarded by an ablated
   reference test.
+- **correction:** `references/LEDGER.md`'s Path safety section originally named only five of
+  `resolve_anchored`'s refusal reasons, though the code already enforced fourteen; the hardlinked
+  regular file, reserved DOS device name, and alternate-data-stream (`:` component) refusals —
+  all added during the same security review as the other checks above — never reached this or any
+  other public document, alongside four narrower reasons (invalid anchor name, empty path,
+  malformed anchor reference, and a resolve/inspect `OSError` wrapped rather than left to escape).
+  The document now names all fourteen, plus the four reasons `check_glob` can raise, in a
+  machine-checked block an alignment test compares against the code directly.
+  **Operational consequence:** a user whose instruction file is hardlinked between two client
+  roots — a routine setup for sharing one file across projects — will see the hardlink refusal.
 
 **Compatibility:** additive. A ledger valid under 0.2.2 stays valid — `baselines` is empty in every
 ledger that exists, because nothing has ever written one, and `portable` is optional everywhere,

@@ -3251,5 +3251,65 @@ class CheckGlobTests(unittest.TestCase):
         self.assertIn("NUL byte", str(ctx.exception))
 
 
+class PathSafetyReasonAlignmentTests(unittest.TestCase):
+    """I3: the documented set of PathSafetyError refusal reasons must equal
+    the enforced set, in both directions.
+
+    references/LEDGER.md used to introduce its refusal list with "refusing
+    with a distinct, named reason whenever:" and then name only five, while
+    the code (resolve_anchored, anchor_path, and check_glob together) could
+    raise PathSafetyError for at least nine. A test that merely checked that
+    five bold labels were present did not — and could not — catch that drift;
+    it would stay green even if a tenth undocumented reason were added
+    tomorrow. This class is driven entirely from dashboard.PATH_SAFETY_REASONS
+    and the machine-checked block in LEDGER.md, not from a hardcoded list, so
+    adding a reason to the code without documenting it fails
+    test_every_code_reason_is_documented, and documenting a reason the code
+    can no longer raise fails test_no_documented_reason_is_stale.
+    """
+
+    REASON_KEY = re.compile(r"^[a-z][a-z_]*$")
+    START_MARKER = "<!-- PATH_SAFETY_REASONS_START -->"
+    END_MARKER = "<!-- PATH_SAFETY_REASONS_END -->"
+
+    def _documented_reasons(self) -> set[str]:
+        text = REFERENCE.read_text(encoding="utf-8")
+        start = text.index(self.START_MARKER)
+        end = text.index(self.END_MARKER)
+        block = text[start:end]
+        tokens = re.findall(r"`([^`]+)`", block)
+        return {token for token in tokens if self.REASON_KEY.fullmatch(token)}
+
+    def test_reason_block_markers_are_present(self) -> None:
+        # Guards the two tests below against both markers being deleted
+        # together, which would otherwise make an empty documented set
+        # compare against an empty "missing" or "extra" set and pass for the
+        # wrong reason.
+        text = REFERENCE.read_text(encoding="utf-8")
+        self.assertIn(self.START_MARKER, text)
+        self.assertIn(self.END_MARKER, text)
+
+    def test_every_code_reason_is_documented(self) -> None:
+        documented = self._documented_reasons()
+        missing = dashboard.PATH_SAFETY_REASONS - documented
+        self.assertFalse(
+            missing,
+            f"PathSafetyError can raise {sorted(missing)}, which "
+            "references/LEDGER.md's PATH_SAFETY_REASONS block does not name",
+        )
+
+    def test_no_documented_reason_is_stale(self) -> None:
+        documented = self._documented_reasons()
+        extra = documented - dashboard.PATH_SAFETY_REASONS
+        self.assertFalse(
+            extra,
+            f"references/LEDGER.md documents {sorted(extra)} as a "
+            "PathSafetyError reason, but no code in dashboard.py can raise it",
+        )
+
+    def test_documented_set_equals_the_runtime_set(self) -> None:
+        self.assertEqual(self._documented_reasons(), dashboard.PATH_SAFETY_REASONS)
+
+
 if __name__ == "__main__":
     unittest.main()
