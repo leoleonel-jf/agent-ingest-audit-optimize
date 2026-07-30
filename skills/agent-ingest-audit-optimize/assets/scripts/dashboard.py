@@ -154,7 +154,7 @@ def load_json(path: Path) -> dict:
         value = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise LedgerError(f"Missing ledger: {path}") from exc
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         raise LedgerError(f"Unreadable ledger: {path}: {exc}") from exc
     if not isinstance(value, dict):
         raise LedgerError(f"Ledger must be a JSON object: {path}")
@@ -394,6 +394,9 @@ def validate_record(record: dict, index: int, *, source: str) -> list[str]:
                         f"{label} evidence[{position}] is time_sensitive and requires expires_on"
                     )
 
+    if "pending_id_reconciliation" in record and type(record["pending_id_reconciliation"]) is not bool:
+        findings.append(f"{label} pending_id_reconciliation must be a boolean")
+
     if record["type"] == "RUN":
         findings.extend(validate_run(record, label=label))
 
@@ -554,8 +557,8 @@ def validate_collection(
                 for target in targets:
                     if isinstance(target, str) and target not in declared:
                         findings.append(
-                            f"{source}: {record.get('id')} links to an "
-                            f"unknown record: {target}"
+                            f"{source}: {record.get('id')!r} links to an "
+                            f"unknown record: {target!r}"
                         )
 
     if len(authorities) > 1:

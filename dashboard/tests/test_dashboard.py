@@ -356,6 +356,18 @@ class LedgerDocumentTests(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             self.assertTrue(stderr, "Directory path should produce error output")
 
+    def test_verify_returns_two_for_deeply_nested_json(self) -> None:
+        # json.loads on pathologically nested JSON raises RecursionError,
+        # not one of the exception types load_json originally caught. That
+        # must surface as exit code 2 (tool error), not a code 1 finding or
+        # an uncaught traceback.
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "ledger.json"
+            depth = 100_000
+            path.write_text(("[" * depth) + ("]" * depth), encoding="utf-8")
+            exit_code, stdout, stderr = _capture_verify([path])
+            self.assertEqual(exit_code, 2)
+
     def test_list_scope_produces_finding_not_crash(self) -> None:
         # scope is checked with a set-membership test; an unhashable value
         # (a list, straight from untrusted ledger content) must not raise.
@@ -404,6 +416,21 @@ class RecordEntryTests(unittest.TestCase):
     def test_provisional_id_is_accepted(self) -> None:
         record = minimal_record()
         record["id"] = "PROP-2026-000-P"
+        self.assertEqual(self.check(record), [])
+
+    def test_non_boolean_pending_id_reconciliation_is_reported(self) -> None:
+        record = minimal_record()
+        record["pending_id_reconciliation"] = "not-a-boolean"
+        self.assertTrue(
+            any(
+                "pending_id_reconciliation" in finding
+                for finding in self.check(record)
+            )
+        )
+
+    def test_boolean_pending_id_reconciliation_is_accepted(self) -> None:
+        record = minimal_record()
+        record["pending_id_reconciliation"] = True
         self.assertEqual(self.check(record), [])
 
     def test_malformed_id_is_reported(self) -> None:
@@ -1357,6 +1384,20 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
         findings = dashboard.validate_collection([("only", data)])
         self.assertTrue(any("RUN-2026-009" in finding for finding in findings))
 
+    def test_dangling_link_finding_escapes_untrusted_content(self) -> None:
+        # The link target (and, in principle, the record id) come straight
+        # from ledger content, which is attacker-influenced by design. An
+        # ANSI escape sequence in a dangling link target must not survive
+        # raw into the printed finding.
+        data = minimal_ledger()
+        record = minimal_record()
+        record["links"]["runs"] = ["\x1b[2J\x1b[3mRUN-2026-009"]
+        data["records"] = [record]
+        data["sequences"]["PROP"] = 1
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertTrue(any("RUN-2026-009" in finding for finding in findings))
+        self.assertFalse(any("\x1b" in finding for finding in findings))
+
     def test_more_than_one_id_authority_is_reported(self) -> None:
         findings = dashboard.validate_collection(
             [("a", minimal_ledger()), ("b", minimal_ledger())]
@@ -1461,9 +1502,17 @@ class CrossLedgerDefensiveParsingTests(unittest.TestCase):
         self.assertEqual(findings, [])
 
     def test_non_boolean_id_authority_is_ignored_not_crashed(self) -> None:
-        data = minimal_ledger()
-        data["id_authority"] = []
-        findings = dashboard.validate_collection([("only", data)])
+        # A second document gives this test teeth: a truthy-but-not-`True`
+        # id_authority sits alongside one genuine authority. If the
+        # authority check ever regressed from `is True` to a bare
+        # truthiness test, the non-boolean value would be counted as a
+        # second authority and this would (wrongly) produce a finding.
+        first = minimal_ledger()
+        first["id_authority"] = ["not-a-boolean"]
+        second = minimal_ledger()
+        second["scope"] = "project"
+        second["id_authority"] = True
+        findings = dashboard.validate_collection([("first", first), ("second", second)])
         self.assertEqual(findings, [])
 
 
