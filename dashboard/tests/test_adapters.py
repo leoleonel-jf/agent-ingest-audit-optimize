@@ -1176,5 +1176,79 @@ class RealBundledSelectionTests(unittest.TestCase):
         self.assertTrue(notes)
 
 
+class DogfoodCorrectionTests(unittest.TestCase):
+    """Three probe defects the first real scan found, each fixed against disk.
+
+    docs/validation/scan-dogfood-0.2.5.md records them. All three shared a shape:
+    the adapter was internally consistent, validated cleanly, and produced a
+    baseline that looked fine while missing or leaking something real. Only
+    running it against a live installation surfaced them.
+    """
+
+    @staticmethod
+    def adapter(name: str) -> dict:
+        return json.loads((ADAPTERS_DIR / name).read_text(encoding="utf-8"))
+
+    def test_the_plugin_registry_is_probed_where_it_actually_lives(self) -> None:
+        """The research says the registry sits beside the plugin cache directory.
+
+        The first adapter read "beside it" as beside the user root and probed
+        $USER_CONFIG/installed_plugins.json, which does not exist. The scan
+        reported no plugins on a machine full of them, and reported it as a clean
+        result rather than an absence worth noticing. Confirmed on disk: the
+        files are under the plugins/ directory.
+        """
+        probes = [
+            probe
+            for probe in self.adapter("claude-code.json")["probes"]
+            if probe["kind"] == "plugin"
+        ]
+        self.assertTrue(probes, "claude-code.json probes no plugin registry at all")
+        for probe in probes:
+            with self.subTest(path=probe["path"]):
+                self.assertTrue(
+                    probe["path"].startswith("$USER_CONFIG/plugins/"),
+                    probe["path"],
+                )
+
+    def test_user_scope_settings_local_json_is_probed_like_settings_json(self) -> None:
+        """settings.local.json exists at user scope too, and carries permissions.
+
+        The research table lists it only under Project, so the first adapter
+        probed it only there. This machine has one at user scope; its permissions
+        were absent from the baseline entirely. A pointer probed against the
+        team file and not against the personal override reports the layer the
+        user did not write and misses the one they did.
+        """
+        probes = self.adapter("claude-code.json")["probes"]
+        user_settings = {
+            (probe["kind"], probe.get("pointer"))
+            for probe in probes
+            if probe.get("path") == "$USER_CONFIG/settings.json"
+        }
+        user_local = {
+            (probe["kind"], probe.get("pointer"))
+            for probe in probes
+            if probe.get("path") == "$USER_CONFIG/settings.local.json"
+        }
+        self.assertTrue(user_settings, "no user-scope settings.json probes")
+        self.assertEqual(user_settings, user_local)
+
+    def test_codex_redacts_the_keys_that_carry_injected_values(self) -> None:
+        """Two Codex keys hold values no baseline should copy.
+
+        shell_environment_policy.set is a name-to-value map exactly like an MCP
+        env block, but the word "set" matches none of the generic patterns, so a
+        variable named MY_PAT would have been stored verbatim. projects holds
+        absolute local paths -- on this machine thirteen of them, including an
+        account name -- and anchoring protects the anchor field, not a parsed
+        value. Both are digested now rather than copied.
+        """
+        patterns = self.adapter("codex.json")["sensitive_key_patterns"]
+        for key in ("set", "projects"):
+            with self.subTest(key=key):
+                self.assertIn(key, patterns)
+
+
 if __name__ == "__main__":
     unittest.main()
