@@ -1425,6 +1425,93 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
             self.assertEqual(exit_code, 1)
             self.assertIn("duplicate", stderr.lower())
 
+    def test_stale_last_digest_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "project.json"
+            project.write_text(json.dumps(self.project_ledger()), encoding="utf-8")
+            global_data = minimal_ledger()
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(root),
+                    "ledger_path": str(project),
+                    "last_seen": "2026-07-30",
+                    "last_digest": "sha256:" + "0" * 64,
+                    "status": "OK",
+                }
+            ]
+            global_path = root / "global.json"
+            global_path.write_text(json.dumps(global_data), encoding="utf-8")
+
+            findings = dashboard.validate_collection(
+                [
+                    (str(global_path), json.loads(global_path.read_text(encoding="utf-8"))),
+                    (str(project), json.loads(project.read_text(encoding="utf-8"))),
+                ],
+                digests={
+                    dashboard._path_key(str(global_path)): dashboard.file_digest(global_path),
+                    dashboard._path_key(str(project)): dashboard.file_digest(project),
+                },
+            )
+
+            self.assertTrue(any("last_digest" in finding for finding in findings))
+
+    def test_matching_last_digest_is_not_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "project.json"
+            project.write_text(json.dumps(self.project_ledger()), encoding="utf-8")
+            global_data = minimal_ledger()
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(root),
+                    "ledger_path": str(project),
+                    "last_seen": "2026-07-30",
+                    "last_digest": dashboard.file_digest(project),
+                    "status": "OK",
+                }
+            ]
+            global_path = root / "global.json"
+            global_path.write_text(json.dumps(global_data), encoding="utf-8")
+
+            findings = dashboard.validate_collection(
+                [
+                    (str(global_path), json.loads(global_path.read_text(encoding="utf-8"))),
+                    (str(project), json.loads(project.read_text(encoding="utf-8"))),
+                ],
+                digests={
+                    dashboard._path_key(str(global_path)): dashboard.file_digest(global_path),
+                    dashboard._path_key(str(project)): dashboard.file_digest(project),
+                },
+            )
+
+            self.assertFalse(any("last_digest" in finding for finding in findings))
+
+    def test_digest_for_a_ledger_outside_the_set_is_not_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            global_data = minimal_ledger()
+            global_data["known_projects"] = [
+                {
+                    "project_root": str(root),
+                    "ledger_path": str(root / "absent.json"),
+                    "last_seen": "2026-07-30",
+                    "last_digest": "sha256:" + "0" * 64,
+                    "status": "OK",
+                }
+            ]
+            global_path = root / "global.json"
+            global_path.write_text(json.dumps(global_data), encoding="utf-8")
+
+            findings = dashboard.validate_collection(
+                [(str(global_path), global_data)],
+                digests={
+                    dashboard._path_key(str(global_path)): dashboard.file_digest(global_path)
+                },
+            )
+
+            self.assertFalse(any("last_digest" in finding for finding in findings))
+
 
 class CrossLedgerDefensiveParsingTests(unittest.TestCase):
     # validate_collection walks ids, sequence numbers, and link targets from

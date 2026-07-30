@@ -8,7 +8,9 @@ rollback preview, and dashboard rendering arrive in later phases.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -159,6 +161,27 @@ def load_json(path: Path) -> dict:
     if not isinstance(value, dict):
         raise LedgerError(f"Ledger must be a JSON object: {path}")
     return value
+
+
+def file_digest(path: Path) -> str:
+    """Hash a ledger's final on-disk bytes.
+
+    The digest recorded in `known_projects[].last_digest` describes the file as
+    written, so it must be taken from the bytes on disk: a trailing newline or a
+    line-ending difference changes the hash of an otherwise identical document.
+    """
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _path_key(value: str) -> str:
+    """Normalize a path for comparison without touching the filesystem.
+
+    `ledger_path` is ledger content, and ledger content is attacker-influenced.
+    This normalizes textually -- never resolving, never opening -- so comparing
+    a ledger's stored path against the paths the user named cannot be steered
+    into reading somewhere else.
+    """
+    return os.path.normcase(os.path.normpath(value))
 
 
 def validate_ledger(data: dict, *, source: str) -> list[str]:
@@ -493,7 +516,10 @@ def _prefix_and_number(identifier: str) -> tuple[str, int]:
 
 
 def validate_collection(
-    documents: list[tuple[str, dict]], *, complete: bool = True
+    documents: list[tuple[str, dict]],
+    *,
+    complete: bool = True,
+    digests: dict[str, str] | None = None,
 ) -> list[str]:
     # complete=False skips link checks to avoid false dangling-link findings.
     findings: list[str] = []
@@ -561,6 +587,28 @@ def validate_collection(
                             f"unknown record: {target!r}"
                         )
 
+    if digests:
+        for source, data in documents:
+            projects = data.get("known_projects") if isinstance(data, dict) else None
+            if not isinstance(projects, list):
+                continue
+            for index, entry in enumerate(projects):
+                if not isinstance(entry, dict):
+                    continue
+                ledger_path = entry.get("ledger_path")
+                declared = entry.get("last_digest")
+                if not isinstance(ledger_path, str) or not isinstance(declared, str):
+                    continue
+                # A path that was not passed on the command line is not
+                # comparable. Silence here means "not checked", never "correct".
+                actual = digests.get(_path_key(ledger_path))
+                if actual is None or actual == declared:
+                    continue
+                findings.append(
+                    f"{source}: known_projects[{index}] last_digest {declared!r} "
+                    f"does not match {ledger_path!r}, which hashes to {actual!r}"
+                )
+
     if len(authorities) > 1:
         findings.append(
             f"More than one ledger claims ID authority: {sorted(authorities)}"
@@ -573,18 +621,29 @@ def verify(paths: list[Path]) -> int:
     findings: list[str] = []
     documents: list[tuple[str, dict]] = []
     errors: list[str] = []
+    digests: dict[str, str] = {}
 
     for path in paths:
         source = str(path)
         try:
             data = load_json(path)
+            digest = file_digest(path)
         except LedgerError as exc:
             errors.append(str(exc))
             continue
+        except OSError as exc:
+            errors.append(f"Unreadable ledger: {path}: {exc}")
+            continue
+        # Register both the path as given and its resolved form, so a ledger
+        # that stores an absolute path still matches a relative invocation.
+        digests[_path_key(source)] = digest
+        digests[_path_key(str(path.resolve()))] = digest
         findings.extend(validate_ledger(data, source=source))
         documents.append((source, data))
 
-    findings.extend(validate_collection(documents, complete=not errors))
+    findings.extend(
+        validate_collection(documents, complete=not errors, digests=digests)
+    )
     for line in (*findings, *errors):
         print(line, file=sys.stderr)
 
