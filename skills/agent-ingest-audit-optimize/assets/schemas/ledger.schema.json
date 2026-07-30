@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize/ledger.schema.json",
+  "title": "Agent Ingest, Audit and Optimize ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ledger_id",
+    "scope",
+    "language",
+    "client",
+    "adapter_version",
+    "created",
+    "updated",
+    "id_authority",
+    "sequences",
+    "known_projects",
+    "records",
+    "baselines",
+    "backlog"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "ledger_id": { "type": "string", "minLength": 1 },
+    "scope": { "enum": ["global", "project"] },
+    "language": { "type": "string", "minLength": 2 },
+    "client": { "type": "string", "minLength": 1 },
+    "adapter_version": { "type": "integer", "minimum": 1 },
+    "created": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "updated": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "id_authority": { "type": "boolean" },
+    "sequences": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["MAT", "PROP", "RUN", "ADR", "BASE"],
+      "properties": {
+        "MAT": { "type": "integer", "minimum": 0 },
+        "PROP": { "type": "integer", "minimum": 0 },
+        "RUN": { "type": "integer", "minimum": 0 },
+        "ADR": { "type": "integer", "minimum": 0 },
+        "BASE": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "known_projects": { "type": "array", "items": { "type": "object" } },
+    "records": { "type": "array", "items": { "type": "object" } },
+    "baselines": { "type": "array", "items": { "type": "object" } },
+    "backlog": { "type": "array", "items": { "type": "object" } }
+  }
+}
