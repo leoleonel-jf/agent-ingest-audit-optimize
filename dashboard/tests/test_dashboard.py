@@ -1270,6 +1270,34 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
         findings = dashboard.validate_collection([("only", data)])
         self.assertTrue(any("sequences.PROP" in finding for finding in findings))
 
+    def test_sequence_drift_finding_names_the_offending_record_not_the_last_one(
+        self,
+    ) -> None:
+        # The record that actually sets the PROP high-water mark is first in
+        # the array; a different-prefix record (whose own sequence is not
+        # drifted) is last. Before the fix, the finding named whatever
+        # `identifier` happened to hold when the `for record in records`
+        # loop exited -- the *last* record processed, regardless of which
+        # prefix's high-water mark triggered the drift.
+        data = minimal_ledger()
+        prop_record = minimal_record()
+        prop_record["id"] = "PROP-2026-005"
+        mat_record = minimal_record()
+        mat_record["id"] = "MAT-2026-000"
+        mat_record["type"] = "MATERIAL"
+        data["records"] = [prop_record, mat_record]
+        data["sequences"]["PROP"] = 0
+        data["sequences"]["MAT"] = 1
+        findings = dashboard.validate_collection([("only", data)])
+        self.assertTrue(
+            any("PROP-2026-005" in finding for finding in findings),
+            f"expected a finding naming PROP-2026-005, got: {findings}",
+        )
+        self.assertFalse(
+            any("MAT-2026-000" in finding for finding in findings),
+            f"MAT-2026-000 must not be named in any finding, got: {findings}",
+        )
+
     def test_matching_sequence_is_accepted(self) -> None:
         data = minimal_ledger()
         data["records"] = [minimal_record()]

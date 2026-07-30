@@ -502,7 +502,11 @@ def validate_collection(
         if isinstance(data, dict) and data.get("id_authority") is True:
             authorities.append(source)
         records = data.get("records") if isinstance(data, dict) else None
-        highest: dict[str, int] = {}
+        # Maps prefix -> (highest number seen, identifier that set it), so
+        # the sequence-drift finding below can name the record that
+        # actually holds the high-water mark instead of whichever record
+        # happened to be last in the `for record in records` loop.
+        highest: dict[str, tuple[int, str]] = {}
         records = records if isinstance(records, list) else []
         for record in records:
             if not isinstance(record, dict):
@@ -525,15 +529,17 @@ def validate_collection(
                     "pending_id_reconciliation to be true"
                 )
             prefix, number = _prefix_and_number(identifier)
-            highest[prefix] = max(highest.get(prefix, -1), number)
+            current = highest.get(prefix)
+            if current is None or number > current[0]:
+                highest[prefix] = (number, identifier)
         sequences = data.get("sequences") if isinstance(data, dict) else None
         if isinstance(sequences, dict):
-            for prefix, number in highest.items():
+            for prefix, (number, highest_identifier) in highest.items():
                 allocated = sequences.get(prefix)
                 if type(allocated) is int and allocated < number + 1:
                     findings.append(
                         f"{source}: sequences.{prefix} is {allocated} but "
-                        f"{identifier} is already allocated"
+                        f"{highest_identifier} is already allocated"
                     )
 
     if complete:
