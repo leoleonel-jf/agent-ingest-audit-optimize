@@ -1399,6 +1399,47 @@ class CrossLedgerIntegrityTests(unittest.TestCase):
         self.assertTrue(any("RUN-2026-009" in finding for finding in findings))
         self.assertFalse(any("\x1b" in finding for finding in findings))
 
+    def test_backlog_id_referencing_no_record_is_reported(self) -> None:
+        ledger = self.project_ledger()
+        record = minimal_record()
+        record["id"] = "MAT-2026-000"
+        record["type"] = "MATERIAL"
+        ledger["records"] = [record]
+        ledger["sequences"]["MAT"] = 1
+        ledger["backlog"] = [
+            {
+                "id": "MAT-2026-777",
+                "classification": "MONITOR",
+                "reason": "refers to nothing",
+                "revisit_trigger": "never",
+                "revisit_after": None,
+            }
+        ]
+
+        findings = dashboard.validate_collection([("project.json", ledger)])
+
+        self.assertTrue(any("MAT-2026-777" in finding for finding in findings))
+
+    def test_two_backlog_entries_may_share_one_id(self) -> None:
+        ledger = self.project_ledger()
+        record = minimal_record()
+        record["id"] = "MAT-2026-000"
+        record["type"] = "MATERIAL"
+        ledger["records"] = [record]
+        ledger["sequences"]["MAT"] = 1
+        entry = {
+            "id": "MAT-2026-000",
+            "classification": "MONITOR",
+            "reason": "one material can produce several findings",
+            "revisit_trigger": "upstream fix",
+            "revisit_after": None,
+        }
+        ledger["backlog"] = [dict(entry), dict(entry)]
+
+        findings = dashboard.validate_collection([("project.json", ledger)])
+
+        self.assertFalse(any("backlog" in finding for finding in findings))
+
     def test_authority_sequences_must_cover_a_sibling_ledgers_records(self) -> None:
         authority = minimal_ledger()
         authority["sequences"]["MAT"] = 0
@@ -1701,6 +1742,24 @@ class PartialSetHonestyTests(unittest.TestCase):
         data["sequences"]["PROP"] = 1
         findings = dashboard.validate_collection([("only", data)], complete=False)
         self.assertEqual(findings, [])
+
+    def test_backlog_back_references_are_suppressed_for_a_partial_set(self) -> None:
+        ledger = self.project_ledger()
+        ledger["backlog"] = [
+            {
+                "id": "MAT-2026-777",
+                "classification": "MONITOR",
+                "reason": "the record may live in the ledger that could not be read",
+                "revisit_trigger": "never",
+                "revisit_after": None,
+            }
+        ]
+
+        findings = dashboard.validate_collection(
+            [("project.json", ledger)], complete=False
+        )
+
+        self.assertFalse(any("MAT-2026-777" in finding for finding in findings))
 
     def test_incomplete_collection_still_reports_duplicate_ids(self) -> None:
         first = self.project_ledger()

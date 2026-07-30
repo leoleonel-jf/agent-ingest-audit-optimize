@@ -619,6 +619,28 @@ def validate_collection(
                             f"unknown record: {target!r}"
                         )
 
+        # A backlog entry's id is a back-reference to the record whose evidence
+        # produced the finding, not a unique key: one material routinely yields
+        # several backlog entries, so duplicates are correct here. What is
+        # checkable is that the record exists. Suppressed with the link checks
+        # when the set is partial, for the same reason: the record may live in
+        # the ledger that could not be read.
+        for source, data in documents:
+            backlog = data.get("backlog") if isinstance(data, dict) else None
+            if not isinstance(backlog, list):
+                continue
+            for index, entry in enumerate(backlog):
+                if not isinstance(entry, dict):
+                    continue
+                identifier = entry.get("id")
+                if not isinstance(identifier, str) or not RECORD_ID.fullmatch(identifier):
+                    continue  # validate_backlog_entry already reported the shape
+                if identifier not in declared:
+                    findings.append(
+                        f"{source}: backlog[{index}] id {identifier!r} references "
+                        "a record that exists in no verified ledger"
+                    )
+
     if digests:
         for source, data in documents:
             projects = data.get("known_projects") if isinstance(data, dict) else None
