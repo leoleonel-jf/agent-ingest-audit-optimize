@@ -58,13 +58,13 @@ def load_json(path: Path) -> dict:
 def validate_ledger(data: dict, *, source: str) -> list[str]:
     findings: list[str] = []
     missing = REQUIRED_LEDGER_FIELDS - set(data)
+    unknown = set(data) - REQUIRED_LEDGER_FIELDS
     if missing:
         findings.append(f"{source}: missing fields: {sorted(missing)}")
-        return findings
-
-    unknown = set(data) - REQUIRED_LEDGER_FIELDS
     if unknown:
         findings.append(f"{source}: unknown fields: {sorted(unknown)}")
+    if missing:
+        return findings
 
     if data["schema_version"] != SCHEMA_VERSION:
         findings.append(
@@ -110,6 +110,12 @@ def validate_ledger(data: dict, *, source: str) -> list[str]:
     for field in ARRAY_FIELDS:
         if not isinstance(data[field], list):
             findings.append(f"{source}: {field} must be an array")
+        else:
+            for index, element in enumerate(data[field]):
+                if not isinstance(element, dict):
+                    findings.append(
+                        f"{source}: {field}[{index}] must be an object"
+                    )
 
     return findings
 
@@ -132,7 +138,7 @@ def verify(paths: list[Path]) -> int:
     return 0
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     verify_parser = subparsers.add_parser("verify", help="validate one or more ledgers")

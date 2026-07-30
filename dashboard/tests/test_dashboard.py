@@ -198,6 +198,79 @@ class LedgerDocumentTests(unittest.TestCase):
         findings = dashboard.validate_ledger(data, source="test")
         self.assertTrue(any("created" in finding for finding in findings))
 
+    def test_missing_sequence_prefix_key_is_reported(self) -> None:
+        data = minimal_ledger()
+        del data["sequences"]["MAT"]
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("MAT" in finding for finding in findings))
+
+    def test_non_dict_element_in_records_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["records"] = ["oops"]
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(
+            any("records" in finding and "0" in finding for finding in findings)
+        )
+
+    def test_non_dict_element_in_known_projects_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["known_projects"] = [123]
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(
+            any("known_projects" in finding and "0" in finding for finding in findings)
+        )
+
+    def test_non_dict_element_in_baselines_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["baselines"] = [True]
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(
+            any("baselines" in finding and "0" in finding for finding in findings)
+        )
+
+    def test_non_dict_element_in_backlog_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["backlog"] = [None]
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(
+            any("backlog" in finding and "0" in finding for finding in findings)
+        )
+
+    def test_valid_empty_dicts_in_arrays_have_no_findings(self) -> None:
+        data = minimal_ledger()
+        data["records"] = [{}, {}]
+        data["known_projects"] = [{}]
+        data["baselines"] = [{}]
+        data["backlog"] = [{}, {}, {}]
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertEqual(findings, [])
+
+    def test_missing_required_and_unknown_field_reported(self) -> None:
+        data = minimal_ledger()
+        del data["records"]
+        data["unexpected_field"] = "value"
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("records" in finding for finding in findings))
+        self.assertTrue(any("unexpected_field" in finding for finding in findings))
+
+    def test_integer_ledger_id_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["ledger_id"] = 12345
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("ledger_id" in finding for finding in findings))
+
+    def test_integer_language_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["language"] = 42
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("language" in finding for finding in findings))
+
+    def test_integer_client_is_reported(self) -> None:
+        data = minimal_ledger()
+        data["client"] = 999
+        findings = dashboard.validate_ledger(data, source="test")
+        self.assertTrue(any("client" in finding for finding in findings))
+
     def test_verify_returns_zero_for_a_valid_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = write_ledger(Path(temp), minimal_ledger())
