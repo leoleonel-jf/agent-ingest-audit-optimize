@@ -86,11 +86,14 @@ next successful global write, rewriting every reference. `verify` checks only th
 `-P` id without `pending_id_reconciliation: true` is a finding. It does not check that
 references were actually rewritten.
 
-`verify` also checks that a ledger's `sequences` value for a prefix is high enough to cover the
-highest number already used by that prefix — never that it matches exactly. A sequence value
-higher than necessary is not flagged. This applies to every ledger, including a project ledger
-that never allocates identifiers itself: its `sequences` must still be kept at or above the
-highest number used by its own records.
+`verify` checks that a ledger's `sequences` value for a prefix is at least one past the highest
+number that ledger's own records already use. It is a floor, not an equality: a value above it
+passes too, so a padded `sequences` is never flagged. Keeping it at exactly the next free number is
+a house convention, stricter than what is enforced.
+
+The ledger that declares `id_authority: true` is additionally checked against every record in the
+verified set, not just its own — it is the ledger that issued those identifiers, and it usually
+holds no records itself.
 
 ## Records
 
@@ -143,6 +146,12 @@ one of the two must be non-empty and non-falsy.
 `OBSOLETE`, `NOT APPLICABLE`, and `ALREADY IMPLEMENTED` are terminal. They are recorded as
 records and never enter the backlog; using one of them on a backlog entry is itself a finding.
 
+A backlog entry's `id` is a **back-reference** to the record whose evidence produced the finding,
+not an identifier of the entry itself. It is deliberately not unique: one material routinely
+produces several backlog entries, and two entries sharing an id is correct. `verify` checks that the
+id resolves to a record declared somewhere in the verified set, and suppresses that check, like the
+link checks, when any ledger in the set could not be read.
+
 ## Runs
 
 A RUN record additionally requires `proposal`, `authorization`, `result`, `targets`, `backup`,
@@ -169,6 +178,12 @@ required.
 
 Never record a digest that was not computed. Never mark a backup verified without reading it.
 
+`self_reported` must name `targets`. `verify` checks every target's shape and can never check that
+the array covers what the run actually changed — nothing in a ledger states how many files a run was
+supposed to touch. A RUN record naming three targets for a fourteen-file change validates clean.
+Listing `targets` in `self_reported` does not make coverage verifiable; it stops the record from
+being silent about the one thing it cannot prove.
+
 ## Known projects
 
 Each entry in the global ledger's `known_projects` requires `project_root`, `ledger_path`,
@@ -182,6 +197,14 @@ Each entry in the global ledger's `known_projects` requires `project_root`, `led
 | `status` | `OK`, `UNREACHABLE`, `CHANGED_EXTERNALLY` |
 
 Mark a project `UNREACHABLE` rather than removing its entry.
+
+`last_digest` is the sha256 of the referenced ledger's **final on-disk bytes**, taken after every
+other edit to that ledger is complete. Hash the file, not the JSON text in an editor: a trailing
+newline or a line-ending difference changes the digest of an otherwise identical document.
+
+When the referenced ledger is passed in the same `verify` invocation, its digest is recompared and
+a mismatch is a finding. When it is not, nothing is checked — silence there means **not comparable**,
+never "correct". `verify` deliberately does not open a path read out of ledger content.
 
 ## Language
 

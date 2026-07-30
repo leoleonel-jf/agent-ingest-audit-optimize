@@ -1987,6 +1987,17 @@ class ReferenceTests(unittest.TestCase):
         text = REFERENCE.read_text(encoding="utf-8")
         self.assertIn("dashboard.py verify", text)
 
+    def test_reference_documents_the_new_checks(self) -> None:
+        text = REFERENCE.read_text(encoding="utf-8")
+        for phrase in (
+            "final on-disk bytes",
+            "not comparable",
+            "a floor",
+            "back-reference",
+            "does not make coverage verifiable",
+        ):
+            self.assertIn(phrase, text)
+
 
 SKILL = REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "SKILL.md"
 
