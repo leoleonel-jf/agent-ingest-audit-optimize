@@ -1,0 +1,49 @@
+{
+  "mapping_version": 1,
+  "framework": "iso-42001",
+  "title": "ISO/IEC 42001 — AI management system, Annex A controls",
+  "expires_on": "2027-01-31",
+  "source": "https://www.iso.org/standard/81230.html",
+  "verified_on": "2026-07-31",
+  "retention_days": null,
+  "controls": [
+    {
+      "id": "A.6.2.6",
+      "title": "Logging of AI system operation",
+      "requires": {
+        "collection": "records",
+        "every": { "field": "created", "non_empty": true }
+      },
+      "note": "The dated record set is the operation log this control asks to exist. Its retention and review are managed elsewhere."
+    },
+    {
+      "id": "A.7.3",
+      "title": "Access management",
+      "requires": {
+        "collection": "baselines",
+        "min_count": 1
+      },
+      "note": "A baseline inventories the permission rules and tool scopes actually configured in the environment. Without one, nothing here describes the access surface at all."
+    },
+    {
+      "id": "A.8.1",
+      "title": "Human oversight design",
+      "requires": {
+        "collection": "records",
+        "where": { "type": "RUN" },
+        "every": { "field": "authorization.quote", "non_empty": true }
+      },
+      "note": "The same artifact art. 13 relies on: the authorising words, recorded per run, plus the recorded deviations and rollback state beside them."
+    },
+    {
+      "id": "cl-8.4",
+      "title": "AI system impact assessment",
+      "requires": {
+        "collection": "records",
+        "where": { "type": "PROPOSAL" },
+        "every": { "field": "classification", "non_empty": true }
+      },
+      "note": "Each PROPOSAL carries a classification decided against scope, risk, reversibility and evidence quality. This reports that the classification exists; clause 8.2 still requires a documented risk analysis linking risks to the controls selected, which is human work no tool performs."
+    }
+  ]
+}

@@ -106,6 +106,18 @@ from ledgerlib.chain import (  # noqa: E402
     seal_ledger,
     verify_chain,
 )
+from ledgerlib.compliance import (  # noqa: E402
+    CAVEAT,
+    EVIDENCE_ABSENT,
+    EVIDENCE_PARTIAL,
+    EVIDENCE_PRESENT,
+    EVIDENCE_REASONS,
+    EVIDENCE_STATES,
+    compliance_command,
+    compliance_report,
+    evaluate_control,
+    load_mapping,
+)
 from ledgerlib.drift import (  # noqa: E402
     DRIFT_REASONS,
     classify_item,
@@ -282,6 +294,30 @@ def main(argv: list[str] | None = None) -> int:
         help="the configuration root user adapters are read from; skipped when omitted",
     )
 
+    compliance_parser = subparsers.add_parser(
+        "compliance",
+        help="inventory a ledger's evidence against one framework's controls "
+        "(read-only unless --out is given)",
+    )
+    compliance_parser.add_argument("ledger", type=Path, help="the ledger to inventory")
+    compliance_parser.add_argument(
+        "--framework",
+        required=True,
+        help="the framework mapping to evaluate against, by bare name",
+    )
+    compliance_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="write an evidence pack here: the report, a copy of each cited "
+        "record, and a digest for each file",
+    )
+    compliance_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="write the evidence pack into a directory that is not empty",
+    )
+
     build_parser = subparsers.add_parser(
         "build",
         help="render a ledger into a self-contained dashboard.html (writes one file)",
@@ -369,6 +405,14 @@ def main(argv: list[str] | None = None) -> int:
             adapter=arguments.adapter,
             user_config=arguments.user_config,
             project=arguments.project,
+        )
+
+    if arguments.command == "compliance":
+        return compliance_command(
+            ledger=arguments.ledger,
+            framework=arguments.framework,
+            out=arguments.out,
+            force=arguments.force,
         )
 
     if arguments.command == "build":

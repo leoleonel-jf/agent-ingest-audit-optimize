@@ -207,6 +207,13 @@ describe a sealed ledger as tamper-proof, and read the threat table in
 Read [references/LEDGER.md](references/LEDGER.md) for the storage layout, scope routing,
 identifier rules, evidence expiry, the validation command, and the hash chain.
 
+When the user asks what the ledger shows against a regulatory framework, run
+`dashboard.py compliance <ledger> --framework <name>`. Report what it reports: it inventories
+evidence and **never certifies compliance**. Never state or imply that the user is compliant,
+however the question is phrased; say which artifacts exist, which are missing, and that
+sufficiency is the auditor's judgement. Read [references/COMPLIANCE.md](references/COMPLIANCE.md)
+before answering any compliance question.
+
 Run `dashboard.py build` to turn a ledger into a single offline dashboard when reporting on or
 reviewing its contents. Read [references/DASHBOARD.md](references/DASHBOARD.md) for the nine
 panels, the static-injection procedure for machines without Python, and the degraded text view.
