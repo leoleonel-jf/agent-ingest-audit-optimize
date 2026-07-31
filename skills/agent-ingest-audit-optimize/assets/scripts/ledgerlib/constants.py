@@ -148,6 +148,14 @@ BASELINE_ITEM_KINDS = {
     "env-var-name",
 }
 BASELINE_ITEM_STATES = {"present", "not_present"}
+# How a client resolves one kind across scopes. `override` is the only mode
+# `drift` may compute a winner under; the other three exist so an adapter can
+# declare that no per-item winner is well-formed rather than staying silent.
+RESOLUTION_MODES = {"override", "key-override", "merge", "concatenate"}
+# The modes that rank scopes. `order` is required under these and forbidden
+# under the rest: an ordering carried by `merge` or `concatenate` would claim
+# a precedence the mode itself denies.
+ORDERED_RESOLUTION_MODES = {"override", "key-override"}
 REQUIRED_BASELINE_FIELDS = {"id", "captured_on", "client", "adapter_version", "items"}
 REQUIRED_BASELINE_ITEM_FIELDS = {
     "kind",
@@ -158,6 +166,13 @@ REQUIRED_BASELINE_ITEM_FIELDS = {
     "origin",
     "state",
 }
+
+# The five states `drift` can assign a baseline item or a run target (design
+# spec section 10). Closed: a sixth state would need a row in the spec's
+# tables first, and `REVERTED` is reachable only for run targets -- a baseline
+# item has no before/after pair to revert between, and `drift` never
+# manufactures one.
+DRIFT_STATES = {"IN_PLACE", "DRIFTED", "REVERTED", "MISSING", "UNVERIFIABLE"}
 
 ANCHOR_REFERENCE = re.compile(r"^\$([A-Z_]+)(?:/(.*))?\Z")
 ANCHOR_NAME = re.compile(r"^[A-Z_]+$")

@@ -2,9 +2,11 @@
 """Validate the agent-ingest-audit-optimize governance ledger.
 
 `verify` validates one or more ledgers. `scan` reads one client's
-configuration and emits a single `baselines[]` entry on stdout; it is
-read-only and writes no file anywhere. Drift detection, rollback preview, and
-dashboard rendering arrive in later phases.
+configuration and emits a single `baselines[]` entry on stdout. `drift`
+re-resolves a ledger's recorded anchors and classifies every baseline item
+and run target against the environment now. Both are read-only and write no
+file anywhere. Rollback preview and dashboard rendering arrive in later
+phases.
 """
 
 from __future__ import annotations
@@ -82,6 +84,13 @@ from ledgerlib.paths import (  # noqa: E402
     load_json,
     resolve_anchored,
 )
+from ledgerlib.drift import (  # noqa: E402
+    DRIFT_REASONS,
+    classify_item,
+    classify_target,
+    drift_command,
+    drift_report,
+)
 from ledgerlib.scan import (  # noqa: E402
     PARSE_ERRORS,
     SCAN_REASONS,
@@ -145,6 +154,36 @@ def main(argv: list[str] | None = None) -> int:
         help="the configuration root user adapters are read from; skipped when omitted",
     )
 
+    drift_parser = subparsers.add_parser(
+        "drift",
+        help="re-resolve a ledger's anchors and classify every baseline item "
+        "and run target against the environment now (read-only)",
+    )
+    drift_parser.add_argument("ledger", type=Path, help="the ledger to classify")
+    # No --client flag, on purpose: the ledger already names its client --
+    # per entry for baselines, at the top level for run targets -- and a flag
+    # overriding recorded provenance would classify one client's files under
+    # another client's anchors.
+    drift_parser.add_argument(
+        "--project",
+        type=Path,
+        default=None,
+        help="the project root $PROJECT anchors to; the working directory when omitted",
+    )
+    drift_parser.add_argument(
+        "--adapter",
+        type=Path,
+        default=None,
+        help="an adapter file to use, overriding selection entirely",
+    )
+    drift_parser.add_argument(
+        "--user-config",
+        dest="user_config",
+        type=Path,
+        default=None,
+        help="the configuration root user adapters are read from; skipped when omitted",
+    )
+
     arguments = parser.parse_args(argv)
 
     if arguments.command == "verify":
@@ -154,6 +193,14 @@ def main(argv: list[str] | None = None) -> int:
         return scan_command(
             identifier=arguments.identifier,
             client=arguments.client,
+            adapter=arguments.adapter,
+            user_config=arguments.user_config,
+            project=arguments.project,
+        )
+
+    if arguments.command == "drift":
+        return drift_command(
+            ledger=arguments.ledger,
             adapter=arguments.adapter,
             user_config=arguments.user_config,
             project=arguments.project,
