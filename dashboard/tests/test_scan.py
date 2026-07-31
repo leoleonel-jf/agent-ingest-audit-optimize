@@ -896,6 +896,21 @@ class ParseJsonTests(ProbeTestCase):
         items = run_probe(self.probe(pointer="/nowhere"), self.roots, [])
         self.assertIn("/nowhere", items[0]["name"])
 
+    def test_an_unresolved_pointer_records_the_pointer_and_format(self) -> None:
+        # An in-file absence cannot be re-verified from the file's existence,
+        # so the item carries what `drift` needs to re-resolve the same
+        # location the same way.
+        self.write(self.user_config / "settings.json", self.THREE_SERVERS)
+        items = run_probe(self.probe(pointer="/nowhere"), self.roots, [])
+        self.assertEqual(items[0]["attributes"]["pointer"], "/nowhere")
+        self.assertEqual(items[0]["attributes"]["parse"], "json")
+
+    def test_a_no_match_item_records_the_pointer_and_format(self) -> None:
+        self.write(self.user_config / "settings.json", '{"mcpServers": {}}')
+        items = run_probe(self.probe(pointer="/mcpServers"), self.roots, [])
+        self.assertEqual(items[0]["attributes"]["pointer"], "/mcpServers")
+        self.assertEqual(items[0]["attributes"]["parse"], "json")
+
     def test_a_pointer_through_a_scalar_does_not_resolve(self) -> None:
         self.write(self.user_config / "settings.json", '{"a": 1}')
         items = run_probe(self.probe(pointer="/a/b"), self.roots, [])

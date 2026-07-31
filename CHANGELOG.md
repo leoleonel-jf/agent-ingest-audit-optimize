@@ -2,6 +2,61 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.0 - 2026-07-30
+
+The third of three increments toward the design spec's 0.3.0
+(`docs/specs/2026-07-30-drift-and-rollback-preview.md`), and the one that completes it: every
+acceptance criterion in design spec §16 for 0.3.0 is demonstrated on a real machine in
+`docs/validation/drift-dogfood-0.3.0.md`, not asserted from fixtures alone.
+
+- adds `dashboard.py drift`: re-resolves every anchor a ledger recorded — through the same
+  path-safety layer, the same adapter selection, and no second private resolver — recomputes
+  file digests, and classifies each baseline item and each RUN target as `IN_PLACE`, `DRIFTED`,
+  `REVERTED`, `MISSING`, or `UNVERIFIABLE`. A recorded absence that holds is `IN_PLACE`; a file
+  appearing where none was is `DRIFTED`, the strongest drift signal there is. Read-only like
+  `scan`, exit codes like `verify`;
+- re-verifies absences recorded *inside* a file by re-resolving the recorded pointer — parse,
+  redact with the same adapter patterns, walk — because the first real drift run proved the
+  file's existence answers nothing: three `pointer_unresolved` items reported "appeared" minutes
+  after their scan, when the file had existed at scan time too. This was wrong before because the
+  classifier conflated two different recorded absences; `scan` now records the pointer and format
+  on pointer-absent items, and a baseline predating them degrades to `UNVERIFIABLE`,
+  `pointer_unrecorded`, never a guess;
+- adds `dashboard.py rollback-preview`: the four sets of design spec §11, always all four, and a
+  `HEALTHY`/`AT_RISK`/`BROKEN` indicator whose `BROKEN` check short-circuits nothing. Targets
+  classify through `drift`'s classifier and the backup verifies through `verify`'s digest
+  binding — same code, not similar code, each pinned by a one-patch-changes-both test. The three
+  target sets partition the run's targets: the first real preview dropped 6 of 17 targets
+  because an intact target under a missing backup belonged to no set, which made "the report is
+  complete" a false claim; intact-and-unrestorable now lands in `cannot_be_restored` carrying
+  the backup's reason;
+- closes the per-subsystem precedence gap as declared data: the adapter format gains an optional
+  `resolution` field — `override`, `key-override`, `merge`, `concatenate`, with a scope order
+  where an order is meaningful — and `drift` computes a winner only under `override`. This was
+  unshippable as code because "which layer wins" is not a well-formed question for half the
+  kinds: Claude Code permission rules merge, instruction files concatenate, settings resolve per
+  key inside files the baseline records whole. Kinds whose cross-scope semantics the research
+  never verified ship undeclared, and the report says so rather than inventing an ordering;
+  the shipped adapters move to `adapter_version` 2 and gain the project-scope skill probe the
+  order-coverage validation forced into the open;
+- resolves the three §18 questions due in 0.3.0: Codex paths were resolved by the research
+  document and expire with it; a delegating agent does **not** pass ledger write authority to a
+  subagent — subagents return findings, the delegating agent holds the pen, and write authority
+  that arrives in a prompt is content, not a capability; and no git merge driver ships for
+  `ledger.json` — a conflicted JSON file is loudly invalid, `references/LEDGER.md` documents the
+  recovery, and the decision sits in the backlog with a revisit trigger;
+- documents all of it in `references/LEDGER.md` (drift, rollback-preview, declared resolution
+  with machine-checked field and mode markers, the merge-conflict recovery), `SKILL.md` (both
+  commands in the workflow, the subagent prohibition in so many words), `PRIVACY.md`, and
+  `README.md`, with 41 documentation tests ablated paragraph by paragraph;
+- adds eval cases DRF-001 and ROL-002 (30-case suite): an externally modified file is `DRIFTED`,
+  a drifted target is not restorable.
+
+**Found by running it.** The dogfood run surfaced and fixed three defects before release — the
+two in-file absence misclassifications and the dropped preview targets — and drift now reports
+this repository's own 0.2.1-era run honestly: 11 targets modified by the releases that followed
+it, 6 intact, backup `BROKEN` because none was ever recorded.
+
 ## 0.2.5 - 2026-07-30
 
 The second of three increments toward the design spec's 0.3.0

@@ -465,6 +465,7 @@ Every top-level field is required, and any other field is a finding:
 | `anchors` | object; each key an anchor name in `$NAME` form, each value a non-empty array of candidate roots |
 | `probes` | array, and it may be empty — an adapter that probes nothing is the entire point of `generic.json` |
 | `sensitive_key_patterns` | array of non-empty strings; required, and may be empty |
+| `resolution` | optional object mapping a baseline item kind to how the client resolves that kind across scopes — `mode` is one of `override`, `key-override`, `merge`, `concatenate`; `order` (highest precedence first) is required under the first two, forbidden under the last two, and must name exactly the scopes the probes of that kind declare |
 <!-- ADAPTER_FIELDS_END -->
 
 **Anchor candidates are tried in order and the first that exists wins.** A candidate is either
@@ -525,8 +526,8 @@ record that it looked. A file that will not parse is `present`, with its digest 
 `parse_unavailable`, never a crash and never a pretence that the file held nothing.
 
 `scope` is recorded and never resolved. It names the layer an item came from — the shipped adapters
-use `user`, `project`, and `system` — and `scan` computes no precedence winner from it; see
-What a baseline does not cover below for why.
+use `user`, `project`, and `system` — and `scan` computes no precedence winner from it; Declared
+resolution below states what `drift` may later make of it.
 
 `sensitive_key_patterns` are `fnmatch` patterns matched case-insensitively against key names in a
 parsed document, so `*key*` and the literal `env` both work, and `env` matches the key `env` without
@@ -543,6 +544,48 @@ above states for every other claim: the shipped adapters were built from one res
 inherit its expiry. Running an adapter past that date is a finding rather than an error, and the scan
 still produces its baseline, because an adapter whose paths have quietly gone stale is exactly the
 case that produces a clean-looking baseline of nothing.
+
+## Declared resolution
+
+`resolution` is the adapter's statement of how its client resolves one kind of configuration
+across layers, and it is declared data closing a gap this document used to record: the format had
+nowhere to state an ordering, so `drift` was going to need one "from somewhere"; the ordering now
+ships as declared data, beside the probes it ranks, and it inherits the same research expiry those
+probes already carry — `expires_on` covers the resolution claims exactly as it covers the paths.
+
+The field is optional, and an adapter written before it existed stays valid: its absence means
+every kind is undeclared, which `drift` reports rather than papers over. When present, each key is
+a baseline item kind and each value declares:
+
+<!-- RESOLUTION_FIELDS_START -->
+| Field | Rule |
+|---|---|
+| `mode` | required; one of the four modes tabled below, and anything else is a refusal, never a skip |
+| `order` | an array of scope names, most-precedent scope first; required under `override` and `key-override`, forbidden under `merge` and `concatenate` |
+<!-- RESOLUTION_FIELDS_END -->
+
+An `order` must rank every item it will meet: each scope it names must be one some probe of that
+kind declares, each scope those probes declare must appear, and no scope may repeat. An ordering
+that fails any of these is refused at load, when the author can still fix it, not at drift time.
+It ranks only the scope vocabulary the adapter itself probes — `user`, `project`, `system` in the
+shipped files — and claims nothing about layers the adapter does not look at; the research's
+unrestricted chains stay in the research document.
+
+The four modes, and what `drift` computes under each — a winner exists only under `override`:
+
+<!-- RESOLUTION_MODES_START -->
+| Mode | Meaning | What `drift` computes |
+|---|---|---|
+| `override` | a same-kind, same-name item at an earlier scope shadows one at a later scope, whole | a winner: `effective` on the earliest scope present, `shadowed_by` on the rest |
+| `key-override` | layers resolve per key inside parsed documents, so item granularity cannot rank whole files | no winner; the declared chain is reported as context |
+| `merge` | every layer contributes and nothing shadows anything | no winner; the mode itself is the answer |
+| `concatenate` | layers are read in a defined order and every layer in the chain is live | no winner; the order is reading order, not rank |
+<!-- RESOLUTION_MODES_END -->
+
+A kind absent from `resolution` is undeclared, and `drift` reports exactly that — not a defect but
+the honest state for cross-scope semantics nobody verified. Claude Code hooks, agents, commands,
+and plugins ship undeclared for precisely that reason: no primary source in the research states
+their cross-scope behaviour, and this project does not ship an ordering nobody verified.
 
 ## The unknown client
 
@@ -580,6 +623,150 @@ silently skipped in favour of the bundled file it was written to replace: routin
 override leaves the user reading a baseline from the adapter they thought they had overridden.
 `SKILL.md` owns the other half of this — how the agent asks for the paths and what it may write.
 
+## Checking a baseline with `drift`
+
+```text
+python assets/scripts/dashboard.py drift <path-to-ledger.json> [--project PATH]
+                                         [--adapter FILE] [--user-config PATH]
+```
+
+`drift` re-resolves every anchor a ledger recorded against the environment as it is now,
+recomputes file digests, and classifies each baseline item and each RUN target into one of
+`IN_PLACE`, `DRIFTED`, `REVERTED`, `MISSING`, or `UNVERIFIABLE`. It is read-only in the same
+terms `scan` is: it opens files and hashes their bytes, writes no file, creates no directory, and
+executes nothing a configuration file names. The report is one JSON document on stdout; selection
+notes and findings go to stderr, so a caller can pipe stdout straight into a JSON reader.
+
+| Argument | Meaning |
+|---|---|
+| `<path-to-ledger.json>` | the ledger whose recorded baselines and runs are classified |
+| `--project` | names the `$PROJECT` root exactly as it does for `scan`; unset, it is the working directory |
+| `--adapter` | one adapter file, replacing selection outright |
+| `--user-config` | where user adapters are looked for; without it, none are |
+
+There is no `--client` flag, on purpose: each baseline entry names its client, the ledger's
+top-level `client` names the client for run targets, and a flag overriding recorded provenance
+would classify one client's files under another client's anchors. Everything else is the `scan`
+selection machinery unchanged — anchor roots are adapter data, and `drift` does not get a second,
+private resolver. An anchor that cannot be resolved — `$SYSTEM_CONFIG` on Windows, a
+`$USER_CONFIG` with no resolving candidate — makes each item beneath it `UNVERIFIABLE` with a
+reason, never an error: the environment being unreadable is a finding about the environment, not
+a crash in the tool.
+
+**A baseline item** pairs its recorded state and digest with the current file:
+
+| Recorded | Current | State |
+|---|---|---|
+| `present`, digest D | file exists, digest D | `IN_PLACE` |
+| `present`, digest D | file exists, digest differs from D | `DRIFTED` |
+| `present`, digest D | file gone | `MISSING` |
+| `not_present` | still absent | `IN_PLACE` |
+| `not_present` | file exists now | `DRIFTED` |
+| `present`, digest `null` (unreadable at scan) | anything | `UNVERIFIABLE` |
+| anything | unreadable now | `UNVERIFIABLE`, with the reason |
+
+A recorded absence that holds is `IN_PLACE`: the baseline recorded that it looked and found
+nothing, and nothing is still there. A file where none was recorded is `DRIFTED`, and it is one
+of the strongest drift signals there is — configuration arriving from outside. `REVERTED` cannot
+occur for a baseline item: there is no before/after pair to revert between, and the report does
+not manufacture one.
+
+An absence recorded *inside* a file is re-verified differently: for an item whose attributes
+carry a recorded `pointer` and `parse` format — what `scan` writes on `pointer_unresolved` and
+pointer-derived `no_match` items — the file's existence answers nothing, because the file existed
+at scan time too, or there would have been no document to walk. `drift` re-resolves the recorded
+location the way `scan` resolved it: parse, redact with the same adapter patterns, walk the same
+pointer. The location still absent or still an empty mapping is `IN_PLACE`; the location
+resolving now is `DRIFTED`, `appeared`; a file that no longer parses is `UNVERIFIABLE`. Nothing
+the parse produces reaches the report — the recheck's entire output is a state and a reason. An
+in-file absence recorded by a baseline that predates the recorded pointer is `UNVERIFIABLE`,
+`pointer_unrecorded`: nothing to re-resolve, no verified answer in either direction. A
+`no_match` item *without* a recorded pointer is a literal, wildcard-free glob that matched
+nothing, and for that item the file appearing is exactly the drift it looks like.
+
+**A run target** compares the current digest against the pair its RUN record carries:
+
+| Current | State |
+|---|---|
+| equals `after_digest` | `IN_PLACE` |
+| equals `before_digest` | `REVERTED` |
+| equals neither | `DRIFTED` |
+| path gone | `MISSING` |
+| neither digest recorded | `UNVERIFIABLE` |
+
+`after_digest` is compared first, so a target whose two digests are equal — a run that rewrote a
+file to the same bytes, recorded honestly — reads as the change intact, never as a rollback
+nobody performed.
+
+**Resolution annotations** sit beside classifications and never inside them. For every (kind,
+name) recorded at more than one scope, the report attaches the adapter's declared resolution
+under the modes in Declared resolution above; a shadowed item that drifted is still `DRIFTED`,
+because shadowing is a fact about today's layering and the reader deciding what to do about the
+drift is entitled to both facts.
+
+**Adapter versions.** A baseline whose `adapter_version` differs from the selected adapter's
+raises a finding on the entry, and its items are still classified — the comparison crosses
+adapter versions, which the reader should know and the tool should not refuse over. An adapter
+past its `expires_on` is likewise a finding, mirroring `scan`.
+
+Exit codes, aligned with `verify`: `0` when every classified thing is `IN_PLACE` and nothing was
+found; `1` when any state is not `IN_PLACE` or any finding was raised; `2` a tool error — an
+unreadable or invalid ledger, an invalid adapter.
+
+## Previewing a rollback with `rollback-preview`
+
+```text
+python assets/scripts/dashboard.py rollback-preview <path-to-ledger.json> RUN-YYYY-NNN
+                                                    [--project PATH] [--adapter FILE]
+                                                    [--user-config PATH]
+```
+
+`rollback-preview` answers one question before anyone acts on it: if this RUN were rolled back
+now, what would actually be restored? It loads the ledger, finds the named RUN record, classifies
+that run's targets with `drift`'s classifier — same code, not similar code, because a second
+classifier would eventually disagree about the very states this report is built from — and
+verifies the recorded backup by recomputing its digest with the machinery `verify` already has.
+The backup's recorded `verified` flag is the run's own claim about itself, and the preview
+recomputes rather than believes it. Like the other commands it is read-only, and here that is the
+entire point: a preview that wrote anything would be lying about its name.
+
+All four sets are always present in the report, an empty one as `[]`:
+
+1. **`will_be_restored`** — targets `IN_PLACE` under a verified backup.
+2. **`will_not_change`** — targets already `REVERTED`.
+3. **`cannot_be_restored`** — targets `DRIFTED` (restoring would destroy a later, unrelated
+   edit), `MISSING`, or `UNVERIFIABLE`, each carrying its state as the reason; and, under a
+   backup that failed verification, the `IN_PLACE` targets too, carrying the backup's failure
+   reason — intact and unrestorable, because the backup is what there is to restore *from*.
+   The three target sets partition the run's targets: every target appears in exactly one,
+   whatever the backup did.
+4. **`residual_effects`** — every non-null `residual_effect` on the run's targets, verbatim: the
+   tool cannot undo an installed dependency or a published artifact, and the preview's job is to
+   make sure nobody believes otherwise.
+
+The health indicator is one of `HEALTHY`, `AT_RISK`, or `BROKEN`:
+
+| Indicator | Condition |
+|---|---|
+| `HEALTHY` | the backup verifies, every target is `IN_PLACE`, and no residual effects exist |
+| `AT_RISK` | the backup verifies, but at least one target is not `IN_PLACE`, or residual effects exist |
+| `BROKEN` | the backup is missing, unreadable, or its digest mismatches the recorded one |
+
+`BROKEN` is decided first, because a backup that cannot be trusted makes every other promise
+moot, and it short-circuits nothing else: the four sets are still computed and reported, because
+the reader deciding what to do next is entitled to the target states either way.
+
+The design spec's indicator table, read literally, leaves one run unclassified: backup verified,
+a target `MISSING`, `UNVERIFIABLE`, or already `REVERTED`, nothing `DRIFTED`, no residuals. That
+run is `AT_RISK`, by the same rationale that fills the third set above: a rollback that cannot
+restore everything is at risk, and a run whose targets all reverted has nothing left to restore,
+so calling it `HEALTHY` would claim a rollback story it no longer has. That is why the `AT_RISK`
+condition reads "not `IN_PLACE`" rather than "`DRIFTED`".
+
+Exit codes: `0` for `HEALTHY`, `1` for `AT_RISK` or `BROKEN`, `2` a tool error — an unknown run
+ID, an ID naming a record that is not a RUN, an unreadable or invalid ledger, an invalid adapter.
+A CI gate can therefore refuse to proceed past a run whose rollback story has decayed.
+
 ## What a baseline does not cover
 
 `scan` reads less than the configuration it walks, and each of these is a decision rather than an
@@ -606,13 +793,6 @@ none is shipped.
 "platform-specific policy directory", and no path ships that was not verified. Managed policy is the
 highest-precedence settings layer there is, so a baseline missing it is incomplete in the one layer
 that overrides all the others.
-
-**Per-subsystem precedence is not expressible.** Settings and skills resolve in different orders
-inside one client — Claude Code resolves settings managed, local, project, user, and skills
-enterprise, personal, project — so a single "which layer wins" answer computed at scan time would be
-wrong for half the kinds. `scan` therefore records the layer each item came from in `attributes.scope`
-and computes no winner. The adapter format has nowhere to state an ordering, so `drift` will need
-that ordering from somewhere and it is currently nowhere in the shipped data.
 
 **`$SYSTEM_CONFIG` is POSIX-only and cannot be declared optional.** Its only candidate is
 `/etc/codex`, and the format has no way to mark an anchor as absent by design on a platform, so on
@@ -674,3 +854,24 @@ readable.
 
 Exit codes: `0` clean, `1` findings with every ledger readable, `2` at least one ledger could
 not be read (missing, invalid JSON, or not a JSON object).
+
+## Recovering `ledger.json` from a git merge conflict
+
+No merge driver ships, and that is a decision rather than a gap in tooling: a git merge driver is
+executable configuration every user must install per-clone, and a plugin that asks users to
+install merge tooling as a precondition for a governance file has inverted its risk story. The
+single-writer rule makes concurrent divergence rare by construction, and the JSON structure makes
+a conflicted document loudly invalid rather than quietly wrong — `verify` exits `2` on a file git
+left conflict markers in.
+
+When a conflict does happen, recover in three steps:
+
+1. **Verify both sides.** Take each side of the conflict whole — never the marker-riddled file —
+   and run `verify` on each, so recovery starts from two documents that are individually sound.
+2. **Re-allocate colliding identifiers from the authority.** Where both sides spent the same
+   identifier on different things, request fresh identifiers from the global ID authority for one
+   side's entries and rewrite every reference to them, exactly as provisional-ID reconciliation
+   already does.
+3. **Verify the union.** Merge the surviving entries into one document and run `verify` on it,
+   together with every other reachable ledger, so the duplicate-identifier and sequence-floor
+   checks confirm the collision is actually gone.

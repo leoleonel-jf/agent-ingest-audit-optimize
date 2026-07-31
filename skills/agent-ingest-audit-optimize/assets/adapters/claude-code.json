@@ -1,5 +1,5 @@
 {
-  "adapter_version": 1,
+  "adapter_version": 2,
   "client": "claude-code",
   "expires_on": "2026-10-28",
   "anchors": {
@@ -37,6 +37,7 @@
     { "kind": "instruction-file", "scope": "project", "glob": "$PROJECT/.claude/CLAUDE.md" },
     { "kind": "instruction-file", "scope": "project", "glob": "$PROJECT/CLAUDE.local.md" },
     { "kind": "instruction-file", "scope": "project", "glob": "$PROJECT/.claude/rules/**/*.md" },
+    { "kind": "skill", "scope": "project", "glob": "$PROJECT/.claude/skills/*/SKILL.md" },
     { "kind": "model-setting", "scope": "project", "path": "$PROJECT/.claude/settings.json" },
     { "kind": "permission-rule", "scope": "project", "path": "$PROJECT/.claude/settings.json",
       "parse": "json", "pointer": "/permissions" },
@@ -54,5 +55,13 @@
     { "kind": "mcp-server", "scope": "project", "path": "$PROJECT/.mcp.json",
       "parse": "json", "pointer": "/mcpServers" }
   ],
-  "sensitive_key_patterns": ["*token*", "*key*", "*secret*", "*password*", "*credential*", "*auth*", "env", "headers", "args", "*url*"]
+  "sensitive_key_patterns": ["*token*", "*key*", "*secret*", "*password*", "*credential*", "*auth*", "env", "headers", "args", "*url*"],
+  "resolution": {
+    "mcp-server": { "mode": "override", "order": ["project", "user"] },
+    "skill": { "mode": "override", "order": ["user", "project"] },
+    "instruction-file": { "mode": "concatenate" },
+    "permission-rule": { "mode": "merge" },
+    "model-setting": { "mode": "key-override", "order": ["project", "user"] },
+    "env-var-name": { "mode": "key-override", "order": ["project", "user"] }
+  }
 }

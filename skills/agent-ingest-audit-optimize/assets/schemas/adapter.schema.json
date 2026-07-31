@@ -40,6 +40,25 @@
       "type": "array",
       "description": "fnmatch patterns, matched case-insensitively against key names. A matching key's value is replaced by a digest and never copied.",
       "items": { "type": "string", "minLength": 1 }
+    },
+    "resolution": {
+      "type": "object",
+      "description": "Optional -- the one top-level field that is, so a version-1 adapter stays valid. Maps a baseline item kind to how the client resolves that kind across scopes; a kind absent here is undeclared, which `drift` reports rather than guessing. Spec docs/specs/2026-07-30-drift-and-rollback-preview.md section 3.1. The key enum is the same closed kind enum probes use, held to `constants.BASELINE_ITEM_KINDS` by an agreement test.",
+      "propertyNames": {
+        "enum": [
+          "agent",
+          "command",
+          "env-var-name",
+          "hook",
+          "instruction-file",
+          "mcp-server",
+          "model-setting",
+          "permission-rule",
+          "plugin",
+          "skill"
+        ]
+      },
+      "additionalProperties": { "$ref": "#/definitions/resolution_rule" }
     }
   },
   "definitions": {
@@ -91,6 +110,28 @@
           "type": "string",
           "pattern": "^/",
           "description": "RFC 6901 JSON pointer selecting a sub-document; one item per key at that location."
+        }
+      }
+    },
+    "resolution_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "oneOf": [
+        { "properties": { "mode": { "enum": ["override", "key-override"] } }, "required": ["mode", "order"] },
+        { "properties": { "mode": { "enum": ["merge", "concatenate"] } }, "not": { "required": ["order"] } }
+      ],
+      "properties": {
+        "mode": {
+          "description": "`override` is the only mode `drift` computes a winner under; the other three declare that no per-item winner is well-formed.",
+          "enum": ["override", "key-override", "merge", "concatenate"]
+        },
+        "order": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Highest precedence first. Required under `override` and `key-override`, forbidden under `merge` and `concatenate`, and must name exactly the scopes the probes of this kind declare -- `validate_adapter` refuses an ordering that cannot rank every item it will meet, at load rather than at drift time."
         }
       }
     }

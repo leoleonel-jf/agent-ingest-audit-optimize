@@ -20,6 +20,8 @@ from ledgerlib.constants import (
     ANCHOR_NAME,
     BASELINE_ITEM_KINDS,
     DATE,
+    ORDERED_RESOLUTION_MODES,
+    RESOLUTION_MODES,
 )
 from ledgerlib.errors import (
     LedgerError,
@@ -38,17 +40,20 @@ REQUIRED_ADAPTER_FIELDS = {
     "probes",
     "sensitive_key_patterns",
 }
-# Every top-level field is required, so the known set and the required set are
-# the same set today. They are named separately because the schema states them
-# separately (`required` and `properties`), and the agreement test compares
-# each against its own counterpart: an optional field added later must appear
-# in `properties` and not in `required`, and one shared constant would hide
-# exactly that mistake.
-ADAPTER_FIELDS = set(REQUIRED_ADAPTER_FIELDS)
+# The known set is the required set plus `resolution`, the one optional
+# top-level field: an adapter written before the field existed stays valid,
+# and its absence means every kind is undeclared, which `drift` reports
+# rather than guessing. The two sets stay separate because the schema states
+# them separately (`required` and `properties`), and the agreement test
+# compares each against its own counterpart.
+ADAPTER_FIELDS = REQUIRED_ADAPTER_FIELDS | {"resolution"}
 
 REQUIRED_PROBE_FIELDS = {"kind"}
 PROBE_FIELDS = {"kind", "scope", "glob", "path", "parse", "pointer"}
 PARSE_FORMATS = {"json", "toml"}
+
+REQUIRED_RESOLUTION_FIELDS = {"mode"}
+RESOLUTION_FIELDS = {"mode", "order"}
 
 ENV_CANDIDATE_PREFIX = "$env:"
 
@@ -174,6 +179,17 @@ def validate_adapter(data: dict, *, source: str) -> list[str]:
                     f"non-empty string: {pattern!r}"
                 )
 
+    # `in` rather than `.get`, so an explicit `"resolution": null` is refused
+    # as a non-object instead of passing as an absence.
+    if "resolution" in data:
+        findings.extend(
+            _validate_resolution(
+                data["resolution"],
+                probes if isinstance(probes, list) else [],
+                source=source,
+            )
+        )
+
     return findings
 
 
@@ -268,6 +284,101 @@ def _validate_probe(probe: object, index: int, *, source: str) -> list[str]:
             findings.append(f"{label} pointer must start with '/': {pointer!r}")
 
     return findings
+
+
+def _validate_resolution(
+    resolution: object, probes: list, *, source: str
+) -> list[str]:
+    """Spec `docs/specs/2026-07-30-drift-and-rollback-preview.md` section 3.1.
+
+    An `order` must name exactly the scopes the probes of its kind declare:
+    an ordering that cannot rank every item it will meet is refused here,
+    when the author can still fix it, not at drift time.
+    """
+    if not isinstance(resolution, dict):
+        return [f"{source}: resolution must be an object"]
+
+    findings: list[str] = []
+    for kind, rule in resolution.items():
+        if not isinstance(kind, str) or kind not in BASELINE_ITEM_KINDS:
+            findings.append(f"{source}: resolution has an invalid kind: {kind!r}")
+            continue
+        label = f"{source}: resolution[{kind!r}]"
+        if not isinstance(rule, dict):
+            findings.append(f"{label} must be an object")
+            continue
+        missing = REQUIRED_RESOLUTION_FIELDS - set(rule)
+        if missing:
+            findings.append(f"{label} missing fields: {sorted(missing)}")
+            continue
+        unknown = set(rule) - RESOLUTION_FIELDS
+        if unknown:
+            findings.append(f"{label} has unknown fields: {sorted(unknown)}")
+            continue
+        mode = rule["mode"]
+        if not isinstance(mode, str) or mode not in RESOLUTION_MODES:
+            # A refusal, not a skip: a mode nobody recognises would otherwise
+            # ship a declaration `drift` silently ignores.
+            findings.append(f"{label} has an invalid mode: {mode!r}")
+            continue
+        if mode in ORDERED_RESOLUTION_MODES:
+            if "order" not in rule:
+                findings.append(f"{label} mode {mode!r} requires order")
+                continue
+            findings.extend(
+                _validate_resolution_order(rule["order"], kind, probes, label=label)
+            )
+        elif "order" in rule:
+            # `merge` and `concatenate` deny that a ranking exists; an order
+            # carried anyway would claim a precedence the mode itself denies.
+            findings.append(f"{label} mode {mode!r} forbids order")
+    return findings
+
+
+def _validate_resolution_order(
+    order: object, kind: str, probes: list, *, label: str
+) -> list[str]:
+    if (
+        not isinstance(order, list)
+        or not order
+        or not all(isinstance(scope, str) and scope for scope in order)
+    ):
+        return [f"{label} order must be a non-empty array of scope names: {order!r}"]
+
+    findings: list[str] = []
+    seen: set[str] = set()
+    for scope in order:
+        if scope in seen:
+            findings.append(f"{label} order repeats a scope: {scope!r}")
+        seen.add(scope)
+
+    declared = _declared_scopes(kind, probes)
+    for scope in order:
+        if scope not in declared:
+            findings.append(
+                f"{label} order names a scope no {kind} probe declares: {scope!r}"
+            )
+    for scope in sorted(declared - seen):
+        findings.append(
+            f"{label} order omits a scope {kind} probes declare: {scope!r}"
+        )
+    return findings
+
+
+def _declared_scopes(kind: str, probes: list) -> set[str]:
+    """The scopes probes of `kind` declare.
+
+    A probe too malformed to read is `_validate_probe`'s finding already;
+    counting it here would report the same defect twice.
+    """
+    return {
+        probe["scope"]
+        for probe in probes
+        if isinstance(probe, dict)
+        and probe.get("kind") == kind
+        and isinstance(probe.get("scope"), str)
+        and probe["scope"].strip()
+    }
 
 
 def load_adapter(path: Path) -> dict:

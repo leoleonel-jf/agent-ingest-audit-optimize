@@ -64,7 +64,7 @@ See [packaging/README.md](packaging/README.md) for the package contract, support
 Add this repository as a marketplace and install the plugin:
 
 ```text
-codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.2.5
+codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.3.0
 codex plugin add agent-ingest-audit-optimize@agent-ingest-audit-optimize
 ```
 
@@ -87,7 +87,7 @@ claude --plugin-dir <path-to-agent-ingest-audit-optimize>
 
 ### Other Agent Skills clients
 
-Download the `agent-ingest-audit-optimize-0.2.5-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
+Download the `agent-ingest-audit-optimize-0.3.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
 
 ## Use
 
@@ -143,6 +143,18 @@ python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py scan --id 
 `scan` is read-only: it writes no file and runs nothing a configuration file names. Exit codes:
 `0` clean, `1` findings, `2` a tool error. See
 [PRIVACY.md](PRIVACY.md) for what it reads and what a baseline can contain.
+
+Check a captured baseline against the environment as it stands with `drift`, and preview what a
+rollback of a recorded run would and would not restore with `rollback-preview`:
+
+```text
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py drift <path-to-ledger.json>
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py rollback-preview <path-to-ledger.json> RUN-YYYY-NNN
+```
+
+Both are read-only like `scan` and print one JSON report on standard output. Exit codes: `0`
+everything in place (`drift`) or a healthy rollback (`rollback-preview`), `1` drift, risk, or
+findings, `2` a tool error.
 
 See [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md) for the
 record model, and [assets/schemas/ledger.schema.json](skills/agent-ingest-audit-optimize/assets/schemas/ledger.schema.json)

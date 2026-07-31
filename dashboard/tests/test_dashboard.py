@@ -41,7 +41,7 @@ SPEC.loader.exec_module(dashboard)
 # than reached through `dashboard`, which re-exports no adapter name: the
 # documentation-agreement tests below compare `LEDGER.md` against the field
 # sets the loader actually enforces.
-from ledgerlib import adapters  # noqa: E402
+from ledgerlib import adapters, constants  # noqa: E402
 
 
 def _capture_verify(paths: list[Path]) -> tuple[int, str, str]:
@@ -3572,9 +3572,44 @@ class KnownGapDocumentationTests(unittest.TestCase):
         text = _collapsed(REFERENCE)
         self.assertIn("platform-specific policy directory", text)
 
-    def test_reference_records_the_precedence_gap(self) -> None:
+    @staticmethod
+    def _not_covered_section() -> str:
+        # The section between its own heading and the next one, collapsed the
+        # way _collapsed collapses a whole file. The two tests below are
+        # scoped to it so a gap paragraph moved elsewhere in the file cannot
+        # keep them green.
+        text = REFERENCE.read_text(encoding="utf-8")
+        start = text.index("## What a baseline does not cover")
+        rest = text[start + 1 :]
+        return re.sub(r"\s+", " ", rest[: rest.index("\n## ")])
+
+    def test_reference_no_longer_records_the_precedence_gap(self) -> None:
+        # 0.3.0 closed gap 4: the ordering `drift` was said to need "from
+        # somewhere" now ships as the adapters' declared `resolution` data,
+        # so the not-covered list must stop claiming it is inexpressible --
+        # and the closure must be stated where the field is documented.
+        # Asserted in both directions, per the 0.3.0 plan's Task 7.
         text = _collapsed(REFERENCE)
-        self.assertIn("Per-subsystem precedence is not expressible", text)
+        self.assertNotIn("Per-subsystem precedence is not expressible", text)
+        self.assertIn("the ordering now ships as declared data", text)
+
+    def test_not_covered_list_still_holds_the_other_six_gaps(self) -> None:
+        # The same six anchors the per-gap tests in this class assert against
+        # the whole file, re-asserted inside the section itself: dropping gap
+        # 4 must not take a neighbour with it, and a gap paragraph that
+        # drifted out of the list would still satisfy a whole-file search.
+        section = self._not_covered_section()
+        for phrase in (
+            "an eleventh kind to record it under",
+            "only their registrations",
+            "platform-specific policy directory",
+            "POSIX-only and cannot be declared optional",
+            "Redaction matches names and never values",
+            "is a finding, not a refusal",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, section)
+        self.assertNotIn("Per-subsystem precedence", section)
 
     def test_reference_records_the_system_config_gap(self) -> None:
         text = _collapsed(REFERENCE)
@@ -3754,6 +3789,351 @@ class ReadmeScanTests(unittest.TestCase):
         self.assertIn(
             "writes no file and runs nothing a configuration file names", text
         )
+
+
+class DriftDocumentationTests(unittest.TestCase):
+    """references/LEDGER.md documents the `drift` command."""
+
+    def test_reference_documents_the_drift_command_and_that_it_is_read_only(
+        self,
+    ) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("dashboard.py drift <path-to-ledger.json>", text)
+        self.assertIn("read-only in the same terms `scan` is", text)
+
+    def test_reference_documents_every_drift_argument(self) -> None:
+        # Deliberately not the wording scan's argument table uses: reusing
+        # those strings here would let scan's own argument test survive the
+        # deletion of scan's table by matching this one instead.
+        text = _collapsed(REFERENCE)
+        for phrase in (
+            "the ledger whose recorded baselines and runs are classified",
+            "names the `$PROJECT` root exactly as it does for `scan`",
+            "replacing selection outright",
+            "where user adapters are looked for",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
+    def test_reference_documents_why_drift_has_no_client_flag(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "classify one client's files under another client's anchors", text
+        )
+
+    def test_reference_documents_the_five_drift_states(self) -> None:
+        # Anchored on the enumeration phrase and cross-checked against the
+        # runtime set, following test_reference_documents_every_baseline_item_kind:
+        # the two cannot silently drift apart.
+        text = _collapsed(REFERENCE)
+        listed = "one of `IN_PLACE`, `DRIFTED`, `REVERTED`, `MISSING`, or `UNVERIFIABLE`"
+        self.assertIn(listed, text)
+        documented = set(re.findall(r"`([A-Z_]+)`", listed))
+        self.assertEqual(documented, constants.DRIFT_STATES)
+
+    def test_reference_documents_both_not_present_rows(self) -> None:
+        # The two rows a refactor inverts silently, pinned as table rows and
+        # as the prose that explains them, per the 0.3.0 plan's Task 7.
+        text = _collapsed(REFERENCE)
+        self.assertIn("| `not_present` | still absent | `IN_PLACE` |", text)
+        self.assertIn("| `not_present` | file exists now | `DRIFTED` |", text)
+        self.assertIn("the baseline recorded that it looked and found nothing", text)
+        self.assertIn("configuration arriving from outside", text)
+
+    def test_reference_documents_the_in_file_absence_recheck(self) -> None:
+        # The dogfood's first real finding: an absence recorded inside a file
+        # cannot be re-verified from the file's existence. The recheck, its
+        # redaction mirror, and both degradations are documentation the
+        # reader of a drift report needs to trust an `appeared`.
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "the recheck's entire output is a state and a reason", text
+        )
+        self.assertIn("redact with the same adapter patterns", text)
+        self.assertIn("`pointer_unrecorded`", text)
+        self.assertIn(
+            "the file appearing is exactly the drift it looks like", text
+        )
+
+    def test_reference_documents_reverted_cannot_occur_for_a_baseline_item(
+        self,
+    ) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("no before/after pair to revert between", text)
+
+    def test_reference_documents_run_target_classification(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("| equals `after_digest` | `IN_PLACE` |", text)
+        self.assertIn("never as a rollback nobody performed", text)
+
+    def test_reference_documents_unresolvable_anchors_as_unverifiable(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "a finding about the environment, not a crash in the tool", text
+        )
+
+    def test_reference_documents_annotations_change_no_classification(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("a shadowed item that drifted is still `DRIFTED`", text)
+
+    def test_reference_documents_the_adapter_version_finding(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("the comparison crosses adapter versions", text)
+
+    def test_reference_documents_the_drift_exit_codes(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("`0` when every classified thing is `IN_PLACE`", text)
+
+
+class RollbackPreviewDocumentationTests(unittest.TestCase):
+    """references/LEDGER.md documents the `rollback-preview` command."""
+
+    def test_reference_documents_the_command_and_that_it_is_read_only(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "dashboard.py rollback-preview <path-to-ledger.json> RUN-YYYY-NNN", text
+        )
+        self.assertIn(
+            "a preview that wrote anything would be lying about its name", text
+        )
+
+    def test_reference_documents_classification_reuse(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("same code, not similar code", text)
+
+    def test_reference_documents_the_backup_is_recomputed_not_trusted(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("recomputes rather than believes", text)
+
+    def test_reference_documents_the_four_sets(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("All four sets are always present", text)
+        for name in (
+            "`will_be_restored`",
+            "`will_not_change`",
+            "`cannot_be_restored`",
+            "`residual_effects`",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(name, text)
+        self.assertIn("each carrying its state as the reason", text)
+
+    def test_reference_documents_the_target_set_partition(self) -> None:
+        # The dogfood's completeness finding: intact targets under a failed
+        # backup are unrestorable, not unreportable.
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "the backup is what there is to restore *from*", text
+        )
+        self.assertIn("every target appears in exactly one", text)
+
+    def test_reference_documents_the_indicator_table(self) -> None:
+        # Anchored on the enumeration phrase and cross-checked against the
+        # runtime set, plus each row's condition column.
+        text = _collapsed(REFERENCE)
+        listed = "one of `HEALTHY`, `AT_RISK`, or `BROKEN`"
+        self.assertIn(listed, text)
+        documented = set(re.findall(r"`([A-Z_]+)`", listed))
+        self.assertEqual(documented, dashboard.ROLLBACK_INDICATORS)
+        self.assertIn("missing, unreadable, or its digest mismatches", text)
+
+    def test_reference_documents_the_indicator_gap_closure(self) -> None:
+        # The paragraph spec 3.3 adds over the design spec's literal table:
+        # MISSING, UNVERIFIABLE, and REVERTED under a verified backup resolve
+        # to AT_RISK, and the condition column carries the closure.
+        text = _collapsed(REFERENCE)
+        self.assertIn("leaves one run unclassified", text)
+        self.assertIn(
+            "at least one target is not `IN_PLACE`, or residual effects exist", text
+        )
+        self.assertIn("a rollback story it no longer has", text)
+
+    def test_reference_documents_broken_short_circuits_nothing(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("short-circuits nothing else", text)
+
+    def test_reference_documents_the_rollback_preview_exit_codes(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("`0` for `HEALTHY`, `1` for `AT_RISK` or `BROKEN`", text)
+        self.assertIn("rollback story has decayed", text)
+
+
+class ResolutionDocumentationTests(unittest.TestCase):
+    """references/LEDGER.md documents the `resolution` field beyond its
+    adapter-table row: the four modes, what `drift` computes under each, and
+    the undeclared state."""
+
+    def test_reference_documents_each_mode_and_the_winner_rule(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("a winner exists only under `override`", text)
+        for phrase in (
+            "shadows one at a later scope, whole",
+            "item granularity cannot rank whole files",
+            "the mode itself is the answer",
+            "every layer in the chain is live",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
+    def test_reference_mode_table_names_exactly_the_runtime_modes(self) -> None:
+        # Driven from the machine-checked block and adapters.RESOLUTION_MODES
+        # in both directions, so a fifth mode added to the code without
+        # documentation fails here, and so does a documented mode the
+        # validator would refuse.
+        text = REFERENCE.read_text(encoding="utf-8")
+        start = "<!-- RESOLUTION_MODES_START -->"
+        end = "<!-- RESOLUTION_MODES_END -->"
+        self.assertIn(start, text)
+        self.assertIn(end, text)
+        block = text[text.index(start) : text.index(end)]
+        documented = set(
+            re.findall(r"^\|\s*`([a-z-]+)`\s*\|", block, re.MULTILINE)
+        )
+        self.assertEqual(documented, adapters.RESOLUTION_MODES)
+
+    def test_reference_documents_the_undeclared_state(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "the honest state for cross-scope semantics nobody verified", text
+        )
+        self.assertIn("does not ship an ordering nobody verified", text)
+
+    def test_reference_documents_order_validation_timing(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("refused at load, when the author can still fix it", text)
+
+
+class ResolutionFieldAlignmentTests(unittest.TestCase):
+    """The documented resolution fields must equal the enforced ones, both
+    ways.
+
+    Driven from `adapters.RESOLUTION_FIELDS` and the machine-checked block in
+    LEDGER.md, never from a list written out here, following the pattern
+    AdapterFieldAlignmentTests established and for the same reason: a field
+    added to `_validate_resolution` without being documented fails one
+    direction, and a field documented that the validator would reject as
+    unknown fails the other.
+    """
+
+    START = "<!-- RESOLUTION_FIELDS_START -->"
+    END = "<!-- RESOLUTION_FIELDS_END -->"
+    ROW_FIELD = AdapterFieldAlignmentTests.ROW_FIELD
+
+    def _documented(self) -> set[str]:
+        text = REFERENCE.read_text(encoding="utf-8")
+        block = text[text.index(self.START) : text.index(self.END)]
+        return set(self.ROW_FIELD.findall(block))
+
+    def test_field_block_markers_are_present(self) -> None:
+        text = REFERENCE.read_text(encoding="utf-8")
+        self.assertIn(self.START, text)
+        self.assertIn(self.END, text)
+
+    def test_every_resolution_field_is_documented(self) -> None:
+        missing = adapters.RESOLUTION_FIELDS - self._documented()
+        self.assertFalse(
+            missing,
+            f"_validate_resolution knows the fields {sorted(missing)}, which "
+            "references/LEDGER.md's resolution field table does not name",
+        )
+
+    def test_no_documented_resolution_field_is_stale(self) -> None:
+        extra = self._documented() - adapters.RESOLUTION_FIELDS
+        self.assertFalse(
+            extra,
+            f"references/LEDGER.md documents the resolution fields "
+            f"{sorted(extra)}, which _validate_resolution does not know and "
+            "would reject as unknown",
+        )
+
+
+class MergeConflictRecoveryDocumentationTests(unittest.TestCase):
+    """references/LEDGER.md documents the merge-conflict recovery procedure
+    that ships instead of a merge driver (spec 3.4)."""
+
+    def test_reference_documents_why_no_merge_driver_ships(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn("inverted its risk story", text)
+        self.assertIn("loudly invalid rather than quietly wrong", text)
+        self.assertIn("a file git left conflict markers in", text)
+
+    def test_reference_documents_the_three_recovery_steps(self) -> None:
+        text = _collapsed(REFERENCE)
+        for step in (
+            "**Verify both sides.**",
+            "**Re-allocate colliding identifiers from the authority.**",
+            "**Verify the union.**",
+        ):
+            with self.subTest(step=step):
+                self.assertIn(step, text)
+        self.assertIn("confirm the collision is actually gone", text)
+
+
+class SubagentLedgerWriteTests(unittest.TestCase):
+    """SKILL.md states the subagent ledger-write prohibition in so many
+    words (spec 3.4): the delegating agent is the ledger's single writer."""
+
+    def test_skill_states_the_delegating_agent_holds_the_pen(self) -> None:
+        text = _collapsed(SKILL)
+        self.assertIn(
+            "subagents return findings, and the delegating agent holds the pen",
+            text,
+        )
+
+    def test_skill_states_a_subagent_never_touches_the_ledger_file(self) -> None:
+        text = _collapsed(SKILL)
+        self.assertIn("A subagent never touches `ledger.json`", text)
+
+
+class DriftWorkflowTests(unittest.TestCase):
+    """SKILL.md places the two 0.3.0 commands in the workflow."""
+
+    def test_skill_places_drift_before_proposing_changes(self) -> None:
+        text = _collapsed(SKILL)
+        self.assertIn("run `dashboard.py drift` before proposing changes", text)
+
+    def test_skill_places_rollback_preview_around_rollback_discussion(self) -> None:
+        text = _collapsed(SKILL)
+        self.assertIn(
+            "run `dashboard.py rollback-preview` against that run before and after",
+            text,
+        )
+
+
+class PrivacyDriftTests(unittest.TestCase):
+    """PRIVACY.md covers `drift` and `rollback-preview`: what they read, that
+    they write nothing, and what their reports carry."""
+
+    def test_privacy_states_what_the_two_commands_read(self) -> None:
+        text = _collapsed(PRIVACY)
+        self.assertIn("read the same files `scan` reads", text)
+        self.assertIn("the backup files a run recorded", text)
+
+    def test_privacy_states_the_two_commands_write_nothing(self) -> None:
+        text = _collapsed(PRIVACY)
+        self.assertIn(
+            "Both write nothing: no file, no directory, no ledger entry", text
+        )
+
+    def test_privacy_states_what_the_reports_carry(self) -> None:
+        text = _collapsed(PRIVACY)
+        self.assertIn(
+            "digests, classification states, and data the ledger already recorded",
+            text,
+        )
+        self.assertIn(
+            "never a configuration value read from the environment", text
+        )
+
+
+class ReadmeDriftTests(unittest.TestCase):
+    def test_readme_documents_drift_and_rollback_preview_beside_scan(self) -> None:
+        text = _collapsed(README)
+        self.assertIn("dashboard.py drift <path-to-ledger.json>", text)
+        self.assertIn(
+            "dashboard.py rollback-preview <path-to-ledger.json> RUN-YYYY-NNN", text
+        )
+        self.assertIn("Both are read-only like `scan`", text)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ Agent Ingest, Audit & Optimize is a Skill plugin. The publisher does not operate
 
 The plugin provides instructions and local resources to the AI agent host selected by the user. Material supplied to the plugin, agent conversation data, tool calls, and generated results may therefore be processed by that host and by any tools or connectors the user authorizes. Their respective privacy policies and account settings govern that processing.
 
-The plugin bundles one executable, `assets/scripts/dashboard.py`. It runs locally and makes no network request. Its `verify` command reads only the paths passed to it on the command line. Its `scan` command reads the configuration files a client adapter names, which is described in the next section. The repository's packaging and evaluation scripts are development tooling used to build and test releases; they are excluded from both distributed archives and never reach a user's installation.
+The plugin bundles one executable, `assets/scripts/dashboard.py`. It runs locally and makes no network request. Its `verify` command reads only the paths passed to it on the command line. Its `scan` command reads the configuration files a client adapter names, which is described in the next section. Its `drift` and `rollback-preview` commands re-read those files and the ledger's recorded backups, and are described below as well. The repository's packaging and evaluation scripts are development tooling used to build and test releases; they are excluded from both distributed archives and never reach a user's installation.
 
 ## What the `scan` command reads
 
@@ -21,6 +21,12 @@ Because the match is on the name, a secret carried inside a value whose own key 
 A parsed value that does **not** match one of those patterns is copied into the baseline verbatim. A baseline can therefore contain absolute local filesystem paths, account and user names, project names, and any other content of a configuration file that is not secret-shaped. A single Codex configuration key produced thirteen absolute local paths in this project's own first real run of the command. The anchoring rules that keep a stored path portable apply to an item's recorded location, not to a parsed value: the value is whatever the file said.
 
 A baseline is a local file like any other in the ledger, and it is never transmitted. Treat it as personally identifying: review it before pasting it into an issue, a chat, or a repository, and keep it out of a directory that is committed.
+
+## What the `drift` and `rollback-preview` commands read
+
+`drift` and `rollback-preview` read the same files `scan` reads — the configuration files the selected adapter names — plus the ledger passed on the command line and, for `rollback-preview`, the backup files a run recorded. Both recompute SHA-256 digests and compare them with what the ledger recorded; neither executes anything. Both write nothing: no file, no directory, no ledger entry — each prints one JSON report to standard output and everything else to standard error.
+
+Their reports carry digests, classification states, and data the ledger already recorded — never a configuration value read from the environment. A report still names recorded anchors, item names, and record identifiers, so review it like any other ledger content before pasting it anywhere public.
 
 ## External material and tools
 
