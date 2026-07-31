@@ -38,6 +38,7 @@ import tempfile
 from pathlib import Path
 
 from ledgerlib import drift, rollback
+from ledgerlib.chain import canonical_text, chain_head, verify_chain
 from ledgerlib.constants import TOOL_VERSION
 from ledgerlib.errors import LedgerError
 from ledgerlib.paths import _path_key, file_digest, load_json
@@ -94,15 +95,32 @@ def serialize_payload(payload: dict) -> str:
     payload byte-identical, which is what lets `dashboard.py build`'s
     overwrite guard -- and any future diffing -- trust the output at all.
     """
-    text = json.dumps(
-        payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-    )
-    text = (
+    # `canonical_text` is the one canonicalization in the repository -- sorted
+    # keys, compact separators, surrogate-safe -- and this function is that
+    # plus the three HTML-embedding escapes it owns. Two canonicalizations
+    # would eventually disagree, and a payload disagreeing with a record
+    # digest about the same object is worse than either being wrong alone.
+    text = canonical_text(payload)
+    return (
         text.replace("<", "\\u003c")
         .replace(_LINE_SEPARATOR, "\\u2028")
         .replace(_PARAGRAPH_SEPARATOR, "\\u2029")
     )
-    return text.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def _chain_summary(ledger: dict) -> dict:
+    """The chain verdict for the payload: verdict, head, and broken rows only.
+
+    Sound rows are omitted deliberately. A page that listed every intact link
+    would bury the two or three that are not, and the verdict already carries
+    the "everything is fine" case in one word.
+    """
+    rows, verdict = verify_chain(ledger)
+    return {
+        "verdict": verdict,
+        "head": chain_head(ledger),
+        "broken": [row for row in rows if row["reason"] is not None],
+    }
 
 
 def _generated_at(today: str | None) -> str:
@@ -301,6 +319,12 @@ def build_payload(
             "previews": previews,
             "expired_evidence": _expired_evidence(ledger, today_value),
             "unreachable_projects": _unreachable_projects(ledger),
+            # The chain verdict plus the records that broke it. `head` rides
+            # along so a reader can compare it against the digest they
+            # recorded outside the ledger without leaving the page -- the page
+            # itself cannot do that comparison, because everything it can see
+            # came out of the same file.
+            "chain": _chain_summary(ledger),
         },
     }
 

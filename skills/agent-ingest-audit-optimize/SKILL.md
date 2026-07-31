@@ -198,8 +198,14 @@ Every finding classified `REJECT`, `NEEDS MORE EVIDENCE`, `RISK EXCEEDS BENEFIT`
 `OBSOLETE`, `NOT APPLICABLE`, and `ALREADY IMPLEMENTED` are terminal and never enter the
 backlog.
 
+After writing the ledger, seal its hash chain (`dashboard.py chain <ledger> --seal`) as routinely
+as you run `verify`. Sealing is bookkeeping too: it is permitted in every operating state and never
+counts as implementing a proposal. The chain makes tampering evident, never impossible — never
+describe a sealed ledger as tamper-proof, and read the threat table in
+[references/LEDGER.md](references/LEDGER.md) before making any claim about what it detects.
+
 Read [references/LEDGER.md](references/LEDGER.md) for the storage layout, scope routing,
-identifier rules, evidence expiry, and the validation command.
+identifier rules, evidence expiry, the validation command, and the hash chain.
 
 Run `dashboard.py build` to turn a ledger into a single offline dashboard when reporting on or
 reviewing its contents. Read [references/DASHBOARD.md](references/DASHBOARD.md) for the nine

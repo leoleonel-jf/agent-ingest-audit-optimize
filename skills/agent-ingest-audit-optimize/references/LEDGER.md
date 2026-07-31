@@ -884,6 +884,50 @@ readable.
 Exit codes: `0` clean, `1` findings with every ledger readable, `2` at least one ledger could
 not be read (missing, invalid JSON, or not a JSON object).
 
+## Tamper-evidence: the hash chain
+
+Each entry in `records[]` may carry a `chain` object — `index`, `previous`, and `digest` — where
+`digest` is the SHA-256 of that record's canonical JSON (sorted keys, compact separators) with
+`chain.digest` itself removed, and `index`/`previous` deliberately inside the hash, because they
+are what bind a record to its position.
+
+```text
+python assets/scripts/dashboard.py verify <ledger> --chain
+python assets/scripts/dashboard.py chain <ledger> --seal
+python assets/scripts/dashboard.py chain <ledger> --head
+```
+
+**What this is, precisely.** Tamper-**evident**, not tamper-proof:
+
+| Scenario | Detected? |
+|---|---|
+| Editing a record | yes — its digest no longer matches |
+| Deleting a record from the middle | yes — the following record's `index`/`previous` no longer line up |
+| Reordering records | yes — `index` and `previous` are inside the hash |
+| Truncating the end of the chain | only with an external anchor |
+| Rewriting everything and re-sealing | **no** — without an external anchor |
+
+The last row is the reason `chain --head` exists. It prints the head digest and nothing else, so
+the value can be recorded **outside** the ledger — a commit message, a tag, another system — and
+`verify --chain --expect-head <digest>` compares against it. There is no key and no service: it is
+one number kept somewhere the ledger cannot reach, and it is what moves "they rewrote everything"
+from undetectable to detectable. A tool that claimed more than this table would be lying about the
+one thing it exists to be trusted about.
+
+Nothing here is access control. It does not stop a write; it makes one visible.
+
+**Compatibility.** A record with no `chain` is `unchained`, never invalid. Every ledger written
+before this shipped is unchained, and `verify` stays silent about it unless `--chain` is passed —
+turning existing records invalid would destroy exactly what this tool preserves. Indices count
+over the sealed subsequence, so a partially sealed ledger verifies cleanly from its first sealed
+record onward, which is the normal state right after migration.
+
+**Sealing.** `chain --seal` writes `chain` onto records that lack it and leaves existing ones
+alone, so it is byte-idempotent. It refuses a ledger that does not validate, and it refuses to
+seal over a chain that is already broken — resealing would recompute the links and erase the
+evidence, which is the one thing this command must never do. It preserves the file's indentation
+and line endings, and writes through `os.replace`.
+
 ## Recovering `ledger.json` from a git merge conflict
 
 No merge driver ships, and that is a decision rather than a gap in tooling: a git merge driver is

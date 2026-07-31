@@ -95,6 +95,17 @@ from ledgerlib.build import (  # noqa: E402
     serialize_payload,
     write_dashboard,
 )
+from ledgerlib.chain import (  # noqa: E402
+    CHAIN_REASONS,
+    CHAIN_VERDICTS,
+    canonical_bytes,
+    canonical_text,
+    chain_command,
+    chain_head,
+    record_digest,
+    seal_ledger,
+    verify_chain,
+)
 from ledgerlib.drift import (  # noqa: E402
     DRIFT_REASONS,
     classify_item,
@@ -134,6 +145,41 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     verify_parser = subparsers.add_parser("verify", help="validate one or more ledgers")
     verify_parser.add_argument("paths", nargs="+", type=Path)
+    # Opt-in, for compatibility: every ledger written before the chain shipped
+    # is unchained, and reporting that by default would turn a clean run into
+    # a finding for every existing user.
+    verify_parser.add_argument(
+        "--chain",
+        action="store_true",
+        help="also verify each ledger's hash chain (tamper-evidence)",
+    )
+    verify_parser.add_argument(
+        "--expect-head",
+        dest="expect_head",
+        default=None,
+        help="the chain head digest recorded outside the ledger; the only "
+        "check that survives a wholly recomputed chain. Requires --chain",
+    )
+
+    chain_parser = subparsers.add_parser(
+        "chain",
+        help="report the hash chain's head, or seal unchained records "
+        "(--seal writes one file)",
+    )
+    chain_parser.add_argument("ledger", type=Path, help="the ledger to chain")
+    chain_mode = chain_parser.add_mutually_exclusive_group(required=True)
+    chain_mode.add_argument(
+        "--head",
+        action="store_true",
+        help="print the head digest and nothing else, to be recorded outside "
+        "the ledger",
+    )
+    chain_mode.add_argument(
+        "--seal",
+        action="store_true",
+        help="write the chain onto records that lack it; refuses an invalid "
+        "ledger and refuses to seal over a broken chain",
+    )
 
     scan_parser = subparsers.add_parser(
         "scan",
@@ -284,7 +330,20 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
 
     if arguments.command == "verify":
-        return verify(arguments.paths)
+        if arguments.expect_head is not None and not arguments.chain:
+            parser.error("--expect-head requires --chain")
+        return verify(
+            arguments.paths,
+            chain=arguments.chain,
+            expect_head=arguments.expect_head,
+        )
+
+    if arguments.command == "chain":
+        return chain_command(
+            ledger=arguments.ledger,
+            head=arguments.head,
+            seal=arguments.seal,
+        )
 
     if arguments.command == "scan":
         return scan_command(
