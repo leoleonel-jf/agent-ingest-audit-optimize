@@ -210,4 +210,9 @@ request.
 
 `dashboard.py serve`, further languages beyond `en`/`pt-BR` (§18 defers both), multi-ledger
 builds (one ledger per dashboard, per §6.2), true staleness detection (see §4 deviation),
-and any change to scan/drift/rollback semantics.
+and any change to scan/drift/rollback semantics. Two §12.2 promises ship narrowed: Open
+links render only where the payload carries a resolved absolute path (today: known
+projects), because drift and preview reports record anchors, not resolved paths — making
+the full promise true is a 0.5.0 change to the Python side; and the ledger-download button
+is dropped in favor of per-record export, which covers the audit-evidence use without a
+second copy path.
