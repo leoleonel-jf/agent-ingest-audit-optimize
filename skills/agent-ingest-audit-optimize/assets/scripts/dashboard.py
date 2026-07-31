@@ -5,9 +5,10 @@
 configuration and emits a single `baselines[]` entry on stdout. `drift`
 re-resolves a ledger's recorded anchors and classifies every baseline item
 and run target against the environment now. `rollback-preview` reports the
-four sets and the health indicator for one RUN record. All of them are
-read-only and write no file anywhere. Dashboard rendering arrives in a later
-phase.
+four sets and the health indicator for one RUN record. All four are
+read-only and write no file anywhere. `build` renders the ledger into a
+self-contained `dashboard.html`: it is the one command here that writes a
+file, and it writes exactly one.
 """
 
 from __future__ import annotations
@@ -85,6 +86,14 @@ from ledgerlib.paths import (  # noqa: E402
     file_digest,
     load_json,
     resolve_anchored,
+)
+from ledgerlib.build import (  # noqa: E402
+    TEMPLATE_PATH,
+    build_command,
+    build_payload,
+    inject_payload,
+    serialize_payload,
+    write_dashboard,
 )
 from ledgerlib.drift import (  # noqa: E402
     DRIFT_REASONS,
@@ -226,6 +235,51 @@ def main(argv: list[str] | None = None) -> int:
         help="the configuration root user adapters are read from; skipped when omitted",
     )
 
+    build_parser = subparsers.add_parser(
+        "build",
+        help="render a ledger into a self-contained dashboard.html (writes one file)",
+    )
+    build_parser.add_argument("ledger", type=Path, help="the ledger to render")
+    build_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="where to write the dashboard; defaults to dashboard.html beside the ledger",
+    )
+    build_parser.add_argument(
+        "--lang",
+        default=None,
+        help="override the dashboard language; falls back to ledger.language, then 'en'",
+    )
+    build_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite --out even if it does not look like a generated dashboard",
+    )
+    # Mirrors `drift`'s flags exactly, for the reason `drift_parser` already
+    # gives: `build_payload` re-resolves the ledger's anchors through
+    # `drift_report` and `rollback_preview`, the same anchor-resolution layer
+    # `drift` and `rollback-preview` use, so it needs the same selectors.
+    build_parser.add_argument(
+        "--project",
+        type=Path,
+        default=None,
+        help="the project root $PROJECT anchors to; the working directory when omitted",
+    )
+    build_parser.add_argument(
+        "--adapter",
+        type=Path,
+        default=None,
+        help="an adapter file to use, overriding selection entirely",
+    )
+    build_parser.add_argument(
+        "--user-config",
+        dest="user_config",
+        type=Path,
+        default=None,
+        help="the configuration root user adapters are read from; skipped when omitted",
+    )
+
     arguments = parser.parse_args(argv)
 
     if arguments.command == "verify":
@@ -252,6 +306,17 @@ def main(argv: list[str] | None = None) -> int:
         return rollback_preview_command(
             ledger=arguments.ledger,
             run_id=arguments.run_id,
+            adapter=arguments.adapter,
+            user_config=arguments.user_config,
+            project=arguments.project,
+        )
+
+    if arguments.command == "build":
+        return build_command(
+            ledger=arguments.ledger,
+            out=arguments.out,
+            lang=arguments.lang,
+            force=arguments.force,
             adapter=arguments.adapter,
             user_config=arguments.user_config,
             project=arguments.project,

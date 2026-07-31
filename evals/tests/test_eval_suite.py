@@ -81,7 +81,7 @@ class EvaluationSuiteTests(unittest.TestCase):
         return results
 
     def test_repository_suite_is_valid(self) -> None:
-        self.assertEqual(len(self.suite["cases"]), 30)
+        self.assertEqual(len(self.suite["cases"]), 33)
         self.assertEqual(
             set(self.suite["task_categories"]),
             eval_suite.REQUIRED_TASK_CATEGORIES,

@@ -161,6 +161,35 @@ class PackagePluginTests(unittest.TestCase):
             self.assertFalse(any("dashboard/tests" in name for name in plugin_names))
             self.assertFalse(any("dashboard/tests" in name for name in skill_names))
 
+    def test_archives_include_the_dashboard_shell_templates(self) -> None:
+        """0.4.0 ships the dashboard shell and its docs alongside the other assets.
+
+        ``package_plugin`` never enumerates individual files under ``assets/`` or a
+        Skill directory; it walks both trees with ``iter_files``/``rglob`` (see
+        ``expected_entries``), so the shell template rides along for free -- the
+        risk this test guards is a later change that starts naming files instead of
+        walking directories, which would silently drop this one. ``dashboard.html``
+        is the injection target itself (design spec §12/§13), and both ``DASHBOARD.md``
+        files are the static-injection recipe and the panel reference a no-Python
+        client needs; missing any of the three breaks degraded-mode dashboard
+        building for anyone working from an extracted archive.
+        """
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp)
+            plugin_archive, skill_archive, _ = package_plugin.build(output)
+            with zipfile.ZipFile(plugin_archive) as archive:
+                plugin_names = archive.namelist()
+            with zipfile.ZipFile(skill_archive) as archive:
+                skill_names = archive.namelist()
+
+            for suffix in (
+                "assets/templates/dashboard.html",
+                "assets/templates/DASHBOARD.md",
+                "references/DASHBOARD.md",
+            ):
+                self.assertIn(f"skills/agent-ingest-audit-optimize/{suffix}", plugin_names)
+                self.assertIn(f"agent-ingest-audit-optimize/{suffix}", skill_names)
+
     def test_archives_exclude_compiled_bytecode(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp)

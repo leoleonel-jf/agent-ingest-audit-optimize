@@ -1,0 +1,258 @@
+"use strict";
+
+/* A DOM small enough to read in one sitting, and just large enough to boot
+   the shell in `skills/agent-ingest-audit-optimize/assets/templates/
+   dashboard.html` under plain `node`.
+
+   It exists so the shell's runtime gates -- `safeHref`, `attrAllowed`,
+   `safeTag` -- can be *executed* by `dashboard/tests/test_shell.py` rather
+   than only grepped. The static suite can prove a guard's source is present;
+   only running it proves the guard refuses anything.
+
+   Deliberately not a browser: nodes remember a tag name, a flat attribute
+   map, their children, and nothing else. No layout, no CSS, and no event
+   dispatch of its own -- listeners are recorded, and a probe that wants one
+   fired calls it. There is no bubbling here either, so a probe standing in
+   for a browser fires a handler on the element the real event would have
+   reached it on: Task 7's palette registers `keydown` on the dialog, which
+   is where a keystroke in its input would arrive after bubbling.
+
+   `document` and `window` record their listeners the same way (Task 7's
+   `Ctrl`/`Cmd`+`K` is a document-level handler, and `hashchange` is a
+   window-level one), and `globalThis.__AIO_FIRE__` is how a probe delivers
+   an event to either. They used to be no-ops, which silently swallowed
+   every global handler the shell installed.
+
+   The harness concatenates this file, a preamble of globals, the shell
+   source, and a probe into one temporary script, so `document` and `window`
+   below are in scope for the shell exactly as they would be in a page.
+   Islands are seeded through `globalThis.__AIO_ISLANDS__` (an id -> text
+   map); every other id is created empty on first request.
+
+   Node builtins only. No dependency to install, nothing to keep current. */
+
+function El(tag) {
+  this.tagName = String(tag).toUpperCase();
+  this.childNodes = [];
+  this.attributes = Object.create(null);
+  this.listeners = Object.create(null);
+  this.text = "";
+  this.hidden = false;
+  this.id = "";
+  this.lang = "";
+  /* Task 6's manual copy tier writes here. A real textarea's `value` is
+     what the reader sees and what a selection copies, so it is the one
+     property the copy path reads back. */
+  this.value = "";
+}
+
+El.prototype.setAttribute = function (name, value) {
+  this.attributes[name] = String(value);
+  if (name === "id") { this.id = String(value); }
+};
+
+El.prototype.getAttribute = function (name) {
+  return name in this.attributes ? this.attributes[name] : null;
+};
+
+El.prototype.removeAttribute = function (name) { delete this.attributes[name]; };
+
+El.prototype.appendChild = function (child) { this.childNodes.push(child); return child; };
+
+El.prototype.removeChild = function (child) {
+  var at = this.childNodes.indexOf(child);
+  if (at !== -1) { this.childNodes.splice(at, 1); }
+  return child;
+};
+
+El.prototype.addEventListener = function (type, fn) {
+  if (!this.listeners[type]) { this.listeners[type] = []; }
+  this.listeners[type].push(fn);
+};
+
+El.prototype.focus = function () {
+  this.focused = true;
+  document.activeElement = this;
+};
+
+/* The clipboard affordances Task 6's copy path really uses, and nothing
+   more. Everything here fails closed.
+
+   `select` records what a copy would take, exactly as a browser's selection
+   would: whatever is in the element's `value` at the moment of the call.
+   `document.execCommand` below then copies *that*, so the recorded
+   clipboard is the text the page actually put in front of the reader --
+   not the text some test handed the function. If the shell ever filled the
+   box with one string and copied another, the two would disagree here. */
+El.prototype.select = function () {
+  globalThis.__AIO_SELECTED__ = String(this.value);
+  this.selected = true;
+};
+
+/* Every string the page succeeded in copying, in order. */
+var clipboard = [];
+
+Object.defineProperty(El.prototype, "firstChild", {
+  get: function () { return this.childNodes.length === 0 ? null : this.childNodes[0]; }
+});
+
+Object.defineProperty(El.prototype, "textContent", {
+  get: function () {
+    if (this.childNodes.length === 0) { return this.text; }
+    return this.childNodes.map(function (child) { return child.textContent; }).join("");
+  },
+  set: function (value) { this.childNodes = []; this.text = String(value); }
+});
+
+var registry = Object.create(null);
+
+/* A tally of every argument `createElement` actually received. `h()` always
+   calls `createElement(safeTag(tag))`, so by the time a name lands here it
+   has already been through `safeTag`'s coercion -- this counter cannot show
+   what tag ledger content *asked* for, only what tag name ultimately reached
+   `createElement`. Its value is narrower than that: it catches a future
+   direct `createElement` call that bypasses `h()` (and therefore `safeTag`)
+   entirely, which a look at the finished tree would not, since the finished
+   tree only ever shows the coerced result either way. The actual inertness
+   guarantee -- that ledger content never becomes an element at all -- is the
+   text-node assertion in `dashboard/tests/test_shell.py`
+   (`RuntimePanelTests`), not this counter. */
+var created = Object.create(null);
+
+var document = {
+  title: "",
+  documentElement: new El("html"),
+  body: new El("body"),
+  /* Real, mutated only by `El.prototype.focus`, which is the one thing
+     that touches it: the shell's manual copy tier reads it back before
+     it steals focus, so a stub that never moved it would let a focus
+     leak pass as a focus restore. */
+  activeElement: null,
+  createElement: function (tag) {
+    var name = String(tag);
+    created[name] = (created[name] || 0) + 1;
+    return new El(tag);
+  },
+  createTextNode: function (value) {
+    var node = new El("#text");
+    node.text = String(value);
+    return node;
+  },
+  /* Fails closed when the harness says which ids the template actually
+     ships (`__AIO_ELEMENT_IDS__`): an id that is not in the markup answers
+     null, the way a browser answers.
+
+     It used to conjure an element for any id at all, which made a whole
+     class of ablation invisible -- delete the live region from the body and
+     `announce` would still find something to write to, so every runtime
+     case about the announcement kept passing against a page that no longer
+     had one. Absent the global (the gate harness does not seed it) the old
+     permissive behaviour stands, because those cases assert about the
+     gates rather than about the markup. */
+  getElementById: function (id) {
+    if (!(id in registry)) {
+      var known = globalThis.__AIO_ELEMENT_IDS__;
+      if (Array.isArray(known) && known.indexOf(id) === -1) { return null; }
+      var node = new El("div");
+      node.setAttribute("id", id);
+      var islands = globalThis.__AIO_ISLANDS__ || {};
+      if (id in islands) { node.text = islands[id]; }
+      registry[id] = node;
+    }
+    return registry[id];
+  },
+  /* Refuses every command but "copy", and refuses even that unless
+     something was selected first -- which is what a browser does, and what
+     makes a shell that forgot to select show up as a failure rather than
+     as a silent success. */
+  execCommand: function (name) {
+    if (String(name) !== "copy") { return false; }
+    if (typeof globalThis.__AIO_SELECTED__ !== "string") { return false; }
+    clipboard.push(globalThis.__AIO_SELECTED__);
+    /* Consumed, not left behind: a stale selection is a copy waiting to
+       reuse someone else's text. Deleting the global rather than setting
+       it to "" keeps the "nothing selected" check above (`typeof ... !==
+       "string"`) honest for whatever calls execCommand next. */
+    delete globalThis.__AIO_SELECTED__;
+    return true;
+  },
+  listeners: Object.create(null),
+  addEventListener: function (type, fn) {
+    if (!this.listeners[type]) { this.listeners[type] = []; }
+    this.listeners[type].push(fn);
+  }
+};
+document.activeElement = document.body;
+
+/* `file:` origins throw on storage in some browsers; the shell wraps every
+   read and write for that reason. Here storage simply works, so the wrap is
+   exercised on its succeeding branch. */
+var storage = {
+  entries: Object.create(null),
+  getItem: function (key) { return key in this.entries ? this.entries[key] : null; },
+  setItem: function (key, value) { this.entries[key] = String(value); }
+};
+
+var window = {
+  document: document,
+  location: {
+    hash: String(globalThis.__AIO_HASH__ || ""),
+    replace: function (value) { this.hash = String(value); }
+  },
+  navigator: {
+    language: String(globalThis.__AIO_LANG__ || "en"),
+    /* Absent by default, which is what a `file:` origin really offers: a
+       file page is not a secure context, so `navigator.clipboard` is not
+       there and the selection tier is the one that runs. A getter rather
+       than a property because the opt-in global is seeded by the preamble,
+       which the harness concatenates *after* this file. */
+    get clipboard() {
+      if (!globalThis.__AIO_CLIPBOARD_API__) { return undefined; }
+      return {
+        writeText: function (text) {
+          clipboard.push(String(text));
+          return Promise.resolve();
+        }
+      };
+    }
+  },
+  localStorage: storage,
+  matchMedia: function (query) {
+    return {
+      media: String(query),
+      matches: false,
+      addEventListener: function () {},
+      addListener: function () {}
+    };
+  },
+  listeners: Object.create(null),
+  addEventListener: function (type, fn) {
+    if (!this.listeners[type]) { this.listeners[type] = []; }
+    this.listeners[type].push(fn);
+  }
+};
+
+/* Deliver one event to one target's recorded handlers, in registration
+   order, and answer how many ran. Fails closed: a probe that expects a
+   handler and gets 0 back has proved the shell never registered it, which
+   is the failure worth catching. `preventDefault` is supplied here rather
+   than by every call site, because a handler that calls it on an event
+   object without one throws and the throw would read as a shell bug. */
+function fire(target, type, event) {
+  var detail = event || {};
+  if (typeof detail.preventDefault !== "function") {
+    detail.preventDefault = function () { detail.defaultPrevented = true; };
+  }
+  var found = target && target.listeners ? target.listeners[type] : null;
+  if (!found) { return 0; }
+  found.slice(0).forEach(function (fn) { fn(detail); });
+  return found.length;
+}
+
+globalThis.document = document;
+globalThis.window = window;
+globalThis.__AIO_FIRE__ = fire;
+globalThis.__AIO_STORAGE__ = storage;
+globalThis.__AIO_REGISTRY__ = registry;
+globalThis.__AIO_CREATED__ = created;
+globalThis.__AIO_CLIPBOARD__ = clipboard;

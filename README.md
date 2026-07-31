@@ -64,7 +64,7 @@ See [packaging/README.md](packaging/README.md) for the package contract, support
 Add this repository as a marketplace and install the plugin:
 
 ```text
-codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.3.0
+codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.4.0
 codex plugin add agent-ingest-audit-optimize@agent-ingest-audit-optimize
 ```
 
@@ -87,7 +87,7 @@ claude --plugin-dir <path-to-agent-ingest-audit-optimize>
 
 ### Other Agent Skills clients
 
-Download the `agent-ingest-audit-optimize-0.3.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
+Download the `agent-ingest-audit-optimize-0.4.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
 
 ## Use
 
@@ -155,6 +155,15 @@ python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py rollback-p
 Both are read-only like `scan` and print one JSON report on standard output. Exit codes: `0`
 everything in place (`drift`) or a healthy rollback (`rollback-preview`), `1` drift, risk, or
 findings, `2` a tool error.
+
+Render a ledger into a single offline HTML dashboard with `build` — vanilla JS, no framework,
+no network request, and it never writes back to the ledger:
+
+```text
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py build <path-to-ledger.json> [--out PATH] [--lang CODE]
+```
+
+Exit codes: `0` written, `1` I/O error or overwrite refusal, `2` a ledger `verify` would reject.
 
 See [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md) for the
 record model, and [assets/schemas/ledger.schema.json](skills/agent-ingest-audit-optimize/assets/schemas/ledger.schema.json)
