@@ -50,7 +50,7 @@ REQUIRED_ADAPTER_FIELDS = {
 ADAPTER_FIELDS = REQUIRED_ADAPTER_FIELDS | {"resolution"}
 
 REQUIRED_PROBE_FIELDS = {"kind"}
-PROBE_FIELDS = {"kind", "scope", "glob", "path", "parse", "pointer"}
+PROBE_FIELDS = {"kind", "scope", "glob", "path", "parse", "pointer", "lockable"}
 PARSE_FORMATS = {"json", "toml"}
 
 REQUIRED_RESOLUTION_FIELDS = {"mode"}
@@ -252,6 +252,12 @@ def _validate_probe(probe: object, index: int, *, source: str) -> list[str]:
     label = f"{source}: probes[{index}]"
     if not isinstance(probe, dict):
         return [f"{label} must be an object"]
+    # `lockable` (0.7.0) marks a probe whose items belong in `agent.lock`.
+    # Optional and false by omission, so every adapter written before it stays
+    # valid; strictly boolean, because a truthy string here would silently
+    # pin a kind nobody meant to pin.
+    if "lockable" in probe and not isinstance(probe["lockable"], bool):
+        return [f"{label} lockable must be a boolean: {probe['lockable']!r}"]
 
     missing = REQUIRED_PROBE_FIELDS - set(probe)
     if missing:

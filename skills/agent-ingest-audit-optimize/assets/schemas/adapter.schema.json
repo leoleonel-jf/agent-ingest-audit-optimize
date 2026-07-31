@@ -110,6 +110,10 @@
           "type": "string",
           "pattern": "^/",
           "description": "RFC 6901 JSON pointer selecting a sub-document; one item per key at that location."
+        },
+        "lockable": {
+          "type": "boolean",
+          "description": "Whether this probe's items belong in `agent.lock`. Optional and false by omission, so adapters written before 0.7.0 stay valid. Mark the kinds that name an installable artifact (skill, plugin, mcp-server, agent, command, hook); leave configuration that legitimately changes every day unmarked, or a lockfile fails CI over an edited instruction file."
         }
       }
     },

@@ -118,6 +118,15 @@ from ledgerlib.compliance import (  # noqa: E402
     evaluate_control,
     load_mapping,
 )
+from ledgerlib.lock import (  # noqa: E402
+    LOCK_DIFFERENCES,
+    LOCK_VERSION,
+    build_lock,
+    check_lock,
+    lock_command,
+    lockable_kinds,
+    render_lock,
+)
 from ledgerlib.drift import (  # noqa: E402
     DRIFT_REASONS,
     classify_item,
@@ -294,6 +303,43 @@ def main(argv: list[str] | None = None) -> int:
         help="the configuration root user adapters are read from; skipped when omitted",
     )
 
+    lock_parser = subparsers.add_parser(
+        "lock",
+        help="pin the installable artifacts a baseline recorded, or check a "
+        "lockfile against it",
+    )
+    lock_parser.add_argument("ledger", type=Path, help="the ledger to read")
+    lock_mode = lock_parser.add_mutually_exclusive_group(required=True)
+    lock_mode.add_argument(
+        "--from",
+        dest="baseline_id",
+        default=None,
+        help="the BASE identifier to pin from",
+    )
+    lock_mode.add_argument(
+        "--check",
+        type=Path,
+        default=None,
+        help="an existing lockfile to compare against the baseline it names; "
+        "reads no file from the environment",
+    )
+    lock_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="where to write the lockfile; stdout when omitted",
+    )
+    lock_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite --out even if it does not look like a lockfile",
+    )
+    lock_parser.add_argument("--adapter", type=Path, default=None)
+    lock_parser.add_argument(
+        "--user-config", dest="user_config", type=Path, default=None
+    )
+    lock_parser.add_argument("--project", type=Path, default=None)
+
     compliance_parser = subparsers.add_parser(
         "compliance",
         help="inventory a ledger's evidence against one framework's controls "
@@ -402,6 +448,18 @@ def main(argv: list[str] | None = None) -> int:
         return rollback_preview_command(
             ledger=arguments.ledger,
             run_id=arguments.run_id,
+            adapter=arguments.adapter,
+            user_config=arguments.user_config,
+            project=arguments.project,
+        )
+
+    if arguments.command == "lock":
+        return lock_command(
+            ledger=arguments.ledger,
+            baseline_id=arguments.baseline_id,
+            check=arguments.check,
+            out=arguments.out,
+            force=arguments.force,
             adapter=arguments.adapter,
             user_config=arguments.user_config,
             project=arguments.project,
