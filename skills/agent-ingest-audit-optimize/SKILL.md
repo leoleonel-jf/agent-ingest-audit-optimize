@@ -199,20 +199,20 @@ Every finding classified `REJECT`, `NEEDS MORE EVIDENCE`, `RISK EXCEEDS BENEFIT`
 backlog.
 
 After writing the ledger, seal its hash chain (`dashboard.py chain <ledger> --seal`) as routinely
-as you run `verify`. Sealing is bookkeeping too: it is permitted in every operating state and never
-counts as implementing a proposal. The chain makes tampering evident, never impossible — never
-describe a sealed ledger as tamper-proof, and read the threat table in
-[references/LEDGER.md](references/LEDGER.md) before making any claim about what it detects.
+as you run `verify`; sealing is bookkeeping too. The chain makes tampering **evident, never
+impossible** — never call a sealed ledger tamper-proof.
 
-Read [references/LEDGER.md](references/LEDGER.md) for the storage layout, scope routing,
-identifier rules, evidence expiry, the validation command, and the hash chain.
+`dashboard.py lock <ledger> --from BASE-YYYY-NNN` pins which installable artifacts should be
+present, and `--check` verifies that pin in CI. It reads nothing from disk, so it never replaces
+`drift`, and a green check says nothing changed since the pin — never that the pin is trustworthy.
 
-When the user asks what the ledger shows against a regulatory framework, run
-`dashboard.py compliance <ledger> --framework <name>`. Report what it reports: it inventories
-evidence and **never certifies compliance**. Never state or imply that the user is compliant,
-however the question is phrased; say which artifacts exist, which are missing, and that
-sufficiency is the auditor's judgement. Read [references/COMPLIANCE.md](references/COMPLIANCE.md)
-before answering any compliance question.
+`dashboard.py compliance <ledger> --framework <name>` inventories evidence and **never certifies
+compliance**. Never state or imply the user is compliant, however the question is phrased: say
+which artifacts exist, which are missing, and that sufficiency is the auditor's judgement.
+
+Read [references/LEDGER.md](references/LEDGER.md) for storage layout, scope routing, identifiers,
+evidence expiry, `verify`, the hash chain and its threat table, and the lockfile; read
+[references/COMPLIANCE.md](references/COMPLIANCE.md) before answering any compliance question.
 
 Run `dashboard.py build` to turn a ledger into a single offline dashboard when reporting on or
 reviewing its contents. Read [references/DASHBOARD.md](references/DASHBOARD.md) for the nine

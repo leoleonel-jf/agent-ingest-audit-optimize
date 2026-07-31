@@ -3,9 +3,16 @@
   "client": "claude-code",
   "expires_on": "2026-10-28",
   "anchors": {
-    "$USER_CONFIG": ["$env:CLAUDE_CONFIG_DIR", "~/.claude"],
-    "$HOME": ["~"],
-    "$PROJECT": ["."],
+    "$USER_CONFIG": [
+      "$env:CLAUDE_CONFIG_DIR",
+      "~/.claude"
+    ],
+    "$HOME": [
+      "~"
+    ],
+    "$PROJECT": [
+      "."
+    ],
     "$MANAGED_CONFIG": [
       "$platform:darwin:/Library/Application Support/ClaudeCode",
       "$platform:linux:/etc/claude-code",
@@ -16,75 +23,284 @@
     ]
   },
   "probes": [
-    { "kind": "model-setting", "scope": "managed",
-      "path": "$MANAGED_CONFIG/managed-settings.json" },
-    { "kind": "permission-rule", "scope": "managed",
+    {
+      "kind": "model-setting",
+      "scope": "managed",
+      "path": "$MANAGED_CONFIG/managed-settings.json"
+    },
+    {
+      "kind": "permission-rule",
+      "scope": "managed",
       "path": "$MANAGED_CONFIG/managed-settings.json",
-      "parse": "json", "pointer": "/permissions" },
-    { "kind": "hook", "scope": "managed",
+      "parse": "json",
+      "pointer": "/permissions"
+    },
+    {
+      "kind": "hook",
+      "scope": "managed",
       "path": "$MANAGED_CONFIG/managed-settings.json",
-      "parse": "json", "pointer": "/hooks" },
-    { "kind": "env-var-name", "scope": "managed",
+      "parse": "json",
+      "pointer": "/hooks",
+      "lockable": true
+    },
+    {
+      "kind": "env-var-name",
+      "scope": "managed",
       "path": "$MANAGED_CONFIG/managed-settings.json",
-      "parse": "json", "pointer": "/env" },
-    { "kind": "model-setting", "scope": "managed",
-      "glob": "$MANAGED_CONFIG/managed-settings.d/*.json" },
-    { "kind": "model-setting", "scope": "managed",
-      "path": "$LEGACY_MANAGED_CONFIG/managed-settings.json" },
-    { "kind": "instruction-file", "scope": "user", "glob": "$USER_CONFIG/CLAUDE.md" },
-    { "kind": "instruction-file", "scope": "user", "glob": "$USER_CONFIG/rules/*.md" },
-    { "kind": "skill", "scope": "user", "glob": "$USER_CONFIG/skills/*/SKILL.md" },
-    { "kind": "agent", "scope": "user", "glob": "$USER_CONFIG/agents/*" },
-    { "kind": "command", "scope": "user", "glob": "$USER_CONFIG/commands/*" },
-    { "kind": "model-setting", "scope": "user", "path": "$USER_CONFIG/settings.json" },
-    { "kind": "permission-rule", "scope": "user", "path": "$USER_CONFIG/settings.json",
-      "parse": "json", "pointer": "/permissions" },
-    { "kind": "hook", "scope": "user", "path": "$USER_CONFIG/settings.json",
-      "parse": "json", "pointer": "/hooks" },
-    { "kind": "env-var-name", "scope": "user", "path": "$USER_CONFIG/settings.json",
-      "parse": "json", "pointer": "/env" },
-    { "kind": "model-setting", "scope": "user", "path": "$USER_CONFIG/settings.local.json" },
-    { "kind": "permission-rule", "scope": "user", "path": "$USER_CONFIG/settings.local.json",
-      "parse": "json", "pointer": "/permissions" },
-    { "kind": "hook", "scope": "user", "path": "$USER_CONFIG/settings.local.json",
-      "parse": "json", "pointer": "/hooks" },
-    { "kind": "env-var-name", "scope": "user", "path": "$USER_CONFIG/settings.local.json",
-      "parse": "json", "pointer": "/env" },
-    { "kind": "plugin", "scope": "user", "path": "$USER_CONFIG/plugins/installed_plugins.json",
-      "parse": "json" },
-    { "kind": "plugin", "scope": "user", "path": "$USER_CONFIG/plugins/known_marketplaces.json",
-      "parse": "json" },
-    { "kind": "mcp-server", "scope": "user", "path": "$HOME/.claude.json",
-      "parse": "json", "pointer": "/mcpServers" },
-    { "kind": "instruction-file", "scope": "project", "glob": "$PROJECT/CLAUDE.md" },
-    { "kind": "instruction-file", "scope": "project", "glob": "$PROJECT/.claude/CLAUDE.md" },
-    { "kind": "instruction-file", "scope": "project", "glob": "$PROJECT/CLAUDE.local.md" },
-    { "kind": "instruction-file", "scope": "project", "glob": "$PROJECT/.claude/rules/**/*.md" },
-    { "kind": "skill", "scope": "project", "glob": "$PROJECT/.claude/skills/*/SKILL.md" },
-    { "kind": "model-setting", "scope": "project", "path": "$PROJECT/.claude/settings.json" },
-    { "kind": "permission-rule", "scope": "project", "path": "$PROJECT/.claude/settings.json",
-      "parse": "json", "pointer": "/permissions" },
-    { "kind": "hook", "scope": "project", "path": "$PROJECT/.claude/settings.json",
-      "parse": "json", "pointer": "/hooks" },
-    { "kind": "env-var-name", "scope": "project", "path": "$PROJECT/.claude/settings.json",
-      "parse": "json", "pointer": "/env" },
-    { "kind": "model-setting", "scope": "project", "path": "$PROJECT/.claude/settings.local.json" },
-    { "kind": "permission-rule", "scope": "project", "path": "$PROJECT/.claude/settings.local.json",
-      "parse": "json", "pointer": "/permissions" },
-    { "kind": "hook", "scope": "project", "path": "$PROJECT/.claude/settings.local.json",
-      "parse": "json", "pointer": "/hooks" },
-    { "kind": "env-var-name", "scope": "project", "path": "$PROJECT/.claude/settings.local.json",
-      "parse": "json", "pointer": "/env" },
-    { "kind": "mcp-server", "scope": "project", "path": "$PROJECT/.mcp.json",
-      "parse": "json", "pointer": "/mcpServers" }
+      "parse": "json",
+      "pointer": "/env"
+    },
+    {
+      "kind": "model-setting",
+      "scope": "managed",
+      "glob": "$MANAGED_CONFIG/managed-settings.d/*.json"
+    },
+    {
+      "kind": "model-setting",
+      "scope": "managed",
+      "path": "$LEGACY_MANAGED_CONFIG/managed-settings.json"
+    },
+    {
+      "kind": "instruction-file",
+      "scope": "user",
+      "glob": "$USER_CONFIG/CLAUDE.md"
+    },
+    {
+      "kind": "instruction-file",
+      "scope": "user",
+      "glob": "$USER_CONFIG/rules/*.md"
+    },
+    {
+      "kind": "skill",
+      "scope": "user",
+      "glob": "$USER_CONFIG/skills/*/SKILL.md",
+      "lockable": true
+    },
+    {
+      "kind": "agent",
+      "scope": "user",
+      "glob": "$USER_CONFIG/agents/*",
+      "lockable": true
+    },
+    {
+      "kind": "command",
+      "scope": "user",
+      "glob": "$USER_CONFIG/commands/*",
+      "lockable": true
+    },
+    {
+      "kind": "model-setting",
+      "scope": "user",
+      "path": "$USER_CONFIG/settings.json"
+    },
+    {
+      "kind": "permission-rule",
+      "scope": "user",
+      "path": "$USER_CONFIG/settings.json",
+      "parse": "json",
+      "pointer": "/permissions"
+    },
+    {
+      "kind": "hook",
+      "scope": "user",
+      "path": "$USER_CONFIG/settings.json",
+      "parse": "json",
+      "pointer": "/hooks",
+      "lockable": true
+    },
+    {
+      "kind": "env-var-name",
+      "scope": "user",
+      "path": "$USER_CONFIG/settings.json",
+      "parse": "json",
+      "pointer": "/env"
+    },
+    {
+      "kind": "model-setting",
+      "scope": "user",
+      "path": "$USER_CONFIG/settings.local.json"
+    },
+    {
+      "kind": "permission-rule",
+      "scope": "user",
+      "path": "$USER_CONFIG/settings.local.json",
+      "parse": "json",
+      "pointer": "/permissions"
+    },
+    {
+      "kind": "hook",
+      "scope": "user",
+      "path": "$USER_CONFIG/settings.local.json",
+      "parse": "json",
+      "pointer": "/hooks",
+      "lockable": true
+    },
+    {
+      "kind": "env-var-name",
+      "scope": "user",
+      "path": "$USER_CONFIG/settings.local.json",
+      "parse": "json",
+      "pointer": "/env"
+    },
+    {
+      "kind": "plugin",
+      "scope": "user",
+      "path": "$USER_CONFIG/plugins/installed_plugins.json",
+      "parse": "json",
+      "lockable": true
+    },
+    {
+      "kind": "plugin",
+      "scope": "user",
+      "path": "$USER_CONFIG/plugins/known_marketplaces.json",
+      "parse": "json",
+      "lockable": true
+    },
+    {
+      "kind": "mcp-server",
+      "scope": "user",
+      "path": "$HOME/.claude.json",
+      "parse": "json",
+      "pointer": "/mcpServers",
+      "lockable": true
+    },
+    {
+      "kind": "instruction-file",
+      "scope": "project",
+      "glob": "$PROJECT/CLAUDE.md"
+    },
+    {
+      "kind": "instruction-file",
+      "scope": "project",
+      "glob": "$PROJECT/.claude/CLAUDE.md"
+    },
+    {
+      "kind": "instruction-file",
+      "scope": "project",
+      "glob": "$PROJECT/CLAUDE.local.md"
+    },
+    {
+      "kind": "instruction-file",
+      "scope": "project",
+      "glob": "$PROJECT/.claude/rules/**/*.md"
+    },
+    {
+      "kind": "skill",
+      "scope": "project",
+      "glob": "$PROJECT/.claude/skills/*/SKILL.md",
+      "lockable": true
+    },
+    {
+      "kind": "model-setting",
+      "scope": "project",
+      "path": "$PROJECT/.claude/settings.json"
+    },
+    {
+      "kind": "permission-rule",
+      "scope": "project",
+      "path": "$PROJECT/.claude/settings.json",
+      "parse": "json",
+      "pointer": "/permissions"
+    },
+    {
+      "kind": "hook",
+      "scope": "project",
+      "path": "$PROJECT/.claude/settings.json",
+      "parse": "json",
+      "pointer": "/hooks",
+      "lockable": true
+    },
+    {
+      "kind": "env-var-name",
+      "scope": "project",
+      "path": "$PROJECT/.claude/settings.json",
+      "parse": "json",
+      "pointer": "/env"
+    },
+    {
+      "kind": "model-setting",
+      "scope": "project",
+      "path": "$PROJECT/.claude/settings.local.json"
+    },
+    {
+      "kind": "permission-rule",
+      "scope": "project",
+      "path": "$PROJECT/.claude/settings.local.json",
+      "parse": "json",
+      "pointer": "/permissions"
+    },
+    {
+      "kind": "hook",
+      "scope": "project",
+      "path": "$PROJECT/.claude/settings.local.json",
+      "parse": "json",
+      "pointer": "/hooks",
+      "lockable": true
+    },
+    {
+      "kind": "env-var-name",
+      "scope": "project",
+      "path": "$PROJECT/.claude/settings.local.json",
+      "parse": "json",
+      "pointer": "/env"
+    },
+    {
+      "kind": "mcp-server",
+      "scope": "project",
+      "path": "$PROJECT/.mcp.json",
+      "parse": "json",
+      "pointer": "/mcpServers",
+      "lockable": true
+    }
   ],
-  "sensitive_key_patterns": ["*token*", "*key*", "*secret*", "*password*", "*credential*", "*auth*", "env", "headers", "args", "*url*"],
+  "sensitive_key_patterns": [
+    "*token*",
+    "*key*",
+    "*secret*",
+    "*password*",
+    "*credential*",
+    "*auth*",
+    "env",
+    "headers",
+    "args",
+    "*url*"
+  ],
   "resolution": {
-    "mcp-server": { "mode": "override", "order": ["project", "user"] },
-    "skill": { "mode": "override", "order": ["user", "project"] },
-    "instruction-file": { "mode": "concatenate" },
-    "permission-rule": { "mode": "merge" },
-    "model-setting": { "mode": "key-override", "order": ["managed", "project", "user"] },
-    "env-var-name": { "mode": "key-override", "order": ["managed", "project", "user"] }
+    "mcp-server": {
+      "mode": "override",
+      "order": [
+        "project",
+        "user"
+      ]
+    },
+    "skill": {
+      "mode": "override",
+      "order": [
+        "user",
+        "project"
+      ]
+    },
+    "instruction-file": {
+      "mode": "concatenate"
+    },
+    "permission-rule": {
+      "mode": "merge"
+    },
+    "model-setting": {
+      "mode": "key-override",
+      "order": [
+        "managed",
+        "project",
+        "user"
+      ]
+    },
+    "env-var-name": {
+      "mode": "key-override",
+      "order": [
+        "managed",
+        "project",
+        "user"
+      ]
+    }
   }
 }

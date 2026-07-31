@@ -522,6 +522,7 @@ a finding:
 | `scope` | optional non-empty string, copied onto the item's attributes |
 | `parse` | optional `json` or `toml`, and only alongside `path` |
 | `pointer` | optional RFC 6901 JSON pointer, and only alongside `parse` |
+| `lockable` | optional boolean, false by omission: whether this probe's items are pinned into `agent.lock` |
 <!-- PROBE_FIELDS_END -->
 
 `glob` and `path` both pass `check_glob` at **load** time, under the rules in Adapter glob safety
@@ -883,6 +884,38 @@ readable.
 
 Exit codes: `0` clean, `1` findings with every ledger readable, `2` at least one ledger could
 not be read (missing, invalid JSON, or not a JSON object).
+
+## Pinning the supply chain: `agent.lock`
+
+```text
+python assets/scripts/dashboard.py lock <ledger> --from BASE-YYYY-NNN --out agent.lock
+python assets/scripts/dashboard.py lock <ledger> --check agent.lock
+```
+
+A baseline answers **"what was here that day"** — an observation, dated and immutable. A lockfile
+answers **"what should be here"** — declared intent, small enough to read in a diff, committed to
+git, and checked by CI. The difference is the one between a `pip freeze` filed in a log and a
+`requirements.lock` in the repository.
+
+`--check` compares the lockfile against the baseline it names and **reads nothing from the
+environment**. Verifying against the disk as it is *now* already has a command — `drift` — and
+giving one question two answers is worse than either. Run both when you want both.
+
+Differences use a closed vocabulary: `added`, `removed`, `changed` (a different digest),
+`state_changed`. Exit codes: `0` identical, `1` any difference, `2` a tool error.
+
+Only kinds an adapter marks `lockable` are pinned — the ones naming an installable artifact
+(`skill`, `plugin`, `mcp-server`, `agent`, `command`, `hook`). Instruction files, model settings,
+permission rules and environment variable names are deliberately left out: a lockfile that fails
+CI because somebody edited `CLAUDE.md` is one somebody switches off in the first week.
+
+A lockfile carries no timestamp and no absolute path, so two machines with the same configuration
+produce identical bytes. A mismatched `client` or `platform` is refused outright rather than
+compared, because comparing across either would report every entry as both added and removed.
+
+**What a green `--check` does and does not say.** It says nothing changed since the pin. It says
+nothing about whether what was pinned is trustworthy — that is what evidence, review and the
+audit workflow are for.
 
 ## Tamper-evidence: the hash chain
 

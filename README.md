@@ -156,6 +156,17 @@ Both are read-only like `scan` and print one JSON report on standard output. Exi
 everything in place (`drift`) or a healthy rollback (`rollback-preview`), `1` drift, risk, or
 findings, `2` a tool error.
 
+Pin which installable artifacts should be present, and check the pin in CI:
+
+```text
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py lock <path-to-ledger.json> --from BASE-YYYY-NNN --out agent.lock
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py lock <path-to-ledger.json> --check agent.lock
+```
+
+`agent.lock` is deterministic and meant to be committed: a baseline says what *was* there, a
+lockfile says what *should* be there. `--check` reads nothing from the environment — comparing
+against the disk as it is now is `drift`'s job, and one question must not have two answers.
+
 Make tampering with the ledger evident by hash-chaining its records, and inventory what the
 ledger holds against a regulatory framework's controls:
 
