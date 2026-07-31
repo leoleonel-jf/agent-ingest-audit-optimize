@@ -20,6 +20,15 @@ README = REPO_ROOT / "README.md"
 SUBMISSION = REPO_ROOT / "docs" / "SUBMISSION.md"
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 RELEASES_DIR = REPO_ROOT / "docs" / "releases"
+LEDGERLIB_CONSTANTS = (
+    REPO_ROOT
+    / "skills"
+    / "agent-ingest-audit-optimize"
+    / "assets"
+    / "scripts"
+    / "ledgerlib"
+    / "constants.py"
+)
 
 SEMVER = r"\d+\.\d+\.\d+"
 
@@ -102,6 +111,14 @@ class VersionConsistencyTests(unittest.TestCase):
 
     def test_changelog_newest_entry_matches(self) -> None:
         found = first_match(rf"^## ({SEMVER})", read_text(CHANGELOG), CHANGELOG)
+        self.assertEqual(found, self.version)
+
+    def test_ledgerlib_constants_tool_version_matches(self) -> None:
+        found = single_match(
+            rf'^TOOL_VERSION = "({SEMVER})"$',
+            read_text(LEDGERLIB_CONSTANTS),
+            LEDGERLIB_CONSTANTS,
+        )
         self.assertEqual(found, self.version)
 
     def test_release_document_exists_and_ref_matches(self) -> None:

@@ -34,10 +34,9 @@ import datetime
 import json
 from pathlib import Path
 
+from ledgerlib import drift, rollback
 from ledgerlib.constants import TOOL_VERSION
-from ledgerlib.drift import drift_report
 from ledgerlib.errors import LedgerError
-from ledgerlib.rollback import rollback_preview
 from ledgerlib.validate import validate_ledger
 
 
@@ -79,11 +78,12 @@ def serialize_payload(payload: dict) -> str:
     text = json.dumps(
         payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
     )
-    return (
+    text = (
         text.replace("<", "\\u003c")
         .replace(_LINE_SEPARATOR, "\\u2028")
         .replace(_PARAGRAPH_SEPARATOR, "\\u2029")
     )
+    return text.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
 def _generated_at(today: str | None) -> str:
@@ -98,7 +98,10 @@ def _generated_at(today: str | None) -> str:
     """
     now = datetime.datetime.now(datetime.timezone.utc)
     if today is not None:
-        pinned = datetime.date.fromisoformat(today)
+        try:
+            pinned = datetime.date.fromisoformat(today)
+        except ValueError as exc:
+            raise LedgerError(f"--today must be YYYY-MM-DD: {today!r}") from exc
         now = now.replace(year=pinned.year, month=pinned.month, day=pinned.day)
     return now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -234,7 +237,7 @@ def build_payload(
     resolved_lang = _resolve_lang(lang, ledger, messages)
 
     try:
-        drift, drift_messages, _drift_code = drift_report(
+        drift_result, drift_messages, _drift_code = drift.drift_report(
             ledger,
             adapter=adapter,
             user_config=user_config,
@@ -243,7 +246,7 @@ def build_payload(
         )
         messages.extend(drift_messages)
     except LedgerError as exc:
-        drift = {"error": str(exc)}
+        drift_result = {"error": str(exc)}
 
     previews: dict[str, object] = {}
     records = ledger.get("records")
@@ -255,7 +258,7 @@ def build_payload(
             continue
         run_id = record.get("id")
         try:
-            preview, preview_messages, _preview_code = rollback_preview(
+            preview, preview_messages, _preview_code = rollback.rollback_preview(
                 ledger,
                 run_id,
                 adapter=adapter,
@@ -275,10 +278,19 @@ def build_payload(
         "lang": resolved_lang,
         "ledger": ledger,
         "computed": {
-            "drift": drift,
+            "drift": drift_result,
             "previews": previews,
             "expired_evidence": _expired_evidence(ledger, today_value),
             "unreachable_projects": _unreachable_projects(ledger),
         },
     }
-    return payload, messages
+
+    seen: set[str] = set()
+    deduped_messages = []
+    for message in messages:
+        if message in seen:
+            continue
+        seen.add(message)
+        deduped_messages.append(message)
+
+    return payload, deduped_messages

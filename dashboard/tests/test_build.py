@@ -22,6 +22,7 @@ do), so every fixture here must be a document the validator accepts whole.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib.util
 import json
@@ -46,8 +47,10 @@ assert SPEC is not None and SPEC.loader is not None
 dashboard = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(dashboard)
 
-from ledgerlib import build as build_module  # noqa: E402
+from ledgerlib import drift as drift_module  # noqa: E402
+from ledgerlib import rollback as rollback_module  # noqa: E402
 from ledgerlib.build import build_payload, serialize_payload  # noqa: E402
+from ledgerlib.constants import TOOL_VERSION  # noqa: E402
 from ledgerlib.errors import LedgerError  # noqa: E402
 
 
@@ -84,6 +87,24 @@ class SerializePayloadTests(unittest.TestCase):
     def test_output_uses_sorted_keys_and_compact_separators(self) -> None:
         serialized = serialize_payload({"b": 1, "a": 2})
         self.assertEqual(serialized, '{"a":2,"b":1}')
+
+    def test_a_lone_surrogate_survives_serialization_as_utf8(self) -> None:
+        ledger_value = json.loads('{"t": "\\ud800"}')["t"]
+        serialized = serialize_payload({"title": ledger_value})
+        # The whole point of the fix: this must not raise UnicodeEncodeError.
+        serialized.encode("utf-8")
+        self.assertNotIn("<", serialized)
+        restored = json.loads(serialized)
+        self.assertEqual(restored["title"], ledger_value)
+
+    def test_backslash_then_less_than_has_no_literal_less_than_and_round_trips(
+        self,
+    ) -> None:
+        value = chr(92) + "<"
+        serialized = serialize_payload({"title": value})
+        self.assertNotIn("<", serialized)
+        restored = json.loads(serialized)
+        self.assertEqual(restored["title"], value)
 
 
 class BuildTestCase(unittest.TestCase):
@@ -253,17 +274,22 @@ class BuildTestCase(unittest.TestCase):
 class BuildPayloadEnvelopeTests(BuildTestCase):
     def test_payload_schema_mode_and_ledger_are_set(self) -> None:
         ledger = self.valid_ledger()
+        ledger_before = copy.deepcopy(ledger)
         payload, _ = self.build(ledger)
         self.assertEqual(payload["payload_schema"], 1)
         self.assertEqual(payload["mode"], "built")
         self.assertEqual(payload["ledger"], ledger)
+        self.assertEqual(payload["tool_version"], TOOL_VERSION)
+        # `build_payload` may hold the same ledger object rather than a copy;
+        # this pins that it never mutates it along the way.
+        self.assertEqual(ledger, ledger_before)
 
 
 class BuildPayloadDriftReuseTests(BuildTestCase):
     def test_computed_drift_is_exactly_drift_reports_report(self) -> None:
         sentinel_report = {"sentinel": True}
         with mock.patch.object(
-            build_module,
+            drift_module,
             "drift_report",
             return_value=(sentinel_report, [], 0),
         ) as spy:
@@ -273,7 +299,7 @@ class BuildPayloadDriftReuseTests(BuildTestCase):
 
     def test_a_drift_ledger_error_lands_as_computed_drift_error(self) -> None:
         with mock.patch.object(
-            build_module,
+            drift_module,
             "drift_report",
             side_effect=LedgerError("no adapter for client 'testclient'"),
         ):
@@ -307,7 +333,7 @@ class BuildPayloadPreviewsTests(BuildTestCase):
         run = self.full_run([self.target()], self.verified_backup())
         ledger = self.valid_ledger(records=[run])
         with mock.patch.object(
-            build_module,
+            rollback_module,
             "rollback_preview",
             side_effect=LedgerError("no record with id 'RUN-2026-000' exists"),
         ):
@@ -382,7 +408,7 @@ class BuildPayloadValidationTests(BuildTestCase):
     def test_nothing_is_computed_for_an_invalid_ledger(self) -> None:
         ledger = self.valid_ledger()
         del ledger["sequences"]
-        with mock.patch.object(build_module, "drift_report") as spy:
+        with mock.patch.object(drift_module, "drift_report") as spy:
             with self.assertRaises(LedgerError):
                 self.build(ledger)
         spy.assert_not_called()
@@ -423,6 +449,37 @@ class BuildPayloadGeneratedAtTests(BuildTestCase):
         generated_at = payload["generated_at"]
         self.assertTrue(generated_at.startswith("2026-07-31T"), generated_at)
         self.assertTrue(generated_at.endswith("Z"), generated_at)
+
+    def test_an_unparseable_today_raises_ledger_error(self) -> None:
+        with self.assertRaises(LedgerError) as ctx:
+            self.build(self.valid_ledger(), today="garbage")
+        self.assertEqual(
+            str(ctx.exception), "--today must be YYYY-MM-DD: 'garbage'"
+        )
+
+
+class BuildPayloadMessageDedupeTests(BuildTestCase):
+    def test_repeated_adapter_selection_notes_appear_once(self) -> None:
+        settings = self.write(self.user_config / "settings.json", "after\n")
+        run_one = self.full_run(
+            [self.target(after_digest=self.digest_of(settings))],
+            self.verified_backup("RUN-2026-000"),
+            run_id="RUN-2026-000",
+        )
+        run_two = self.full_run(
+            [self.target(after_digest=self.digest_of(settings))],
+            self.verified_backup("RUN-2026-001"),
+            run_id="RUN-2026-001",
+        )
+        ledger = self.valid_ledger(records=[run_one, run_two])
+        _, messages = self.build(ledger)
+        expected_note = (
+            f"selected adapter {self.adapter_path} for client 'testclient': "
+            "named by --adapter"
+        )
+        # drift_report plus two rollback_preview calls would each surface
+        # this exact note without dedupe -- it must survive only once.
+        self.assertEqual(messages.count(expected_note), 1, messages)
 
 
 if __name__ == "__main__":
