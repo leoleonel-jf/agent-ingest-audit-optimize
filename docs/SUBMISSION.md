@@ -92,4 +92,4 @@ The publisher must select countries or regions in the submission portal after co
 
 ## Release notes
 
-Skills-only submission. The plugin ingests external material, verifies recommendations against current primary evidence, creates scoped proposals, and applies only explicitly authorized improvements. It includes security boundaries, rollback procedures, portability guidance, deterministic packaging, a local governance ledger with a standard-library validator, and a 28-case evaluation suite.
+Skills-only submission. The plugin ingests external material, verifies recommendations against current primary evidence, creates scoped proposals, and applies only explicitly authorized improvements. It includes security boundaries, rollback procedures, portability guidance, deterministic packaging, a local governance ledger with a standard-library validator, and a 30-case evaluation suite.
