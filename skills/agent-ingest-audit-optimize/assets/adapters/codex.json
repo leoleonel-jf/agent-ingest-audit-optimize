@@ -1,5 +1,5 @@
 {
-  "adapter_version": 1,
+  "adapter_version": 2,
   "client": "codex",
   "expires_on": "2026-10-28",
   "anchors": {
@@ -25,5 +25,10 @@
       "parse": "toml" },
     { "kind": "skill", "scope": "system", "glob": "$SYSTEM_CONFIG/skills/*/SKILL.md" }
   ],
-  "sensitive_key_patterns": ["*token*", "*key*", "*secret*", "*password*", "*credential*", "*auth*", "env", "headers", "set", "projects", "args", "*url*"]
+  "sensitive_key_patterns": ["*token*", "*key*", "*secret*", "*password*", "*credential*", "*auth*", "env", "headers", "set", "projects", "args", "*url*"],
+  "resolution": {
+    "skill": { "mode": "override", "order": ["project", "user", "system"] },
+    "instruction-file": { "mode": "concatenate" },
+    "model-setting": { "mode": "key-override", "order": ["project", "user", "system"] }
+  }
 }

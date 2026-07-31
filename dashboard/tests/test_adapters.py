@@ -74,6 +74,22 @@ def with_probe(probe: dict) -> dict:
     return data
 
 
+def with_resolution(resolution: dict, probes: list[dict] | None = None) -> dict:
+    data = minimal_adapter()
+    if probes is not None:
+        data["probes"] = probes
+    data["resolution"] = resolution
+    return data
+
+
+def scoped_probes(kind: str, *scopes: str) -> list[dict]:
+    """One probe of `kind` per scope, each declaring that scope."""
+    return [
+        {"kind": kind, "scope": scope, "glob": f"$USER_CONFIG/{scope}/x"}
+        for scope in scopes
+    ]
+
+
 class AdapterDocumentTests(unittest.TestCase):
     """One test per field rule in spec section 3.2, each on its own message."""
 
@@ -312,6 +328,195 @@ class AdapterDocumentTests(unittest.TestCase):
         self.assertEqual(self.findings(data), ["test: unknown fields: ['probe']"])
 
 
+class AdapterResolutionTests(unittest.TestCase):
+    """The optional `resolution` field, spec 2026-07-30 section 3.1.
+
+    An `order` must name exactly the scopes the probes of its kind declare:
+    an ordering that cannot rank every item it will meet is refused at load,
+    when the author can still fix it, not at drift time.
+    """
+
+    def findings(self, data: dict) -> list[str]:
+        return adapters.validate_adapter(data, source="test")
+
+    def test_an_adapter_without_resolution_validates(self) -> None:
+        """The field is optional: a version-1 adapter that predates it stays valid."""
+        data = minimal_adapter()
+        self.assertNotIn("resolution", data)
+        self.assertEqual(self.findings(data), [])
+
+    def test_a_well_formed_resolution_validates(self) -> None:
+        data = with_resolution(
+            {
+                "skill": {"mode": "override", "order": ["user", "project"]},
+                "instruction-file": {"mode": "concatenate"},
+            },
+            probes=scoped_probes("skill", "user", "project")
+            + scoped_probes("instruction-file", "user"),
+        )
+        self.assertEqual(self.findings(data), [])
+
+    def test_every_declared_mode_is_accepted(self) -> None:
+        for mode in sorted(constants.RESOLUTION_MODES):
+            with self.subTest(mode=mode):
+                rule: dict = {"mode": mode}
+                if mode in constants.ORDERED_RESOLUTION_MODES:
+                    rule["order"] = ["user"]
+                data = with_resolution(
+                    {"skill": rule}, probes=scoped_probes("skill", "user")
+                )
+                self.assertEqual(self.findings(data), [])
+
+    def test_resolution_not_an_object(self) -> None:
+        data = with_resolution([])
+        self.assertEqual(self.findings(data), ["test: resolution must be an object"])
+
+    def test_a_resolution_key_that_is_not_a_baseline_item_kind_is_refused(self) -> None:
+        data = with_resolution({"nonsense": {"mode": "merge"}})
+        self.assertEqual(
+            self.findings(data),
+            ["test: resolution has an invalid kind: 'nonsense'"],
+        )
+
+    def test_a_resolution_rule_that_is_not_an_object_is_refused(self) -> None:
+        data = with_resolution({"skill": "override"})
+        self.assertEqual(
+            self.findings(data), ["test: resolution['skill'] must be an object"]
+        )
+
+    def test_a_resolution_rule_missing_mode_is_refused(self) -> None:
+        data = with_resolution({"skill": {}})
+        self.assertEqual(
+            self.findings(data),
+            ["test: resolution['skill'] missing fields: ['mode']"],
+        )
+
+    def test_a_resolution_rule_with_an_unknown_field_is_refused(self) -> None:
+        data = with_resolution({"skill": {"mode": "merge", "wins": "user"}})
+        self.assertEqual(
+            self.findings(data),
+            ["test: resolution['skill'] has unknown fields: ['wins']"],
+        )
+
+    def test_a_mode_outside_the_four_is_refused_never_skipped(self) -> None:
+        """A mode nobody recognises would otherwise ship an ordering `drift`
+        silently ignores."""
+        data = with_resolution(
+            {"skill": {"mode": "wins", "order": ["user"]}},
+            probes=scoped_probes("skill", "user"),
+        )
+        self.assertEqual(
+            self.findings(data),
+            ["test: resolution['skill'] has an invalid mode: 'wins'"],
+        )
+
+    def test_order_missing_under_override_is_refused(self) -> None:
+        data = with_resolution(
+            {"skill": {"mode": "override"}}, probes=scoped_probes("skill", "user")
+        )
+        self.assertEqual(
+            self.findings(data),
+            ["test: resolution['skill'] mode 'override' requires order"],
+        )
+
+    def test_order_missing_under_key_override_is_refused(self) -> None:
+        data = with_resolution(
+            {"skill": {"mode": "key-override"}},
+            probes=scoped_probes("skill", "user"),
+        )
+        self.assertEqual(
+            self.findings(data),
+            ["test: resolution['skill'] mode 'key-override' requires order"],
+        )
+
+    def test_order_present_under_merge_is_refused(self) -> None:
+        data = with_resolution(
+            {"skill": {"mode": "merge", "order": ["user"]}},
+            probes=scoped_probes("skill", "user"),
+        )
+        self.assertEqual(
+            self.findings(data),
+            ["test: resolution['skill'] mode 'merge' forbids order"],
+        )
+
+    def test_order_present_under_concatenate_is_refused(self) -> None:
+        data = with_resolution(
+            {"skill": {"mode": "concatenate", "order": ["user"]}},
+            probes=scoped_probes("skill", "user"),
+        )
+        self.assertEqual(
+            self.findings(data),
+            ["test: resolution['skill'] mode 'concatenate' forbids order"],
+        )
+
+    def test_order_that_is_not_an_array_of_scope_names_is_refused(self) -> None:
+        for order in ([], "user", ["user", 3], [""]):
+            with self.subTest(order=order):
+                data = with_resolution(
+                    {"skill": {"mode": "override", "order": order}},
+                    probes=scoped_probes("skill", "user"),
+                )
+                self.assertEqual(
+                    self.findings(data),
+                    [
+                        "test: resolution['skill'] order must be a non-empty "
+                        f"array of scope names: {order!r}"
+                    ],
+                )
+
+    def test_order_naming_a_scope_no_probe_of_that_kind_declares_is_refused(
+        self,
+    ) -> None:
+        data = with_resolution(
+            {"skill": {"mode": "override", "order": ["user", "project"]}},
+            probes=scoped_probes("skill", "user"),
+        )
+        self.assertEqual(
+            self.findings(data),
+            [
+                "test: resolution['skill'] order names a scope no skill probe "
+                "declares: 'project'"
+            ],
+        )
+
+    def test_a_scope_declared_only_by_another_kinds_probe_does_not_count(self) -> None:
+        """Scopes are ranked per kind; an agent probe cannot vouch for a skill order."""
+        data = with_resolution(
+            {"skill": {"mode": "override", "order": ["user", "project"]}},
+            probes=scoped_probes("skill", "user") + scoped_probes("agent", "project"),
+        )
+        self.assertEqual(
+            self.findings(data),
+            [
+                "test: resolution['skill'] order names a scope no skill probe "
+                "declares: 'project'"
+            ],
+        )
+
+    def test_order_omitting_a_scope_some_probe_declares_is_refused(self) -> None:
+        data = with_resolution(
+            {"skill": {"mode": "override", "order": ["user"]}},
+            probes=scoped_probes("skill", "user", "project"),
+        )
+        self.assertEqual(
+            self.findings(data),
+            [
+                "test: resolution['skill'] order omits a scope skill probes "
+                "declare: 'project'"
+            ],
+        )
+
+    def test_order_with_a_duplicate_scope_is_refused(self) -> None:
+        data = with_resolution(
+            {"skill": {"mode": "override", "order": ["user", "project", "user"]}},
+            probes=scoped_probes("skill", "user", "project"),
+        )
+        self.assertEqual(
+            self.findings(data),
+            ["test: resolution['skill'] order repeats a scope: 'user'"],
+        )
+
+
 class AdapterPathSafetyAtLoadTests(unittest.TestCase):
     """`check_glob` runs at load, before any probe could expand."""
 
@@ -425,9 +630,11 @@ class SchemaAgreementTests(unittest.TestCase):
         )
 
     def test_schema_properties_equal_the_validator_known_fields(self) -> None:
-        self.assertEqual(
-            set(self.schema["properties"]), set(adapters.REQUIRED_ADAPTER_FIELDS)
-        )
+        # `ADAPTER_FIELDS`, not `REQUIRED_ADAPTER_FIELDS`: `resolution` is
+        # optional, so it appears in `properties` and not in `required`, and
+        # comparing `properties` against the required set would refuse every
+        # optional field the validator knows.
+        self.assertEqual(set(self.schema["properties"]), set(adapters.ADAPTER_FIELDS))
 
     def test_schema_probe_required_equals_the_validator_required_probe_fields(
         self,
@@ -445,6 +652,45 @@ class SchemaAgreementTests(unittest.TestCase):
         self.assertEqual(
             set(self.probe["properties"]["parse"]["enum"]), set(adapters.PARSE_FORMATS)
         )
+
+    def test_schema_resolution_keys_are_the_baseline_item_kinds(self) -> None:
+        resolution = self.schema["properties"]["resolution"]
+        self.assertEqual(
+            set(resolution["propertyNames"]["enum"]),
+            set(constants.BASELINE_ITEM_KINDS),
+        )
+
+    def test_schema_resolution_rule_required_equals_the_validator_required_fields(
+        self,
+    ) -> None:
+        rule = self.schema["definitions"]["resolution_rule"]
+        self.assertEqual(set(rule["required"]), set(adapters.REQUIRED_RESOLUTION_FIELDS))
+
+    def test_schema_resolution_rule_properties_equal_the_validator_known_fields(
+        self,
+    ) -> None:
+        rule = self.schema["definitions"]["resolution_rule"]
+        self.assertEqual(set(rule["properties"]), set(adapters.RESOLUTION_FIELDS))
+
+    def test_schema_resolution_mode_enum_equals_the_validator_modes(self) -> None:
+        rule = self.schema["definitions"]["resolution_rule"]
+        self.assertEqual(
+            set(rule["properties"]["mode"]["enum"]), set(constants.RESOLUTION_MODES)
+        )
+
+    def test_schema_order_requirement_splits_the_modes_like_the_validator(self) -> None:
+        """`order` required under the ordered modes, forbidden under the rest."""
+        ordered, unordered = self.schema["definitions"]["resolution_rule"]["oneOf"]
+        self.assertEqual(
+            set(ordered["properties"]["mode"]["enum"]),
+            set(constants.ORDERED_RESOLUTION_MODES),
+        )
+        self.assertIn("order", ordered["required"])
+        self.assertEqual(
+            set(unordered["properties"]["mode"]["enum"]),
+            set(constants.RESOLUTION_MODES) - set(constants.ORDERED_RESOLUTION_MODES),
+        )
+        self.assertEqual(unordered["not"], {"required": ["order"]})
 
 
 class AnchorRootTests(unittest.TestCase):
@@ -705,6 +951,83 @@ class BundledAdapterTests(unittest.TestCase):
                 ]
                 self.assertTrue(patterns, path.name)
                 self.assertIn("env", patterns)
+
+
+class ShippedResolutionTests(unittest.TestCase):
+    """The resolution data the three adapters declare, spec section 3.1.
+
+    Exact equality on the whole map, never membership: a kind added without a
+    source would slip past a membership test, and undeclared is the recorded
+    state for a kind whose cross-scope semantics the research did not verify.
+    """
+
+    @staticmethod
+    def adapter(name: str) -> dict:
+        return json.loads((ADAPTERS_DIR / name).read_text(encoding="utf-8"))
+
+    def test_every_shipped_adapter_carries_adapter_version_2(self) -> None:
+        """Version 2 is the generation that declares resolution data."""
+        paths = sorted(ADAPTERS_DIR.glob("*.json"))
+        self.assertTrue(paths, f"no adapters found in {ADAPTERS_DIR}")
+        for path in paths:
+            with self.subTest(adapter=path.name):
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(data["adapter_version"], 2)
+
+    def test_claude_code_declares_exactly_the_researched_resolutions(self) -> None:
+        self.assertEqual(
+            self.adapter("claude-code.json")["resolution"],
+            {
+                "mcp-server": {"mode": "override", "order": ["project", "user"]},
+                "skill": {"mode": "override", "order": ["user", "project"]},
+                "instruction-file": {"mode": "concatenate"},
+                "permission-rule": {"mode": "merge"},
+                "model-setting": {"mode": "key-override", "order": ["project", "user"]},
+                "env-var-name": {"mode": "key-override", "order": ["project", "user"]},
+            },
+        )
+
+    def test_claude_code_skill_order_is_user_before_project(self) -> None:
+        """The inversion the research warns about, asserted as data.
+
+        Settings resolve project before user; skills resolve enterprise ->
+        personal -> project, and reusing one resolver for both is a
+        correctness bug, not a simplification. The settings-order habit
+        produces exactly ["project", "user"] here.
+        """
+        skill = self.adapter("claude-code.json")["resolution"]["skill"]
+        self.assertEqual(skill, {"mode": "override", "order": ["user", "project"]})
+
+    def test_claude_code_declares_nothing_for_unverified_kinds(self) -> None:
+        """Undeclared is the recorded state for unverified semantics.
+
+        No primary source in the research states cross-scope behaviour for
+        these four kinds, and this project ships no ordering nobody verified.
+        Whoever adds one must bring a source and delete its entry here.
+        """
+        resolution = self.adapter("claude-code.json")["resolution"]
+        for kind in ("hook", "agent", "command", "plugin"):
+            with self.subTest(kind=kind):
+                self.assertNotIn(kind, resolution)
+
+    def test_codex_declares_exactly_the_researched_resolutions(self) -> None:
+        """The research's chains restricted to probed scopes: no admin probe,
+        so no admin scope in the skill order."""
+        self.assertEqual(
+            self.adapter("codex.json")["resolution"],
+            {
+                "skill": {"mode": "override", "order": ["project", "user", "system"]},
+                "instruction-file": {"mode": "concatenate"},
+                "model-setting": {
+                    "mode": "key-override",
+                    "order": ["project", "user", "system"],
+                },
+            },
+        )
+
+    def test_generic_declares_no_resolution(self) -> None:
+        """An adapter that probes nothing has nothing to rank."""
+        self.assertNotIn("resolution", self.adapter("generic.json"))
 
 
 class SelectAdapterTests(unittest.TestCase):

@@ -465,6 +465,7 @@ Every top-level field is required, and any other field is a finding:
 | `anchors` | object; each key an anchor name in `$NAME` form, each value a non-empty array of candidate roots |
 | `probes` | array, and it may be empty — an adapter that probes nothing is the entire point of `generic.json` |
 | `sensitive_key_patterns` | array of non-empty strings; required, and may be empty |
+| `resolution` | optional object mapping a baseline item kind to how the client resolves that kind across scopes — `mode` is one of `override`, `key-override`, `merge`, `concatenate`; `order` (highest precedence first) is required under the first two, forbidden under the last two, and must name exactly the scopes the probes of that kind declare |
 <!-- ADAPTER_FIELDS_END -->
 
 **Anchor candidates are tried in order and the first that exists wins.** A candidate is either
