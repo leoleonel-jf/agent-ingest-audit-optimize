@@ -804,6 +804,7 @@ footer {
     "changes.authorized": "authorized on",
     "changes.deviations": "Plan deviations",
     "changes.self_reported": "The agent that ran this change stated this field; nothing checked it. Only a page produced by dashboard.py build carries verified digests, drift states, and rollback previews.",
+    "changes.self_reported_other": "This run also named other fields as self-reported, with no heading of their own on this page:",
 
     "provenance.intro": "One entry per target, and under it every run that touched it: the proposal each run carried out, the material that proposal came from, and the evidence that material rests on.",
     "provenance.runs": "runs",
@@ -822,6 +823,7 @@ footer {
     "rollback.no_backup_heading": "Runs with no backup",
     "rollback.no_backup": "These runs recorded no backup, so there is nothing to preview and nothing to restore from. They are listed in the Changes panel like any other run.",
     "rollback.preview_missing": "No preview was computed for this run, so nothing below it can be promised.",
+    "rollback.degraded": "The preview computation failed while this page was built, so it is missing here rather than showing an empty preview. Compute a live one with: dashboard.py rollback-preview \u003cledger> RUN-ID",
 
     "rollback.tested.NOT_TESTED.tip": "Nobody tried undoing this run: the rollback is written down and has never been exercised.",
     "rollback.tested.PARTIAL.tip": "Part of the rollback was exercised, and the rest was not.",
@@ -1015,6 +1017,7 @@ footer {
     "changes.authorized": "autorizada em",
     "changes.deviations": "Desvios do plano",
     "changes.self_reported": "O agente que executou esta mudança afirmou este campo; nada o conferiu. Só uma página produzida pelo dashboard.py build traz digests, estados de drift e prévias de rollback verificados.",
+    "changes.self_reported_other": "Esta execução também citou outros campos como autoafirmados, sem seção própria nesta página:",
 
     "provenance.intro": "Uma entrada por alvo e, embaixo dela, cada execução que o tocou: a proposta que cada execução cumpriu, o material de onde essa proposta veio e a evidência em que esse material se apoia.",
     "provenance.runs": "execuções",
@@ -1022,17 +1025,18 @@ footer {
     "provenance.material": "material",
     "provenance.no_material": "Nenhum material está vinculado a esta proposta, então a cadeia para aqui.",
 
-    "rollback.intro": "Para cada execução que guardou um backup: o que desfazê-la restauraria, o que ela deixaria intacto, o que não conseguiria restaurar e o que não dá para desfazer de jeito nenhum. Os quatro conjuntos aparecem sempre, inclusive os vazios.",
+    "rollback.intro": "Para cada execução que guardou um backup: o que desfazê-la restauraria, o que ela deixaria intacto, o que não conseguiria restaurar e o que não pode ser desfeito. Os quatro conjuntos aparecem sempre, inclusive os vazios.",
     "rollback.indicator": "prognóstico",
     "rollback.backup": "backup",
     "rollback.tested": "rollback testado",
     "rollback.restorable": "Será restaurado",
-    "rollback.cannot_restore": "Não dá para restaurar",
+    "rollback.cannot_restore": "Não é possível restaurar",
     "rollback.not_touched": "Não será alterado",
     "rollback.residual": "Efeitos residuais — desfazer a execução não desfaz estes",
     "rollback.no_backup_heading": "Execuções sem backup",
     "rollback.no_backup": "Estas execuções não registraram backup, então não há o que prever nem de onde restaurar. Elas aparecem no painel Mudanças como qualquer outra execução.",
     "rollback.preview_missing": "Nenhuma prévia foi calculada para esta execução, então nada abaixo dela pode ser prometido.",
+    "rollback.degraded": "O cálculo da prévia falhou durante a geração desta página, então está faltando aqui em vez de mostrar uma prévia vazia. Calcule uma ao vivo com: dashboard.py rollback-preview \u003cledger> RUN-ID",
 
     "rollback.tested.NOT_TESTED.tip": "Ninguém tentou desfazer esta execução: o rollback está escrito e nunca foi exercitado.",
     "rollback.tested.PARTIAL.tip": "Parte do rollback foi exercitada, e o resto não.",
@@ -1204,6 +1208,31 @@ footer {
     HEALTHY: "info",
     AT_RISK: "warning",
     BROKEN: "error"
+  };
+
+  /* The exact four keys `rollback_preview`'s report carries for design spec
+     section 11's four sets, in the order they render. This is the whole
+     contract between this file and `ledgerlib/rollback.py`: declared once,
+     as data, so a test can read it out of this source and compare it
+     against a live report's own keys rather than against a second
+     hand-typed copy that could drift from either side unnoticed. A rename
+     on either end -- here, or in the report `rollback_preview` builds --
+     leaves the two lists disagreeing and fails
+     `dashboard/tests/test_rollback.py`'s contract test. */
+  var PREVIEW_SETS = [
+    "will_be_restored", "cannot_be_restored", "will_not_change", "residual_effects"
+  ];
+
+  /* Per set: the label this page shows it under, and whether that set's
+     rows carry a reason worth a second line (`cannot_be_restored` alone
+     does -- a target the preview could not restore always says why). Keyed
+     by `PREVIEW_SETS`' own literal strings, never by anything the ledger
+     supplies, so this is a plain object rather than an `own()`-guarded one. */
+  var PREVIEW_SET_META = {
+    will_be_restored: { labelKey: "rollback.restorable", withReason: false },
+    cannot_be_restored: { labelKey: "rollback.cannot_restore", withReason: true },
+    will_not_change: { labelKey: "rollback.not_touched", withReason: false },
+    residual_effects: { labelKey: "rollback.residual", withReason: false }
   };
 
   /* `rollback.tested` as severities. A rollback nobody exercised is a
@@ -1637,6 +1666,46 @@ footer {
     );
   }
 
+  /* `self_reported` is an open list: a run can name any field, not only the
+     ones this page happens to have a heading for. `selfReportedBadge` only
+     ever renders next to a heading it already knows -- `result`, `targets`
+     -- so a name the run listed and this page has no heading for used to
+     vanish silently. Design spec section 7.4 asks for every listed field to
+     be marked visibly, so whatever is left over after the known badges is
+     rendered here, once, with the field's own name as text: the only way to
+     show a field this page has no other place for. Field names are ledger
+     strings and travel through `h()`/`data-field` exactly as the known
+     badges do -- never as an object key -- so a name like "__proto__" is
+     just a string on screen, not a lookup. */
+  function selfReportedLeftover(record, known) {
+    var leftover = selfReportedFields(record).filter(function (name) {
+      return known.indexOf(name) === -1;
+    });
+    if (leftover.length === 0) { return null; }
+    return h(
+      "p",
+      { class: "note" },
+      t("changes.self_reported_other") + " ",
+      leftover.map(function (name) {
+        return [
+          h(
+            "span",
+            {
+              class: "marker",
+              "data-field": name,
+              title: tipFor("changes.self_reported")
+            },
+            h("span", { class: "glyph", "aria-hidden": "true" }, GLYPHS.warning),
+            h("code", { lang: "en" }, name),
+            " ",
+            h("span", { lang: "en" }, SELF_REPORTED)
+          ),
+          " "
+        ];
+      })
+    );
+  }
+
   /* The digest pair is what "before and after" means here: the ledger stores
      digests, not file bodies, so there is nothing in this document to diff.
      Twelve hex characters on screen, the whole value in the tooltip. A null
@@ -1657,11 +1726,21 @@ footer {
      so a cell built without one loses its heading at 360px and nowhere
      else -- which is exactly the kind of break nothing notices. */
 
-  function gridTable(captionKey, headerKeys, rows) {
+  /* `captionSuffix`, when given, is a second text node appended after the
+     translated caption -- never interpolated into the dictionary string, so
+     the caption stays one whole sentence per language and the per-table
+     identifier (a run id, here) is unambiguously a second, distinct run of
+     text rather than something a translator could reorder into the middle
+     of a sentence. Every run's targets table shares one `changes.caption`
+     key; this is what makes each one's accessible name distinct anyway. */
+  function gridTable(captionKey, headerKeys, rows, captionSuffix) {
+    var caption = captionSuffix === undefined || captionSuffix === null
+      ? h("caption", null, t(captionKey))
+      : h("caption", null, t(captionKey), " ", captionSuffix);
     return h(
       "table",
       { class: "grid-table" },
-      h("caption", null, t(captionKey)),
+      caption,
       h("thead", null, h("tr", null, headerKeys.map(function (key) {
         return h("th", { scope: "col" }, t(key));
       }))),
@@ -2205,11 +2284,17 @@ footer {
      "This page never computed it" is a static page and one command away;
      "this computation failed while the page was built" is a broken build,
      and rerunning the same command may not fix it. Both show no number --
-     that part is not negotiable, since a zero would read as an all-clear. */
-  function unavailableNoteKey(key, commandKey) {
+     that part is not negotiable, since a zero would read as an all-clear.
+
+     `degradedKey` defaults to `card.degraded`, which is written for an
+     overview card ("the count below is missing"). A caller with no count
+     below it -- the Rollback panel, whose own degraded copy names its own
+     command instead -- passes its own key so the sentence matches where it
+     actually appears. */
+  function unavailableNoteKey(key, commandKey, degradedKey) {
     var computed = PAYLOAD.computed;
     if (computed && typeof computed === "object" && isError(computed[key])) {
-      return "card.degraded";
+      return degradedKey || "card.degraded";
     }
     return commandKey;
   }
@@ -2474,6 +2559,8 @@ footer {
       selfReportedBadge(record, "targets")
     ));
     block.appendChild(targetsTable(record, states));
+    var leftover = selfReportedLeftover(record, ["result", "targets"]);
+    if (leftover !== null) { block.appendChild(leftover); }
     return block;
   }
 
@@ -2498,7 +2585,7 @@ footer {
     ]);
     return gridTable("changes.caption", headers, targets.map(function (target) {
       return targetRow(target, states);
-    }));
+    }), textOrDash(record.id));
   }
 
   function targetRow(target, states) {
@@ -2781,7 +2868,7 @@ footer {
          a build whose previews failed is not. */
       section.appendChild(statusBlock(
         "warning",
-        t(unavailableNoteKey("previews", "panel.rollback.empty"))
+        t(unavailableNoteKey("previews", "panel.rollback.empty", "rollback.degraded"))
       ));
     } else {
       section.appendChild(h("p", { class: "note" }, t("rollback.intro")));
@@ -2864,10 +2951,10 @@ footer {
       block.appendChild(h("p", { class: "note" }, t("rollback.preview_missing")));
       return block;
     }
-    appendSet(block, "rollback.restorable", preview.will_be_restored, false);
-    appendSet(block, "rollback.cannot_restore", preview.cannot_be_restored, true);
-    appendSet(block, "rollback.not_touched", preview.will_not_change, false);
-    appendSet(block, "rollback.residual", preview.residual_effects, false);
+    PREVIEW_SETS.forEach(function (key) {
+      var meta = PREVIEW_SET_META[key];
+      appendSet(block, meta.labelKey, preview[key], meta.withReason);
+    });
     return block;
   }
 

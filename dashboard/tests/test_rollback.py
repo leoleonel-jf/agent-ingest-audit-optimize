@@ -29,6 +29,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 import shutil
 import tempfile
 import unittest
@@ -44,6 +45,14 @@ SCRIPT = (
     / "assets"
     / "scripts"
     / "dashboard.py"
+)
+TEMPLATE_PATH = (
+    REPO_ROOT
+    / "skills"
+    / "agent-ingest-audit-optimize"
+    / "assets"
+    / "templates"
+    / "dashboard.html"
 )
 SPEC = importlib.util.spec_from_file_location("dashboard", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -252,6 +261,73 @@ class FourSetsTests(RollbackTestCase):
             self.assertEqual(len(report["will_be_restored"]), 1, report)
             self.assertEqual(report["will_not_change"], [], report)
             self.assertEqual(report["cannot_be_restored"], [], report)
+
+
+class PreviewSetContractTests(RollbackTestCase):
+    """M3: the four set-key names are a contract between this module and
+    the shell template, and until now nothing pinned the two sides
+    together -- only a human reading both files at once could have noticed
+    a rename in either one.
+
+    `dashboard.html` declares `var PREVIEW_SETS = [...]`, the literal list
+    its Rollback renderer loops over to pull each set out of a live preview
+    (`skills/agent-ingest-audit-optimize/assets/templates/dashboard.html`,
+    `rollbackBlock`). This test extracts that array by regex, straight out
+    of the shipped template source, and compares it against the actual keys
+    a real `rollback_preview()` call returns -- not against a second
+    hand-typed tuple that could itself drift from either side. `SETS`
+    above is checked too, since it is what the rest of this suite already
+    asserts against by name; if a rename slipped past both `PREVIEW_SETS`
+    and `SETS` in the same change, this second comparison is what would
+    still catch it, because it is computed from the live report both times.
+
+    A rename on either side breaks this test, in different ways: renaming
+    a key in `dashboard.html`'s `PREVIEW_SETS` makes the template's set
+    disagree with the report's; renaming a key in `rollback_preview`'s
+    `report` dict does the same from the other side. Both directions were
+    exercised by hand while writing this test (see the report's M3
+    transcript for both simulated renames and their failures) and reverted
+    before landing.
+    """
+
+    NON_SET_KEYS = frozenset({"run", "indicator", "backup"})
+
+    def template_preview_sets(self) -> tuple[str, ...]:
+        text = TEMPLATE_PATH.read_text(encoding="utf-8")
+        match = re.search(r"var PREVIEW_SETS = \[(.*?)\];", text, re.DOTALL)
+        assert match is not None, (
+            "dashboard.html no longer declares `var PREVIEW_SETS = [...]`"
+        )
+        return tuple(re.findall(r'"([^"]+)"', match.group(1)))
+
+    def test_the_templates_preview_sets_are_exactly_the_reports_own_keys(
+        self,
+    ) -> None:
+        template_sets = self.template_preview_sets()
+        report, _, _ = self.preview(
+            [self.run_record([self.in_place_target()], self.verified_backup())]
+        )
+        report_sets = set(report) - self.NON_SET_KEYS
+        self.assertEqual(
+            set(template_sets),
+            report_sets,
+            "the template's PREVIEW_SETS and rollback_preview's own report "
+            "keys disagree -- one side was renamed without the other",
+        )
+        # No duplicates and no stowaways: the template's list is the report's
+        # key set, not a superset or a subset of it.
+        self.assertEqual(len(template_sets), len(report_sets))
+
+    def test_the_templates_preview_sets_match_this_suites_own_sets_tuple(
+        self,
+    ) -> None:
+        """`SETS` above is what every other case in this file asserts
+        against by name. Comparing it here too means a rename that updated
+        `PREVIEW_SETS` and the live report but missed `SETS` -- or the
+        reverse -- still fails a test instead of quietly passing because
+        the one comparison above happened to still line up.
+        """
+        self.assertEqual(set(self.template_preview_sets()), set(SETS))
 
 
 class SetMembershipTests(RollbackTestCase):

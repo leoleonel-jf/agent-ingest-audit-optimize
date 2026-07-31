@@ -280,6 +280,7 @@ TASK_5_KEYS = (
     "changes.authorized",
     "changes.deviations",
     "changes.self_reported",
+    "changes.self_reported_other",
     "provenance.intro",
     "provenance.runs",
     "provenance.proposal",
@@ -296,6 +297,7 @@ TASK_5_KEYS = (
     "rollback.no_backup_heading",
     "rollback.no_backup",
     "rollback.preview_missing",
+    "rollback.degraded",
     "help.results",
 )
 
@@ -757,7 +759,12 @@ FIXTURE_LEDGER = {
             # panel has to be honest about rather than silently omit.
             "backup": None,
             "rollback": {"tested": "NOT_TESTED"},
-            "self_reported": ["targets"],
+            # I1: the run names two fields the Changes panel has no heading
+            # for -- "tests" is not a real ledger field at all, "backup" is
+            # real but belongs to Rollback -- so both used to vanish here
+            # with no badge at all. `RuntimeMaliciousKeyPanelTests` extends
+            # this same check with hostile names on top.
+            "self_reported": ["targets", "tests", "backup"],
         },
         # The newest run of the four, and undone: it must sort *below* both
         # findings despite being the most recent, because a change that was
@@ -1024,12 +1031,22 @@ STATIC_FIXTURE_PAYLOAD = {
     "computed": None,
 }
 
-# Design spec section 14: a build that succeeded with a sub-computation that
-# did not. The key holds an error message instead of a report, and the panel
-# that depends on it must name the missing guarantee rather than show a zero.
+# Design spec section 14: a build that succeeded with two sub-computations
+# that did not (drift, and -- I2 -- previews). Each key holds an error
+# message instead of a report, and the panel that depends on it must name
+# the missing guarantee rather than show a zero. Two degrade rather than one
+# so the fixture also proves the Rollback panel's own degraded sentence
+# (`rollback.degraded`) renders instead of the overview card's
+# (`card.degraded`), which is I2: before the fix, `unavailableNoteKey`
+# always returned `card.degraded`, and its "the count below" would have
+# printed in a panel that carries no count at all.
 DEGRADED_FIXTURE_PAYLOAD = dict(
     FIXTURE_PAYLOAD,
-    computed=dict(FIXTURE_COMPUTED, drift={"error": "unknown client 'nope'"}),
+    computed=dict(
+        FIXTURE_COMPUTED,
+        drift={"error": "unknown client 'nope'"},
+        previews={"error": "backup verification crashed"},
+    ),
 )
 
 # --- the I1 fixture: ledger strings used as plain-object keys -----------
@@ -1057,9 +1074,34 @@ MALICIOUS_KEY_FIXTURE_LEDGER = {
     "created": "2026-07-01",
     "updated": "2026-07-31",
     "id_authority": True,
-    "sequences": {"MAT": 0, "PROP": 0, "RUN": 0, "ADR": 2, "BASE": 1},
+    "sequences": {"MAT": 0, "PROP": 0, "RUN": 1, "ADR": 2, "BASE": 1},
     "known_projects": [],
     "records": [
+        {
+            # I1: the run names "targets" (a known Changes field), plus a
+            # hostile-looking string and two non-strings. `selfReportedBadge`
+            # and `selfReportedLeftover` only ever compare a listed name by
+            # value (`Array.indexOf`) and render it as text -- never use it
+            # as an object key -- so "__proto__" here must land as an inert
+            # badge, exactly like any other string, and the non-strings must
+            # be silently dropped by `selfReportedFields`'s own type filter.
+            "id": "RUN-2026-HOSTILE",
+            "type": "RUN",
+            "title": "A run whose self_reported list carries hostile and non-string entries",
+            "status": "IMPLEMENTED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-07",
+            "updated": "2026-07-07",
+            "file": "records/RUN-2026-HOSTILE.md",
+            "links": {},
+            "evidence": [],
+            "result": "VALIDATED",
+            "targets": [],
+            "backup": None,
+            "rollback": {"tested": "NOT_TESTED"},
+            "self_reported": ["targets", "__proto__", None, 7],
+        },
         {
             "id": "toString",
             "type": "ADR",
@@ -1248,6 +1290,17 @@ MALICIOUS_KEY_PROBE = r"""
   facts.decisionsRows = bodyRows(decisions).length;
   facts.decisionsText = decisions.textContent;
 
+  // I1: the self-reported badges the hostile-names run rendered in
+  // Changes, wherever in its block they landed -- the known-field ones
+  // and the leftover line's alike.
+  var changes = document.getElementById("aio-panel-changes");
+  facts.changesBadges = byClass(changes, "marker").map(function (badge) {
+    return {
+      field: badge.attributes["data-field"] || null,
+      text: badge.textContent
+    };
+  });
+
   report(bad.length === 0 ? 0 : 1);
 }());
 """
@@ -1322,6 +1375,14 @@ PANEL_PROBE = r"""
           };
         }),
         headings: byTag(node, "H4").map(function (n) { return n.textContent; }),
+        // `appendSet` gives an empty set's placeholder its own
+        // `<p class="note">`, distinct from the note paragraph at the top
+        // of the block (the indicator/backup/tested line, which is also
+        // class "note" but is a longer sentence, never equal to the
+        // placeholder alone). M6: a case that wants to count empty sets
+        // compares against these exact strings rather than a substring of
+        // the whole block's text.
+        notes: byClass(node, "note").map(function (n) { return n.textContent; }),
         text: node.textContent
       };
     });
@@ -1394,6 +1455,7 @@ PANEL_PROBE = r"""
     vocab: byClass(changes, "vocab").map(function (n) { return n.textContent; }),
     texts: textValues(changes),
     anchors: byTag(changes, "A").length,
+    captions: byTag(changes, "CAPTION").map(function (n) { return n.textContent; }),
     text: changes.textContent
   };
 
@@ -2633,23 +2695,74 @@ class RuntimePanelTests(ShellTemplateTestCase):
         self.assertIn("Key", panel["headers"])
         self.assertIn("not a line-by-line diff", panel["text"])
 
+    def test_changes_gives_each_runs_targets_table_a_distinct_caption(self) -> None:
+        """M4: `changes.caption` is one shared sentence, repeated once per
+        run block (four runs, four tables) -- so on its own it is not an
+        accessible name a screen reader could use to tell one table from
+        another. The run id is appended as a second text node at render
+        time, never interpolated into the dictionary string, so every
+        language keeps one whole sentence and only gains a distinct suffix.
+        """
+        captions = self._panel("changes")["captions"]
+        self.assertEqual(len(captions), 4)
+        for run_id in ("RUN-2026-000", "RUN-2026-001", "RUN-2026-002", "RUN-2026-003"):
+            with self.subTest(run=run_id):
+                self.assertTrue(
+                    any(run_id in caption for caption in captions),
+                    captions,
+                )
+        self.assertEqual(len(captions), len(set(captions)))
+
     def test_changes_badges_exactly_the_fields_the_run_named(self) -> None:
         """Design spec section 5's marker, driven by `self_reported`.
 
-        `RUN-2026-000` lists only `targets`; `RUN-2026-001` lists `result`
-        too. A badge on a field the run did not name would be this page
-        inventing a doubt, and a missing badge would be it hiding one --
-        so the assertion is set equality, in both directions, per run.
+        `RUN-2026-000` lists only `targets`; `RUN-2026-001` lists `result`,
+        `backup`, and `rollback.tested` too. A badge on a field the run did
+        not name would be this page inventing a doubt, and a missing badge
+        would be it hiding one -- so the assertion is set equality, in both
+        directions, per run.
+
+        `backup` and `rollback.tested` have no heading of their own in the
+        Changes panel -- they belong to Rollback -- which is exactly I1's
+        finding: before the fix, a field this panel had no heading for was
+        silently unbadged here. `selfReportedLeftover` is what puts them on
+        screen, on the one extra line, rather than dropping them.
         """
         first = self._run_block("changes", "RUN-2026-000")
         self.assertEqual({badge["field"] for badge in first["badges"]}, {"targets"})
         second = self._run_block("changes", "RUN-2026-001")
         self.assertEqual(
-            {badge["field"] for badge in second["badges"]}, {"targets", "result"}
+            {badge["field"] for badge in second["badges"]},
+            {"targets", "result", "backup", "rollback.tested"},
         )
         for badge in first["badges"] + second["badges"]:
             with self.subTest(field=badge["field"]):
                 self.assertIn("SELF-REPORTED", badge["text"])
+
+    def test_changes_shows_self_reported_fields_that_have_no_heading_here(
+        self,
+    ) -> None:
+        """I1: design spec section 7.4 asks for every listed field to be
+        marked visibly. `RUN-2026-002` names `targets` (which already has a
+        badge, next to the "Targets" heading), plus `tests` (not a real
+        ledger field at all) and `backup` (a real one, but Rollback's, not
+        Changes'). Before the fix, the badge for the two unknown fields
+        never appeared anywhere on this panel -- not just unlabelled, gone.
+        The fix's whole promise is that a name the run listed is never
+        silently dropped, so all three must be visible, and the two that
+        have no heading of their own must carry their own name as text
+        since nothing else on the page names them.
+        """
+        block = self._run_block("changes", "RUN-2026-002")
+        self.assertEqual(
+            {badge["field"] for badge in block["badges"]},
+            {"targets", "tests", "backup"},
+        )
+        by_field = {badge["field"]: badge["text"] for badge in block["badges"]}
+        for field in ("tests", "backup"):
+            with self.subTest(field=field):
+                self.assertIn(field, by_field[field])
+                self.assertIn("SELF-REPORTED", by_field[field])
 
     def test_changes_labels_every_cell_for_the_card_fold(self) -> None:
         labels = self._panel("changes")["labels"]
@@ -2756,6 +2869,12 @@ class RuntimePanelTests(ShellTemplateTestCase):
         an empty set is an answer -- `BROKEN` restores nothing, and that is
         the finding. A panel that dropped the empty ones would make "nothing
         could be restored" and "this was never computed" look identical.
+
+        M6: the count is asserted against the dictionary's own
+        `value.none` string, fetched from the parsed dictionary rather than
+        hard-coded, and only within the set lists' own placeholders --
+        `notes`, not the whole block's text -- so a coincidental "none"
+        substring elsewhere in the block could never inflate it.
         """
         block = self._run_block("rollback", "RUN-2026-000")
         self.assertEqual(
@@ -2767,7 +2886,10 @@ class RuntimePanelTests(ShellTemplateTestCase):
                 "Residual effects — undoing the run does not undo these",
             ],
         )
-        self.assertEqual(block["text"].count("none"), 3)
+        none_label = json.loads(self.islands["aio-i18n"])["en"]["value.none"]
+        self.assertEqual(
+            sum(1 for note in block["notes"] if note == none_label), 3
+        )
 
     def test_rollback_shows_the_broken_indicator_and_its_reason(self) -> None:
         block = self._run_block("rollback", "RUN-2026-000")
@@ -3033,13 +3155,20 @@ class RuntimeStaticModePanelTests(RuntimePanelTests):
 
 @unittest.skipUnless(NODE, "node is not on PATH -- this suite needs it")
 class RuntimeDegradedPanelTests(ShellTemplateTestCase):
-    """Design spec section 14: one computation failed, one panel degrades.
+    """Design spec section 14: two computations failed, two panels degrade.
 
     The distinction this pins is the one a reader acts on. "Not computed on
     this page" is a static page and one command away; "this computation
     failed while the page was built" is a broken build, and running the same
     command again may not fix it. Both show no number, and they must not show
     the same sentence.
+
+    `previews` degrades alongside `drift` (I2): the overview's "Rollbacks at
+    risk" card and the Rollback panel itself both depend on it, and the two
+    must not read alike either. The card's `card.degraded` is written for a
+    card ("the count below is missing"); the panel has no count below it,
+    so it carries its own sentence (`rollback.degraded`) naming its own
+    command instead of quietly reusing the card's.
     """
 
     @classmethod
@@ -3076,14 +3205,48 @@ class RuntimeDegradedPanelTests(ShellTemplateTestCase):
         self.assertNotIn("dashboard.py drift", note)
 
     def test_the_other_cards_still_hold_their_numbers(self) -> None:
-        """One panel degrades, not all of them (design spec section 14)."""
-        self.assertEqual(self._card("Rollbacks at risk")["count"], "2")
+        """Two of the four indicator cards degrade in this fixture, not all
+        of them (design spec section 14): "Expired evidence" depends on
+        neither `drift` nor `previews`, so it still holds its number."""
         self.assertEqual(self._card("Expired evidence")["count"], "1")
 
     def test_inventory_falls_back_to_the_recorded_state(self) -> None:
         """A failed drift report is not a drift report: no chip, no claim."""
         self.assertEqual(self.facts["inventory"]["vocab"], [])  # type: ignore[attr-defined]
         self.assertEqual(self.facts["inventory"]["rows"], 3)  # type: ignore[attr-defined]
+
+    # --- I2: the Rollback panel's own degraded sentence -----------------
+
+    def test_the_rollbacks_card_shows_no_number_either(self) -> None:
+        """`previews` degrades too, so this card refuses a number the same
+        way "Drifted items" does."""
+        card = self._card("Rollbacks at risk")
+        self.assertIsNone(card["count"])
+        self.assertEqual(card["unavailable"], "unavailable")
+
+    def test_the_rollbacks_card_still_uses_the_generic_degraded_sentence(self) -> None:
+        """The overview card is not the panel: its degraded copy is written
+        for a card with a count below it, and that has not changed."""
+        note = self._card("Rollbacks at risk")["note"]
+        self.assertIn("count below", note)
+
+    def test_the_rollback_panel_names_its_own_failed_computation(self) -> None:
+        """I2: the panel's own sentence, not the overview card's. It must
+        still say the computation failed and still name a command a reader
+        can run for a live answer."""
+        text = self.facts["rollback"]["text"]  # type: ignore[attr-defined]
+        self.assertIn("failed", text)
+        self.assertIn("dashboard.py rollback-preview", text)
+
+    def test_the_rollback_panel_does_not_reuse_the_overview_cards_sentence(
+        self,
+    ) -> None:
+        """Before the fix, `unavailableNoteKey` had one degraded key
+        (`card.degraded`) for every caller, so this exact sentence -- written
+        for a card, and meaningless in a panel with no count below it --
+        would have appeared here too."""
+        text = self.facts["rollback"]["text"]  # type: ignore[attr-defined]
+        self.assertNotIn("count below", text)
 
 
 @unittest.skipUnless(NODE, "node is not on PATH -- this suite needs it")
@@ -3183,6 +3346,23 @@ class RuntimeMaliciousKeyPanelTests(ShellTemplateTestCase):
                 self.assertNotIn("function", css_class.lower())
                 self.assertNotIn("[native code]", css_class)
         self.assertIn("constructor", row["text"])
+
+    def test_a_hostile_self_reported_name_renders_as_inert_text(self) -> None:
+        """I1, run against the real shell: `RUN-2026-HOSTILE` names `targets`
+        (a known Changes field) and the string `"__proto__"` (unknown to
+        this panel, so it lands on the leftover line); a null and a number
+        are also in the list and must be silently dropped, exactly as they
+        already are for the known badges. Nothing here is a lookup -- a
+        listed name is only ever compared by value and rendered as text --
+        so a ledger string of `"__proto__"` is just a badge whose name reads
+        `"__proto__"`, never a route to `Object.prototype`.
+        """
+        badges = self.facts.get("changesBadges", [])
+        fields = {badge["field"] for badge in badges}
+        self.assertEqual(fields, {"targets", "__proto__"})
+        by_field = {badge["field"]: badge["text"] for badge in badges}
+        self.assertIn("__proto__", by_field["__proto__"])
+        self.assertIn("SELF-REPORTED", by_field["__proto__"])
 
 
 if __name__ == "__main__":
