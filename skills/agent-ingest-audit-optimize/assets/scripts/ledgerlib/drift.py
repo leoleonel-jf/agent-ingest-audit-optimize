@@ -34,7 +34,7 @@ import json
 import os
 import stat
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from ledgerlib.adapters import (
@@ -49,7 +49,7 @@ from ledgerlib.constants import (
 )
 from ledgerlib.errors import LedgerError, PathSafetyError
 from ledgerlib.paths import check_glob, file_digest, load_json, resolve_anchored
-from ledgerlib.scan import BUNDLED_ADAPTERS
+from ledgerlib.scan import BUNDLED_ADAPTERS, _resolve_pointer, redact, tomllib
 from ledgerlib.validate import validate_ledger
 
 
@@ -74,6 +74,13 @@ DRIFT_REASONS = frozenset(
         "not_regular_file",
         "appeared",
         "glob_failed",
+        # The pointer-recheck vocabulary. An absence recorded *inside* a file
+        # (`pointer_unresolved`, `no_match`) cannot be re-verified from the
+        # file's existence, so it is re-resolved -- or, when the baseline
+        # predates the recorded pointer, honestly not verified at all.
+        "pointer_unrecorded",
+        "parse_unavailable",
+        "unparseable",
     }
 )
 
@@ -85,7 +92,56 @@ DRIFT_REASONS = frozenset(
 _GLOB_CHARS = frozenset("*?[")
 
 
-def classify_item(item: object, resolved: Mapping[str, Path]) -> tuple[str, str | None]:
+def _recheck_pointer(
+    path: Path, attributes: Mapping[str, object], patterns: Sequence[str]
+) -> tuple[str, str | None]:
+    """Re-resolve a recorded in-file absence against the file as it is now.
+
+    This is the one place `drift` parses a configuration file, and it mirrors
+    `scan` exactly -- parse, then `redact` with the same patterns, then walk
+    the same pointer -- so the two commands cannot disagree about what
+    "absent" means: a pointer that `scan` could not resolve through a redacted
+    marker is equally unresolvable here. Nothing the parse produces survives
+    this function; the only outputs are a state and a reason, which is what
+    keeps a live secret out of a drift report even in memory-dump distance.
+
+    A baseline written before the pointer was recorded (0.2.5 and earlier)
+    has nothing to re-resolve and is `UNVERIFIABLE`, `pointer_unrecorded` --
+    the honest degradation, not a guess in either direction.
+    """
+    pointer = attributes.get("pointer")
+    fmt = attributes.get("parse")
+    if not isinstance(pointer, str) or not pointer or fmt not in ("json", "toml"):
+        return UNVERIFIABLE, "pointer_unrecorded"
+    if fmt == "toml" and tomllib is None:
+        return UNVERIFIABLE, "parse_unavailable"
+    try:
+        data = path.read_bytes()
+    except (OSError, MemoryError):
+        return UNVERIFIABLE, "unreadable"
+    try:
+        if fmt == "toml":
+            document: object = tomllib.loads(data.decode("utf-8"))
+        else:
+            document = json.loads(data)
+    except (ValueError, RecursionError):
+        return UNVERIFIABLE, "unparseable"
+    document = redact(document, patterns)
+    found, value = _resolve_pointer(document, pointer)
+    # `scan` records `not_present` both for a pointer that does not resolve
+    # (`pointer_unresolved`) and for one that resolves to an empty mapping
+    # (`no_match`); either condition holding now means the recorded absence
+    # holds. Anything else at the location is configuration that appeared.
+    if not found or (isinstance(value, dict) and not value):
+        return IN_PLACE, None
+    return DRIFTED, "appeared"
+
+
+def classify_item(
+    item: object,
+    resolved: Mapping[str, Path],
+    patterns: Sequence[str] = (),
+) -> tuple[str, str | None]:
     """One baseline item against the current environment: spec 3.2's table.
 
     `resolved` is the anchor-roots mapping `resolve_anchor_roots` returns --
@@ -136,6 +192,16 @@ def classify_item(item: object, resolved: Mapping[str, Path]) -> tuple[str, str 
             # Something is there but cannot be inspected: neither a verified
             # absence nor a verified arrival.
             return UNVERIFIABLE, reason
+        attributes = item.get("attributes")
+        recorded_reason = (
+            attributes.get("reason") if isinstance(attributes, dict) else None
+        )
+        if recorded_reason in ("pointer_unresolved", "no_match"):
+            # The baseline verified an absence *inside* this file, not of the
+            # file -- which existed at scan time too, or there would have been
+            # no document to walk. Its presence now answers nothing; the
+            # recorded location has to be re-resolved.
+            return _recheck_pointer(path, attributes, patterns)
         # A digest, a directory, a FIFO: something exists where the baseline
         # verified nothing did.
         return DRIFTED, "appeared"
@@ -470,8 +536,16 @@ def drift_report(
                 f"was not classified: {items!r}"
             )
             items = []
+        # The adapter's redaction patterns ride along so the pointer recheck
+        # walks the same document `scan` walked, not a more revealing one.
+        declared_patterns = document.get("sensitive_key_patterns")
+        patterns = (
+            tuple(p for p in declared_patterns if isinstance(p, str))
+            if isinstance(declared_patterns, list)
+            else ()
+        )
         for item in items:
-            state, reason = classify_item(item, roots)
+            state, reason = classify_item(item, roots, patterns)
             classified(state)
             attributes = item.get("attributes") if isinstance(item, dict) else None
             scope = (

@@ -245,6 +245,100 @@ class BaselineItemTests(DriftTestCase):
             self.assertIn(state, DRIFT_STATES)
 
 
+class PointerRecheckTests(DriftTestCase):
+    """Recorded in-file absences re-resolve the pointer, not the file.
+
+    The dogfood run that motivated these: three `pointer_unresolved` items
+    were reported `DRIFTED`/`appeared` minutes after their scan because the
+    classifier tested the file's existence -- and the file had existed at
+    scan time too, or there would have been no document to walk.
+    """
+
+    def pointer_item(self, **attribute_overrides: object) -> dict:
+        attributes: dict = {
+            "scope": "user",
+            "reason": "pointer_unresolved",
+            "pointer": "/env",
+            "parse": "json",
+        }
+        attributes.update(attribute_overrides)
+        return self.item(
+            kind="env-var-name",
+            name="settings.json/env",
+            anchor="$USER_CONFIG/settings.json",
+            state="not_present",
+            digest=None,
+            attributes=attributes,
+        )
+
+    def test_a_pointer_still_absent_in_an_existing_file_is_in_place(self) -> None:
+        self.write(self.user_config / "settings.json", '{"model": "opus"}\n')
+        state, reason = classify_item(self.pointer_item(), self.roots)
+        self.assertEqual((state, reason), ("IN_PLACE", None))
+
+    def test_a_pointer_that_now_resolves_is_drifted_appeared(self) -> None:
+        self.write(
+            self.user_config / "settings.json",
+            '{"model": "opus", "env": {"HTTP_PROXY": "http://proxy"}}\n',
+        )
+        state, reason = classify_item(self.pointer_item(), self.roots)
+        self.assertEqual((state, reason), ("DRIFTED", "appeared"))
+
+    def test_a_pointer_resolving_to_an_empty_mapping_is_in_place(self) -> None:
+        # `scan` records an empty mapping as `not_present`/`no_match`, so an
+        # empty mapping now is the same recorded absence, still holding.
+        self.write(self.user_config / "settings.json", '{"env": {}}\n')
+        state, reason = classify_item(self.pointer_item(), self.roots)
+        self.assertEqual((state, reason), ("IN_PLACE", None))
+
+    def test_a_recorded_no_match_that_now_has_keys_is_drifted(self) -> None:
+        self.write(
+            self.user_config / "settings.json", '{"env": {"NEW": "value"}}\n'
+        )
+        state, reason = classify_item(
+            self.pointer_item(reason="no_match"), self.roots
+        )
+        self.assertEqual((state, reason), ("DRIFTED", "appeared"))
+
+    def test_a_baseline_without_the_recorded_pointer_is_unverifiable(self) -> None:
+        # 0.2.5 baselines predate the recorded pointer: nothing to re-resolve,
+        # and neither IN_PLACE nor DRIFTED would be a verified answer.
+        self.write(self.user_config / "settings.json", '{"model": "opus"}\n')
+        item = self.pointer_item()
+        del item["attributes"]["pointer"]
+        del item["attributes"]["parse"]
+        state, reason = classify_item(item, self.roots)
+        self.assertEqual((state, reason), ("UNVERIFIABLE", "pointer_unrecorded"))
+
+    def test_a_file_that_no_longer_parses_is_unverifiable(self) -> None:
+        self.write(self.user_config / "settings.json", "{not json any more\n")
+        state, reason = classify_item(self.pointer_item(), self.roots)
+        self.assertEqual((state, reason), ("UNVERIFIABLE", "unparseable"))
+
+    def test_the_recheck_walks_the_redacted_document(self) -> None:
+        # `scan` redacts before the pointer walks, so a pointer aimed inside
+        # a redacted subtree recorded `pointer_unresolved` even though the
+        # raw document had the key. The recheck must mirror that -- with the
+        # same patterns -- or an absence that never stopped holding would be
+        # reported as configuration arriving.
+        self.write(
+            self.user_config / "settings.json",
+            '{"env": {"TOKEN": "value-that-must-stay-unread"}}\n',
+        )
+        item = self.pointer_item(pointer="/env/TOKEN")
+        state, reason = classify_item(item, self.roots, patterns=("env",))
+        self.assertEqual((state, reason), ("IN_PLACE", None))
+        # Without the patterns the same pointer resolves: the parity above is
+        # the redaction, not an accident of the fixture.
+        state, reason = classify_item(item, self.roots)
+        self.assertEqual((state, reason), ("DRIFTED", "appeared"))
+
+    def test_a_pointer_recheck_with_the_file_gone_is_in_place(self) -> None:
+        # No file at all certainly holds an in-file absence.
+        state, reason = classify_item(self.pointer_item(), self.roots)
+        self.assertEqual((state, reason), ("IN_PLACE", None))
+
+
 class RunTargetTests(DriftTestCase):
     """Design spec section 10's table, literally, plus the tie rule."""
 

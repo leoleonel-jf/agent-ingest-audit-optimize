@@ -531,7 +531,7 @@ def _parse_items(
         # record that it looked.
         return [_item(probe, name=f"{name}{pointer}", anchor=anchor,
                       state="not_present", reason="pointer_unresolved",
-                      portable=portable)]
+                      portable=portable, pointer=pointer, parse_format=fmt)]
 
     if not isinstance(value, dict) or _is_marker(value):
         # No mapping means no keys to enumerate: an array, a scalar, or a
@@ -541,7 +541,8 @@ def _parse_items(
 
     if not value:
         return [_item(probe, name=name, anchor=anchor, state="not_present",
-                      reason="no_match", portable=portable)]
+                      reason="no_match", portable=portable, pointer=pointer,
+                      parse_format=fmt)]
 
     # Sorted for the same reason glob matches are: a user reordering the keys
     # in their own `settings.json` must not reorder the baseline, or the next
@@ -686,6 +687,8 @@ def _item(
     value: object = _ABSENT,
     parse_error: str | None = None,
     parse_unavailable: str | None = None,
+    pointer: str | None = None,
+    parse_format: str | None = None,
 ) -> dict:
     """Assemble one baseline item.
 
@@ -719,6 +722,15 @@ def _item(
         attributes["parse_error"] = parse_error
     if parse_unavailable is not None:
         attributes["parse_unavailable"] = parse_unavailable
+    # A recorded absence of a pointed-to location is ambiguous without the
+    # location: the file exists, so "did the absent thing appear" cannot be
+    # answered from the file's existence alone. The pointer and its format
+    # are recorded so `drift` can re-resolve the same location the same way,
+    # instead of mistaking the always-present file for arriving configuration.
+    if pointer is not None:
+        attributes["pointer"] = pointer
+    if parse_format is not None:
+        attributes["parse"] = parse_format
     if value is not _ABSENT:
         attributes["value"] = value
 
