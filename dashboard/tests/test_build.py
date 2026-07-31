@@ -22,9 +22,11 @@ do), so every fixture here must be a document the validator accepts whole.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 import shutil
 import tempfile
@@ -49,9 +51,31 @@ SPEC.loader.exec_module(dashboard)
 
 from ledgerlib import drift as drift_module  # noqa: E402
 from ledgerlib import rollback as rollback_module  # noqa: E402
-from ledgerlib.build import build_payload, serialize_payload  # noqa: E402
+from ledgerlib.build import (  # noqa: E402
+    TEMPLATE_PATH,
+    _ISLAND_MARKER,
+    build_command,
+    build_payload,
+    inject_payload,
+    serialize_payload,
+    write_dashboard,
+)
 from ledgerlib.constants import TOOL_VERSION  # noqa: E402
 from ledgerlib.errors import LedgerError  # noqa: E402
+
+
+def extract_island(html: str) -> str:
+    """Pull the `aio-payload` island's text content out of a built dashboard.
+
+    Written independently of `inject_payload`'s own splice logic -- same two
+    searches, but never a call into the code under test -- so a round-trip
+    test proves the *output* is correct rather than proving the
+    implementation agrees with itself.
+    """
+    marker_at = html.index(_ISLAND_MARKER)
+    tag_end = html.index(">", marker_at) + 1
+    content_end = html.index("</script", tag_end)
+    return html[tag_end:content_end]
 
 
 class SerializePayloadTests(unittest.TestCase):
@@ -228,13 +252,17 @@ class BuildTestCase(unittest.TestCase):
         }
 
     def full_material(
-        self, *, material_id: str = "MAT-2026-000", evidence: list | None = None
+        self,
+        *,
+        material_id: str = "MAT-2026-000",
+        evidence: list | None = None,
+        title: str = "a material",
     ) -> dict:
         """A MATERIAL record `validate_ledger` accepts whole."""
         return {
             "id": material_id,
             "type": "MATERIAL",
-            "title": "a material",
+            "title": title,
             "status": "ANALYZED",
             "classification": "MONITOR",
             "scope": "project",
@@ -244,6 +272,34 @@ class BuildTestCase(unittest.TestCase):
             "links": {"materials": [], "runs": [], "adrs": []},
             "evidence": evidence if evidence is not None else [],
         }
+
+    def backlog_entry(
+        self,
+        *,
+        entry_id: str = "MAT-2026-000",
+        classification: str = "MONITOR",
+        reason: str = "flagged for review",
+        revisit_trigger: str | None = "next audit",
+        revisit_after: str | None = None,
+    ) -> dict:
+        """A backlog entry `validate_ledger` accepts, referencing `entry_id`.
+
+        `validate_collection`'s cross-check requires `id` to name a record
+        declared elsewhere in the same ledger (`ledgerlib/validate.py`), so
+        every caller must also include a record with a matching id.
+        """
+        return {
+            "id": entry_id,
+            "classification": classification,
+            "reason": reason,
+            "revisit_trigger": revisit_trigger,
+            "revisit_after": revisit_after,
+        }
+
+    def write_ledger(self, document: dict, *, name: str = "ledger.json") -> Path:
+        path = self.tmp / name
+        path.write_text(json.dumps(document), encoding="utf-8")
+        return path
 
     def known_project(self, *, project_root: str, status: str = "OK") -> dict:
         return {
@@ -480,6 +536,340 @@ class BuildPayloadMessageDedupeTests(BuildTestCase):
         # drift_report plus two rollback_preview calls would each surface
         # this exact note without dedupe -- it must survive only once.
         self.assertEqual(messages.count(expected_note), 1, messages)
+
+
+STATIC_ISLAND_DEFAULT = (
+    '{"payload_schema":1,"mode":"static","generated_at":null,'
+    '"tool_version":null,"lang":null,"ledger":null,"computed":null}'
+)
+
+
+class InjectPayloadTests(unittest.TestCase):
+    """`inject_payload` splices by locating two marker tags, never a regex."""
+
+    def real_template(self) -> str:
+        return TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    def test_the_static_default_is_gone_and_the_serialized_text_is_present(
+        self,
+    ) -> None:
+        result = inject_payload(self.real_template(), '{"payload_schema":1,"mode":"built"}')
+        self.assertNotIn(STATIC_ISLAND_DEFAULT, result)
+        self.assertIn(
+            'id="aio-payload">{"payload_schema":1,"mode":"built"}</script', result
+        )
+
+    def test_everything_outside_the_island_is_byte_identical(self) -> None:
+        template = self.real_template()
+        before, _, after = template.partition(STATIC_ISLAND_DEFAULT)
+        result = inject_payload(template, '{"a":1}')
+        self.assertTrue(result.startswith(before), "prefix changed")
+        self.assertTrue(result.endswith(after), "suffix changed")
+        self.assertEqual(len(result), len(before) + len('{"a":1}') + len(after))
+
+    def test_the_island_marker_still_occurs_exactly_once_after_injection(
+        self,
+    ) -> None:
+        result = inject_payload(self.real_template(), '{"a":1}')
+        self.assertEqual(result.count(_ISLAND_MARKER), 1)
+
+    def test_zero_islands_raises_ledger_error(self) -> None:
+        template = "<html><body>no island here</body></html>"
+        with self.assertRaises(LedgerError):
+            inject_payload(template, "{}")
+
+    def test_two_islands_raises_ledger_error(self) -> None:
+        island = '<script type="application/json" id="aio-payload">{}</script>'
+        template = f"<html>{island}{island}</html>"
+        with self.assertRaises(LedgerError):
+            inject_payload(template, "{}")
+
+
+class WriteDashboardTests(BuildTestCase):
+    """The overwrite guard and the atomic write, in isolation from `build_command`."""
+
+    def test_writes_the_given_html_verbatim(self) -> None:
+        out = self.tmp / "dashboard.html"
+        write_dashboard("<html>hi</html>", out, force=False)
+        self.assertEqual(out.read_text(encoding="utf-8"), "<html>hi</html>")
+
+    def test_refuses_to_overwrite_a_file_without_the_marker(self) -> None:
+        out = self.tmp / "dashboard.html"
+        out.write_text("not a dashboard", encoding="utf-8")
+        with self.assertRaises(LedgerError) as ctx:
+            write_dashboard("<html>new</html>", out, force=False)
+        self.assertIn(repr(str(out)), str(ctx.exception))
+        self.assertEqual(out.read_text(encoding="utf-8"), "not a dashboard")
+
+    def test_overwrites_a_file_that_already_contains_the_marker(self) -> None:
+        out = self.tmp / "dashboard.html"
+        out.write_text('<script id="aio-payload">{}</script>', encoding="utf-8")
+        write_dashboard("<html>new</html>", out, force=False)
+        self.assertEqual(out.read_text(encoding="utf-8"), "<html>new</html>")
+
+    def test_force_overrides_the_refusal(self) -> None:
+        out = self.tmp / "dashboard.html"
+        out.write_text("not a dashboard", encoding="utf-8")
+        write_dashboard("<html>new</html>", out, force=True)
+        self.assertEqual(out.read_text(encoding="utf-8"), "<html>new</html>")
+
+    def test_a_failed_replace_leaves_the_prior_content_and_no_temp_file(
+        self,
+    ) -> None:
+        out = self.tmp / "dashboard.html"
+        out.write_text("prior content", encoding="utf-8")
+        before = {entry.name for entry in self.tmp.iterdir()}
+        with mock.patch("os.replace", side_effect=OSError("boom")):
+            with self.assertRaises(OSError):
+                write_dashboard("<html>new</html>", out, force=True)
+        self.assertEqual(out.read_text(encoding="utf-8"), "prior content")
+        after = {entry.name for entry in self.tmp.iterdir()}
+        self.assertEqual(before, after, "a temp file was left behind")
+
+    def test_never_creates_the_output_directory(self) -> None:
+        out = self.tmp / "missing-dir" / "dashboard.html"
+        with self.assertRaises(OSError):
+            write_dashboard("<html>new</html>", out, force=False)
+        self.assertFalse(out.parent.exists())
+
+
+class BuildCommandTestCase(BuildTestCase):
+    """`build_command` driven directly, the way `dashboard.py build` calls it."""
+
+    def run_build(
+        self, ledger_path: Path, out: Path | None, *, lang: str | None = None,
+        force: bool = False,
+    ) -> int:
+        return build_command(
+            ledger_path,
+            out,
+            lang,
+            force,
+            adapter=self.adapter_path,
+            project=self.tmp,
+        )
+
+
+class BuildCommandOutPathTests(BuildCommandTestCase):
+    def test_default_out_is_dashboard_html_beside_the_ledger(self) -> None:
+        ledger_path = self.write_ledger(self.valid_ledger())
+        code = self.run_build(ledger_path, None)
+        self.assertEqual(code, 0)
+        self.assertTrue((ledger_path.parent / "dashboard.html").exists())
+
+    def test_the_out_flag_is_honored(self) -> None:
+        ledger_path = self.write_ledger(self.valid_ledger())
+        custom_out = self.tmp / "custom-name.html"
+        code = self.run_build(ledger_path, custom_out)
+        self.assertEqual(code, 0)
+        self.assertTrue(custom_out.exists())
+        self.assertFalse((ledger_path.parent / "dashboard.html").exists())
+
+
+class BuildCommandExitCodeTests(BuildCommandTestCase):
+    def test_exit_0_on_a_valid_ledger_even_when_drift_finds_problems(self) -> None:
+        # A run whose target anchor points at a file that was never written:
+        # `drift_report`/target classification will not find it IN_PLACE, so
+        # the payload's `computed` sections carry problems -- and the build
+        # still succeeds, because rendering those problems is the point.
+        run = self.full_run([self.target()], None)
+        ledger = self.valid_ledger(records=[run])
+        ledger_path = self.write_ledger(ledger)
+        out = self.tmp / "dashboard.html"
+        code = self.run_build(ledger_path, out)
+        self.assertEqual(code, 0)
+        self.assertTrue(out.exists())
+
+    def test_exit_1_on_an_unreadable_ledger(self) -> None:
+        missing = self.tmp / "does-not-exist.json"
+        code = self.run_build(missing, None)
+        self.assertEqual(code, 1)
+        self.assertFalse((self.tmp / "dashboard.html").exists())
+
+    def test_exit_1_on_overwrite_refusal_and_the_file_is_untouched(self) -> None:
+        ledger_path = self.write_ledger(self.valid_ledger())
+        out = self.tmp / "dashboard.html"
+        out.write_text("not a dashboard", encoding="utf-8")
+        code = self.run_build(ledger_path, out)
+        self.assertEqual(code, 1)
+        self.assertEqual(out.read_text(encoding="utf-8"), "not a dashboard")
+
+    def test_force_overrides_overwrite_refusal(self) -> None:
+        ledger_path = self.write_ledger(self.valid_ledger())
+        out = self.tmp / "dashboard.html"
+        out.write_text("not a dashboard", encoding="utf-8")
+        code = self.run_build(ledger_path, out, force=True)
+        self.assertEqual(code, 0)
+        self.assertIn(_ISLAND_MARKER, out.read_text(encoding="utf-8"))
+
+    def test_exit_2_on_a_schema_invalid_ledger_and_nothing_is_written(self) -> None:
+        ledger = self.valid_ledger()
+        del ledger["sequences"]
+        ledger_path = self.write_ledger(ledger)
+        out = self.tmp / "dashboard.html"
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            code = self.run_build(ledger_path, out)
+        self.assertEqual(code, 2)
+        self.assertFalse(out.exists())
+        self.assertIn("sequences", buf.getvalue())
+
+    def test_a_verify_only_finding_also_fails_the_build_at_two(self) -> None:
+        # duplicate record ids are a `validate_collection` finding, not a
+        # `validate_ledger` one -- this is the ADJUDICATED spec point: build
+        # must run both checks, exactly as `verify` does for one document.
+        material = self.full_material()
+        duplicate = self.full_material()
+        ledger = self.valid_ledger(records=[material, duplicate])
+        ledger_path = self.write_ledger(ledger)
+        out = self.tmp / "dashboard.html"
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            code = self.run_build(ledger_path, out)
+        self.assertEqual(code, 2)
+        self.assertFalse(out.exists())
+        self.assertIn("Duplicate record id", buf.getvalue())
+
+
+class BuildCommandLanguageTests(BuildCommandTestCase):
+    def test_lang_xx_warns_on_stderr_and_builds_with_en(self) -> None:
+        ledger_path = self.write_ledger(self.valid_ledger())
+        out = self.tmp / "dashboard.html"
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            code = self.run_build(ledger_path, out, lang="xx")
+        self.assertEqual(code, 0)
+        self.assertIn("xx", buf.getvalue())
+        self.assertIn("en", buf.getvalue())
+        payload = json.loads(extract_island(out.read_text(encoding="utf-8")))
+        self.assertEqual(payload["lang"], "en")
+
+    def test_lang_pt_br_lands_in_the_payload(self) -> None:
+        ledger_path = self.write_ledger(self.valid_ledger())
+        out = self.tmp / "dashboard.html"
+        code = self.run_build(ledger_path, out, lang="pt-BR")
+        self.assertEqual(code, 0)
+        payload = json.loads(extract_island(out.read_text(encoding="utf-8")))
+        self.assertEqual(payload["lang"], "pt-BR")
+
+
+class BuildCommandSecurityTests(BuildCommandTestCase):
+    """Design spec section 1.1's stored-XSS control, exercised end to end."""
+
+    def test_a_script_payload_in_ledger_content_contributes_no_angle_bracket(
+        self,
+    ) -> None:
+        template_script_opens = TEMPLATE_PATH.read_text(encoding="utf-8").count(
+            "<script"
+        )
+        template_script_closes = TEMPLATE_PATH.read_text(encoding="utf-8").count(
+            "</script"
+        )
+        material = self.full_material(title="</script><script>alert(1)</script>")
+        entry = self.backlog_entry(
+            reason="flagged for review <!-- suspicious --> pending"
+        )
+        ledger = self.valid_ledger(records=[material])
+        ledger["backlog"] = [entry]
+        ledger_path = self.write_ledger(ledger)
+        out = self.tmp / "dashboard.html"
+        code = self.run_build(ledger_path, out)
+        self.assertEqual(code, 0)
+
+        html = out.read_text(encoding="utf-8")
+        self.assertEqual(html.count("<script"), template_script_opens)
+        self.assertEqual(html.count("</script"), template_script_closes)
+
+        island = extract_island(html)
+        self.assertNotIn("<", island)
+        # And the escaping is lossless: the dangerous text survives intact
+        # once JSON-parsed.
+        payload = json.loads(island)
+        material_out = next(
+            record
+            for record in payload["ledger"]["records"]
+            if record["id"] == "MAT-2026-000"
+        )
+        self.assertEqual(
+            material_out["title"], "</script><script>alert(1)</script>"
+        )
+        self.assertEqual(
+            payload["ledger"]["backlog"][0]["reason"],
+            "flagged for review <!-- suspicious --> pending",
+        )
+
+
+class BuildCommandRoundTripTests(BuildCommandTestCase):
+    def test_the_generated_islands_ledger_matches_the_input_ledger(self) -> None:
+        ledger = self.valid_ledger()
+        ledger_path = self.write_ledger(ledger)
+        out = self.tmp / "dashboard.html"
+        code = self.run_build(ledger_path, out)
+        self.assertEqual(code, 0)
+        payload = json.loads(extract_island(out.read_text(encoding="utf-8")))
+        self.assertEqual(payload["ledger"], ledger)
+
+
+class BuildCommandWriteIsolationTests(BuildCommandTestCase):
+    def test_build_writes_exactly_one_path(self) -> None:
+        workspace = self.tmp / "workspace"
+        workspace.mkdir()
+        ledger = self.valid_ledger()
+        ledger_path = workspace / "ledger.json"
+        ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+        out = workspace / "dashboard.html"
+
+        before = {p.relative_to(workspace) for p in workspace.rglob("*")}
+        code = self.run_build(ledger_path, out)
+        after = {p.relative_to(workspace) for p in workspace.rglob("*")}
+
+        self.assertEqual(code, 0)
+        self.assertEqual(after - before, {out.relative_to(workspace)})
+        self.assertEqual(ledger_path.read_text(encoding="utf-8"), json.dumps(ledger))
+
+
+class BuildCliTestCase(BuildCommandTestCase):
+    """`dashboard.main` driven the way a shell would, per `DriftCliTestCase`."""
+
+    def run_cli(self, *argv: str) -> tuple[int, str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = dashboard.main(list(argv))
+            except SystemExit as exc:
+                code = exc.code
+        return code, out.getvalue(), err.getvalue()
+
+    def build_arguments(self, ledger_path: Path, out: Path) -> list[str]:
+        return [
+            "build",
+            str(ledger_path),
+            "--out",
+            str(out),
+            "--adapter",
+            str(self.adapter_path),
+            "--project",
+            str(self.tmp),
+        ]
+
+
+class BuildCliTests(BuildCliTestCase):
+    def test_the_subcommand_is_wired_into_main(self) -> None:
+        ledger_path = self.write_ledger(self.valid_ledger())
+        out = self.tmp / "dashboard.html"
+        code, _, _ = self.run_cli(*self.build_arguments(ledger_path, out))
+        self.assertEqual(code, 0)
+        self.assertTrue(out.exists())
+
+    def test_the_subcommand_reaches_build_payload_through_main(self) -> None:
+        ledger_path = self.write_ledger(self.valid_ledger())
+        out = self.tmp / "dashboard.html"
+        with mock.patch(
+            "ledgerlib.build.build_payload", wraps=build_payload
+        ) as spy:
+            code, _, _ = self.run_cli(*self.build_arguments(ledger_path, out))
+        self.assertEqual(code, 0)
+        spy.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -32,12 +32,16 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
+import sys
+import tempfile
 from pathlib import Path
 
 from ledgerlib import drift, rollback
 from ledgerlib.constants import TOOL_VERSION
 from ledgerlib.errors import LedgerError
-from ledgerlib.validate import validate_ledger
+from ledgerlib.paths import _path_key, file_digest, load_json
+from ledgerlib.validate import validate_collection, validate_ledger
 
 
 PAYLOAD_SCHEMA = 1
@@ -50,6 +54,12 @@ PAYLOAD_SCHEMA = 1
 TEMPLATE_PATH = (
     Path(__file__).resolve().parent.parent.parent / "templates" / "dashboard.html"
 )
+
+# The data island's id attribute, exactly as it appears in the template
+# (design spec section 1.1): `inject_payload` counts and locates it, and
+# `write_dashboard`'s overwrite guard tests an existing file for the same
+# string to decide whether that file is itself a generated dashboard.
+_ISLAND_MARKER = 'id="aio-payload"'
 
 # Design spec section 5: exactly the two dictionaries the shell embeds. A
 # `lang` naming anything else cannot select a dictionary the shell actually
@@ -303,3 +313,179 @@ def build_payload(
         deduped_messages.append(message)
 
     return payload, deduped_messages
+
+
+def inject_payload(template_text: str, serialized: str) -> str:
+    """Splice `serialized` into the template's one `aio-payload` island.
+
+    The replacement is two string searches, never a regex over the whole
+    document (design spec section 3): find the marker `id="aio-payload"`,
+    then that opening tag's own `>`, then the following `</script`. Only the
+    text between those two points changes; the tag itself, and everything
+    before and after it, is copied through byte-for-byte. A template with
+    zero or more than one island is a template this function refuses to
+    guess about -- `LedgerError`, naming the count, rather than splicing the
+    first or the last of several candidates.
+    """
+    count = template_text.count(_ISLAND_MARKER)
+    if count != 1:
+        raise LedgerError(
+            f"the dashboard template must contain exactly one {_ISLAND_MARKER!r} "
+            f"island, found {count}"
+        )
+    marker_at = template_text.index(_ISLAND_MARKER)
+    try:
+        tag_end = template_text.index(">", marker_at) + 1
+        content_end = template_text.index("</script", tag_end)
+    except ValueError as exc:
+        raise LedgerError(
+            "the dashboard template's aio-payload island is malformed: no "
+            "closing </script found after the marker"
+        ) from exc
+    return template_text[:tag_end] + serialized + template_text[content_end:]
+
+
+def write_dashboard(html: str, out: Path, *, force: bool) -> None:
+    """Write `html` to `out`, atomically, refusing to clobber a stray file.
+
+    The overwrite guard (design spec section 3): an existing `out` is left
+    alone unless it already looks like a generated dashboard -- it contains
+    the `aio-payload` marker -- or the caller passed `force=True`. This is
+    the first ledger-adjacent write command in the bundle, so the guard is
+    the only thing standing between a typo'd `--out` and a file that had
+    nothing to do with this tool.
+
+    The write itself goes through a temporary file created in `out`'s own
+    directory, then `os.replace`, so a reader never observes a partially
+    written dashboard and a crash mid-write never corrupts a file that
+    already existed. `out`'s directory is never created -- a missing parent
+    is a caller error, not something this function silently repairs -- and
+    on any failure the temporary file is removed on a best-effort basis
+    before the exception propagates, so a failed build leaves no stray
+    `.tmp` file behind.
+    """
+    if out.exists() and not force:
+        try:
+            existing = out.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise LedgerError(
+                f"cannot read existing file {str(out)!r} to check the "
+                f"overwrite guard: {exc}"
+            ) from exc
+        if _ISLAND_MARKER not in existing:
+            raise LedgerError(
+                f"refusing to overwrite {str(out)!r}: it does not look like a "
+                "generated dashboard (no aio-payload marker); pass --force to "
+                "overwrite it anyway"
+            )
+
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(out.parent), prefix=out.name + ".", suffix=".tmp"
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(html)
+        os.replace(tmp_path, out)
+    except BaseException:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def build_command(
+    ledger: Path,
+    out: Path | None,
+    lang: str | None,
+    force: bool,
+    adapter: Path | None = None,
+    user_config: Path | None = None,
+    project: Path | None = None,
+) -> int:
+    """`build` as a command: assemble the payload, inject it, write the file.
+
+    Exit codes (design spec section 3, mirroring `verify`'s split between a
+    tool error and a finding): `0` once the file is written -- even when
+    `computed.drift` or a preview reports problems, because the dashboard's
+    job is to render those problems, not to refuse them; `1` for an
+    unreadable ledger or a write refusal (the overwrite guard, or any other
+    I/O failure); `2` for a ledger `verify` would reject, in which case
+    nothing is written.
+
+    The adjudicated reading of design spec section 2 governs the `2` case:
+    there is no `computed.verify` key, so `build_command` itself runs
+    `verify`'s two checks -- `validate_ledger` and the single-document
+    `validate_collection(..., complete=True)`, exactly as `verify()` in
+    `ledgerlib/verify.py` does for a list of one -- before calling
+    `build_payload` at all. Any finding from either check is printed to
+    stderr and the build stops there. `build_payload` also calls
+    `validate_ledger` internally (its own docstring explains why: it must
+    never compute anything for a ledger nothing vouched for), but by the
+    time it runs here the document has already passed both checks, so that
+    second call finds nothing and prints nothing -- one set of findings
+    reaches stderr, never two.
+    """
+    try:
+        document = load_json(ledger)
+        digest = file_digest(ledger)
+    except LedgerError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"Unreadable ledger: {ledger}: {exc}", file=sys.stderr)
+        return 1
+
+    source = str(ledger)
+    findings = validate_ledger(document, source=source)
+    digests = {
+        _path_key(source): digest,
+        _path_key(str(ledger.resolve())): digest,
+    }
+    findings.extend(
+        validate_collection([(source, document)], complete=True, digests=digests)
+    )
+    if findings:
+        for finding in findings:
+            print(finding, file=sys.stderr)
+        return 2
+
+    out_path = out if out is not None else ledger.parent / "dashboard.html"
+
+    try:
+        payload, messages = build_payload(
+            document,
+            ledger_source=source,
+            lang=lang,
+            adapter=adapter,
+            user_config=user_config,
+            project=project,
+        )
+    except LedgerError as exc:
+        # Not reachable through the checks above for any ledger this
+        # function already validated whole; kept as a tool error rather than
+        # an assertion because a second, differently worded validator living
+        # inside `build_payload` is exactly the kind of drift design spec
+        # section 2 rules out.
+        print(exc, file=sys.stderr)
+        return 2
+
+    for message in messages:
+        print(message, file=sys.stderr)
+
+    serialized = serialize_payload(payload)
+    template_text = TEMPLATE_PATH.read_text(encoding="utf-8")
+    html = inject_payload(template_text, serialized)
+
+    try:
+        write_dashboard(html, out_path, force=force)
+    except LedgerError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"cannot write {out_path}: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"wrote {out_path}")
+    return 0
