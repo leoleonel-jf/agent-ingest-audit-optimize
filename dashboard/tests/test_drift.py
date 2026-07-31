@@ -1220,6 +1220,77 @@ class DriftWritesNothingTests(DriftCliTestCase):
         self.assertEqual(json.loads(out.getvalue())["summary"]["IN_PLACE"], 1)
 
 
+class ManagedLayerDriftTests(DriftReportTestCase):
+    """0.5.0: the managed layer classifies and annotates like any other.
+
+    Two things worth pinning separately: policy appearing where a baseline
+    verified none is `DRIFTED`/`appeared` -- which is the signal the legacy
+    Windows path exists to raise, since a file there is policy the platform
+    stopped reading but an administrator may still believe in -- and
+    `managed` outranking `user` in the declared precedence chain.
+    """
+
+    def adapter_document(self) -> dict:
+        document = super().adapter_document()
+        document["anchors"] = dict(
+            document["anchors"], **{"$MANAGED_CONFIG": [str(self.user_config)]}
+        )
+        document["probes"] = list(document["probes"]) + [
+            {
+                "kind": "model-setting",
+                "scope": "managed",
+                "path": "$MANAGED_CONFIG/managed-settings.json",
+            },
+            {
+                "kind": "model-setting",
+                "scope": "user",
+                "path": "$USER_CONFIG/managed-settings.json",
+            },
+        ]
+        # Only the two scopes this fixture actually probes: the adapter
+        # validator refuses an order naming a scope no probe of that kind
+        # declares, which is the same check that caught a wrong `managed`
+        # entry on the shipped mcp-server rule.
+        document["resolution"] = {
+            "model-setting": {"mode": "override", "order": ["managed", "user"]}
+        }
+        return document
+
+    def managed_item(self, **overrides: object) -> dict:
+        return self.item(
+            kind="model-setting",
+            name="managed-settings.json",
+            anchor="$MANAGED_CONFIG/managed-settings.json",
+            attributes={"scope": "managed"},
+            **overrides,
+        )
+
+    def test_policy_appearing_where_none_was_recorded_is_drifted(self) -> None:
+        self.write(self.user_config / "managed-settings.json", '{"model":"x"}\n')
+        item = self.managed_item(state="not_present", digest=None)
+        report, _messages, code = self.report(self.ledger(items=[item]))
+        row = report["baselines"][0]["items"][0]
+        self.assertEqual((row["state"], row["reason"]), ("DRIFTED", "appeared"))
+        self.assertEqual(code, 1)
+
+    def test_managed_outranks_user_in_the_declared_precedence(self) -> None:
+        managed = self.write(self.user_config / "managed-settings.json", "{}\n")
+        items = [
+            self.managed_item(digest=self.digest_of(managed)),
+            self.item(
+                kind="model-setting",
+                name="managed-settings.json",
+                anchor="$USER_CONFIG/managed-settings.json",
+                attributes={"scope": "user"},
+                digest=self.digest_of(managed),
+            ),
+        ]
+        report, _messages, _code = self.report(self.ledger(items=items))
+        rows = {row["scope"]: row["resolution"] for row in report["baselines"][0]["items"]}
+        self.assertEqual(rows["managed"].get("effective"), True)
+        self.assertEqual(rows["user"].get("shadowed_by"), "managed")
+
+
 class ResolvedPathHelperTests(DriftTestCase):
     """`resolved_path`: the row-level answer to "which file was classified".
 

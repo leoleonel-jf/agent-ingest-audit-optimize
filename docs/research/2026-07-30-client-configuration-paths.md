@@ -50,7 +50,27 @@ has no effect.
 | Project | `./.claude/settings.local.json` | personal overrides, gitignored |
 | Project | `./.claude/rules/**/*.md` | path-scoped rules |
 | Project | `./.mcp.json` | project MCP servers — at the repository root, **not** inside `.claude/` |
-| Managed | platform-specific policy directory | enterprise policy, plus Windows registry policy keys |
+| Managed | see the table below | enterprise policy, plus Windows registry policy keys |
+
+#### Managed policy paths — verified 2026-07-31
+
+Source: `https://code.claude.com/docs/en/settings`, consulted 2026-07-31. These close the
+"platform-specific policy directory" gap this document carried since 2026-07-30, and they are what
+`$MANAGED_CONFIG` ships as of 0.5.0.
+
+| Platform | File | Fragment directory |
+|---|---|---|
+| macOS | `/Library/Application Support/ClaudeCode/managed-settings.json` | `.../managed-settings.d/` |
+| Linux and WSL | `/etc/claude-code/managed-settings.json` | `/etc/claude-code/managed-settings.d/` |
+| Windows | `C:\Program Files\ClaudeCode\managed-settings.json` | `C:\Program Files\ClaudeCode\managed-settings.d\` |
+
+The legacy Windows path `C:\ProgramData\ClaudeCode\managed-settings.json` **stopped being
+supported in v2.1.75**. It ships as `$LEGACY_MANAGED_CONFIG` and is probed as an *expected
+absence*: a file still sitting there is policy the client no longer reads and an administrator may
+still believe in, which is a finding rather than noise.
+
+**Still unverified, and therefore not shipped:** Windows registry policy keys (named here since
+2026-07-30 with no path), and any managed-policy location for Codex. Neither is guessed.
 
 `<user-root>` is `~/.claude` unless `CLAUDE_CONFIG_DIR` says otherwise.
 

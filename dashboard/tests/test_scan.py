@@ -52,6 +52,7 @@ SPEC.loader.exec_module(dashboard)
 from ledgerlib.constants import (  # noqa: E402
     BASELINE_ITEM_STATES,
     RECORD_ID,
+    OPTIONAL_BASELINE_FIELDS,
     REQUIRED_BASELINE_FIELDS,
     REQUIRED_BASELINE_ITEM_FIELDS,
 )
@@ -1577,10 +1578,13 @@ class ScanEntryTests(ScanTestCase):
         entry, _, _ = self.do_scan()
         self.assertEqual(REQUIRED_BASELINE_FIELDS - set(entry), set())
 
-    def test_the_entry_carries_no_field_beyond_the_required_five(self) -> None:
+    def test_the_entry_carries_no_field_beyond_the_declared_ones(self) -> None:
         self.populate()
         entry, _, _ = self.do_scan()
-        self.assertEqual(set(entry), set(REQUIRED_BASELINE_FIELDS))
+        self.assertEqual(
+            set(entry),
+            REQUIRED_BASELINE_FIELDS | OPTIONAL_BASELINE_FIELDS,
+        )
 
     def test_the_id_is_the_one_the_caller_allocated(self) -> None:
         entry, _, _ = self.do_scan(identifier="BASE-2026-042")
@@ -2083,7 +2087,10 @@ class ScanCliTests(ScanTestCase):
         self.populate()
         _, stdout, stderr = self.run_cli(*self.cli_arguments())
         entry = json.loads(stdout)
-        self.assertEqual(set(entry), set(REQUIRED_BASELINE_FIELDS))
+        self.assertEqual(
+            set(entry),
+            REQUIRED_BASELINE_FIELDS | OPTIONAL_BASELINE_FIELDS,
+        )
         self.assertNotIn("selected adapter", stdout)
         self.assertIn("selected adapter", stderr)
 
@@ -2225,7 +2232,10 @@ class ScanSubprocessTests(ScanTestCase):
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         entry = json.loads(result.stdout)
-        self.assertEqual(set(entry), set(REQUIRED_BASELINE_FIELDS))
+        self.assertEqual(
+            set(entry),
+            REQUIRED_BASELINE_FIELDS | OPTIONAL_BASELINE_FIELDS,
+        )
 
     def test_nothing_but_the_entry_is_written_to_stdout(self) -> None:
         self.populate()
@@ -2760,6 +2770,174 @@ class ScanNeverTracebacksTests(ScanTestCase):
         self.assertEqual(code, 0, stderr)
         self.assertNotIn("Traceback", stderr)
         self.assertEqual(len(json.loads(stdout)["items"]), 2)
+
+
+class PlatformExcludedProbeTests(ScanTestCase):
+    """0.5.0: a probe under an anchor the platform does not have is skipped.
+
+    Not recorded `not_present` -- skipped. The difference is the whole point:
+    `not_present` is a verified absence, and claiming one for `/etc/codex` on
+    Windows verifies nothing. It is the gap `references/LEDGER.md` recorded as
+    "`$SYSTEM_CONFIG` is POSIX-only and cannot be declared optional".
+    """
+
+    def platform_adapter(self, **overrides: object) -> dict:
+        document = self.adapter_document(**overrides)
+        document["anchors"] = dict(
+            document["anchors"],
+            **{"$MANAGED_CONFIG": ["$platform:linux:/etc/nowhere-for-tests"]},
+        )
+        document["probes"] = list(document["probes"]) + [
+            {
+                "kind": "model-setting",
+                "scope": "managed",
+                "path": "$MANAGED_CONFIG/managed-settings.json",
+            }
+        ]
+        return document
+
+    def scan_on(self, platform: str):
+        path = self.bundled / "platform-client.json"
+        path.write_text(json.dumps(self.platform_adapter()), encoding="utf-8")
+        return self.do_scan(adapter=path, platform=platform)
+
+    def test_a_probe_under_a_non_applicable_anchor_emits_no_item(self) -> None:
+        entry, _messages, _code = self.scan_on("win32")
+        anchors = [item["anchor"] for item in entry["items"]]
+        self.assertNotIn("$MANAGED_CONFIG/managed-settings.json", anchors)
+
+    def test_the_skip_is_announced_rather_than_silent(self) -> None:
+        """A skipped layer nobody mentioned reads as a layer that was clean."""
+        _entry, messages, _code = self.scan_on("win32")
+        self.assertTrue(
+            any("MANAGED_CONFIG" in message and "win32" in message
+                for message in messages),
+            messages,
+        )
+
+    def test_the_same_probe_is_recorded_where_the_platform_applies(self) -> None:
+        """The anchor is applicable on linux and simply absent, so the probe
+        is recorded `not_present` -- a verified absence, which is honest."""
+        entry, _messages, _code = self.scan_on("linux")
+        rows = [
+            item for item in entry["items"]
+            if item["anchor"] == "$MANAGED_CONFIG/managed-settings.json"
+        ]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["state"], "not_present")
+
+    def test_probes_under_applicable_anchors_are_untouched(self) -> None:
+        self.populate()
+        entry, _messages, _code = self.scan_on("win32")
+        self.assertTrue(
+            any(item["anchor"] == "$USER_CONFIG/CLAUDE.md" for item in entry["items"])
+        )
+
+
+class ManagedLayerTests(ScanTestCase):
+    """The managed layer behaves like any other -- and must not degrade into
+    a false clean when it is present but unreadable.
+
+    `/Library/Application Support`, `/etc` and `C:\\Program Files` are exactly
+    the places a normal user cannot always read, so this is the layer where
+    "unreadable" is most likely and where mistaking it for "absent" would be
+    most misleading: unreadable managed policy still governs the session.
+    """
+
+    def managed_adapter(self) -> dict:
+        document = self.adapter_document()
+        document["anchors"] = dict(
+            document["anchors"], **{"$MANAGED_CONFIG": [str(self.user_config)]}
+        )
+        document["probes"] = [
+            {
+                "kind": "model-setting",
+                "scope": "managed",
+                "path": "$MANAGED_CONFIG/managed-settings.json",
+            },
+            {
+                "kind": "env-var-name",
+                "scope": "managed",
+                "path": "$MANAGED_CONFIG/managed-settings.json",
+                "parse": "json",
+                "pointer": "/env",
+            },
+        ]
+        return document
+
+    def scan_managed(self):
+        path = self.bundled / "managed-client.json"
+        path.write_text(json.dumps(self.managed_adapter()), encoding="utf-8")
+        return self.do_scan(adapter=path)
+
+    def managed_rows(self, entry: dict) -> list[dict]:
+        return [
+            item for item in entry["items"]
+            if item["anchor"] == "$MANAGED_CONFIG/managed-settings.json"
+        ]
+
+    def test_an_unreadable_managed_file_is_never_recorded_absent(self) -> None:
+        """The distinction that matters: refused-to-read is not verified-absent."""
+        self.write(self.user_config / "managed-settings.json", "{}\n")
+        real_open = Path.open
+
+        def deny(self_path, *args, **kwargs):
+            if self_path.name == "managed-settings.json":
+                raise PermissionError(13, "Permission denied")
+            return real_open(self_path, *args, **kwargs)
+
+        with mock.patch.object(Path, "open", deny), \
+                mock.patch.object(Path, "read_bytes",
+                                  side_effect=PermissionError(13, "denied")):
+            entry, _messages, _code = self.scan_managed()
+
+        rows = self.managed_rows(entry)
+        self.assertTrue(rows)
+        for row in rows:
+            with self.subTest(kind=row["kind"]):
+                # `present` with a null digest and a reason: the file IS
+                # there, and its bytes could not be compared. Degrading this
+                # to `not_present` would report a governing policy layer as
+                # empty.
+                self.assertEqual(row["state"], "present")
+                self.assertEqual(row["attributes"]["reason"], "unreadable")
+                self.assertIsNone(row["digest"])
+
+    def test_a_secret_in_managed_settings_does_not_reach_the_baseline(self) -> None:
+        """Redaction is a property of the adapter's patterns, not of the
+        layer -- but the managed layer is the one an administrator is most
+        likely to put a token in, so it is pinned here too."""
+        self.write(
+            self.user_config / "managed-settings.json",
+            json.dumps({"env": {"API_TOKEN": "PLAINTEXT-9f21"}}),
+        )
+        entry, _messages, _code = self.scan_managed()
+        self.assertNotIn("PLAINTEXT-9f21", json.dumps(entry))
+
+    def test_managed_items_carry_the_managed_scope(self) -> None:
+        self.write(self.user_config / "managed-settings.json", "{}\n")
+        entry, _messages, _code = self.scan_managed()
+        rows = self.managed_rows(entry)
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(row["attributes"]["scope"], "managed")
+
+
+class BaselinePlatformFieldTests(ScanTestCase):
+    """0.5.0: the entry records which platform produced it.
+
+    Without it, two baselines of the same logical machine taken on different
+    platforms look like they disagree, and `drift` has no way to say the
+    difference is structural rather than drift.
+    """
+
+    def test_the_entry_records_the_platform(self) -> None:
+        entry, _messages, _code = self.do_scan(platform="win32")
+        self.assertEqual(entry["platform"], "win32")
+
+    def test_the_platform_defaults_to_the_running_interpreter(self) -> None:
+        entry, _messages, _code = self.do_scan()
+        self.assertEqual(entry["platform"], sys.platform)
 
 
 if __name__ == "__main__":

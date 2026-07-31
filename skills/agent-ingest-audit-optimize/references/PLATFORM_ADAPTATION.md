@@ -57,6 +57,34 @@ Ledger writes follow the writer: a subagent returns data, and the main context r
 
 Detect subagent support; never assume it. Without support, run the same work sequentially in the main context. Delegation is an optimization of context budget, never a change to the workflow, the evidence standard, or the result.
 
+## Platform-guarded anchor candidates
+
+An adapter anchor whose location differs per platform declares one candidate per platform:
+
+```json
+"$MANAGED_CONFIG": [
+  "$platform:darwin:/Library/Application Support/ClaudeCode",
+  "$platform:linux:/etc/claude-code",
+  "$platform:win32:C:/Program Files/ClaudeCode"
+]
+```
+
+`$platform:<system>:<path>` applies only where `sys.platform` starts with `<system>`, so `linux`
+covers WSL and the historical `linux2` without enumerating either, and a Windows drive colon
+survives because the token splits on the first colon after the system only. A non-matching
+candidate is skipped textually, before any filesystem call.
+
+Two outcomes that must not be confused:
+
+- **Not applicable** — every candidate was skipped by a guard. The anchor has no meaning on this
+  platform, its probes are skipped, and the baseline records nothing about that layer, with a
+  note saying so. Do not read this as a clean layer.
+- **Applicable and absent** — a guard matched but the directory is not there. This is a verified
+  absence and its probes are recorded `not_present`, exactly as any other anchor.
+
+Use a guard only where the concept is genuinely platform-specific. An anchor that merely happens
+to be missing takes an ordinary candidate, so its absence is verified rather than skipped.
+
 ## Compatibility rules
 
 - keep `name` and the parent Skill directory identical;

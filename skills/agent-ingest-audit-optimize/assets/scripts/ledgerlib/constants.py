@@ -167,6 +167,12 @@ RESOLUTION_MODES = {"override", "key-override", "merge", "concatenate"}
 # a precedence the mode itself denies.
 ORDERED_RESOLUTION_MODES = {"override", "key-override"}
 REQUIRED_BASELINE_FIELDS = {"id", "captured_on", "client", "adapter_version", "items"}
+# Written by `scan` since 0.5.0, and deliberately NOT required: every baseline
+# captured before it is still valid, and demanding the field would invalidate
+# the very records this tool exists to preserve. `platform` says which
+# `sys.platform` produced the entry, so a layer missing because the platform
+# has no such anchor is distinguishable from a layer missing because it drifted.
+OPTIONAL_BASELINE_FIELDS = {"platform"}
 REQUIRED_BASELINE_ITEM_FIELDS = {
     "kind",
     "name",

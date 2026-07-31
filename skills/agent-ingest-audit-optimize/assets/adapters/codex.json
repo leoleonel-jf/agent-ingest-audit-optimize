@@ -6,7 +6,10 @@
     "$USER_CONFIG": ["$env:CODEX_HOME", "~/.codex"],
     "$HOME": ["~"],
     "$PROJECT": ["."],
-    "$SYSTEM_CONFIG": ["/etc/codex"]
+    "$SYSTEM_CONFIG": [
+      "$platform:linux:/etc/codex",
+      "$platform:darwin:/etc/codex"
+    ]
   },
   "probes": [
     { "kind": "model-setting", "scope": "user", "path": "$USER_CONFIG/config.toml",

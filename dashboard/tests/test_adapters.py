@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import re
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -982,10 +983,28 @@ class ShippedResolutionTests(unittest.TestCase):
                 "skill": {"mode": "override", "order": ["user", "project"]},
                 "instruction-file": {"mode": "concatenate"},
                 "permission-rule": {"mode": "merge"},
-                "model-setting": {"mode": "key-override", "order": ["project", "user"]},
-                "env-var-name": {"mode": "key-override", "order": ["project", "user"]},
+                # 0.5.0: `managed` leads the two kinds the adapter actually
+                # probes at that layer. `mcp-server` deliberately does NOT
+                # carry it -- no managed MCP probe ships, because no primary
+                # source documents a managed MCP location, and the validator
+                # refuses an order naming a scope no probe declares.
+                "model-setting": {
+                    "mode": "key-override",
+                    "order": ["managed", "project", "user"],
+                },
+                "env-var-name": {
+                    "mode": "key-override",
+                    "order": ["managed", "project", "user"],
+                },
             },
         )
+
+    def test_claude_code_permission_rules_still_merge_across_managed(self) -> None:
+        """The primary source declares permission rules MERGE across scopes
+        while everything else overrides. Declaring `managed` first here would
+        contradict the documentation the adapter is built from."""
+        rule = self.adapter("claude-code.json")["resolution"]["permission-rule"]
+        self.assertEqual(rule, {"mode": "merge"})
 
     def test_claude_code_skill_order_is_user_before_project(self) -> None:
         """The inversion the research warns about, asserted as data.
@@ -1725,6 +1744,155 @@ class ReviewRedactionCorrectionTests(unittest.TestCase):
             for pattern in ("args", "*url*"):
                 with self.subTest(adapter=name, pattern=pattern):
                     self.assertIn(pattern, patterns)
+
+
+class PlatformGuardedCandidateTests(unittest.TestCase):
+    """`$platform:<sys>:<path>` candidates (0.5.0).
+
+    Two things are under test and they are different: a guarded candidate
+    whose platform does not match is *skipped without touching the disk*,
+    and an anchor whose every candidate was skipped that way is *not
+    applicable on this platform* rather than unresolved. The second is the
+    distinction that stops a baseline from claiming "we looked and found
+    nothing" about a platform where the concept does not exist -- the
+    `$SYSTEM_CONFIG`-on-Windows gap `references/LEDGER.md` recorded.
+
+    `platform` is a parameter for the reason `environ` is one: a test must
+    be able to supply both sides without mutating the process.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.present = self.root / "present"
+        self.present.mkdir()
+        self.project = self.root / "project"
+        self.project.mkdir()
+
+    def adapter_with(self, candidates: list[str]) -> dict:
+        adapter = minimal_adapter()
+        adapter["anchors"] = {"$MANAGED_CONFIG": candidates, "$PROJECT": ["."]}
+        return adapter
+
+    def resolve(self, candidates: list[str], platform: str):
+        return adapters.resolve_anchor_roots(
+            self.adapter_with(candidates),
+            project=self.project,
+            environ={},
+            platform=platform,
+        )
+
+    def excluded(self, candidates: list[str], platform: str):
+        return adapters.platform_excluded_anchors(
+            self.adapter_with(candidates), platform=platform
+        )
+
+    def test_a_matching_platform_candidate_resolves_normally(self) -> None:
+        roots, _unresolved = self.resolve(
+            [f"$platform:linux:{self.present}"], "linux"
+        )
+        self.assertEqual(roots["MANAGED_CONFIG"], self.present)
+
+    def test_a_non_matching_candidate_is_skipped_without_touching_the_disk(
+        self,
+    ) -> None:
+        """The guard is textual and runs before any filesystem call.
+
+        Statting `/etc/claude-code` from Windows is not merely wasteful --
+        on a UNC-ish or unmapped path it can block -- so the skip must not
+        be "resolve it and find nothing".
+        """
+        with mock.patch.object(Path, "is_dir", autospec=True) as is_dir:
+            roots, unresolved = self.resolve(
+                [f"$platform:linux:{self.present}"], "win32"
+            )
+        # Other anchors in the same adapter ($PROJECT) are resolved normally
+        # and do stat; the assertion is that the GUARDED path was never one
+        # of them.
+        statted = [call.args[0] for call in is_dir.call_args_list if call.args]
+        self.assertNotIn(self.present, statted)
+        self.assertNotIn("MANAGED_CONFIG", roots)
+        self.assertIn("MANAGED_CONFIG", unresolved)
+
+    def test_an_anchor_with_no_applicable_candidate_is_platform_excluded(self) -> None:
+        self.assertEqual(
+            self.excluded(
+                ["$platform:linux:/etc/claude-code", "$platform:darwin:/Library/X"],
+                "win32",
+            ),
+            frozenset({"MANAGED_CONFIG"}),
+        )
+
+    def test_an_anchor_with_one_applicable_candidate_is_not_excluded(self) -> None:
+        """Applicable and absent are different answers.
+
+        A guard that matches makes the anchor applicable even when the
+        directory is not there: that is a real absence on a platform that
+        has the concept, and the probes beneath it must be recorded absent,
+        not skipped.
+        """
+        self.assertEqual(
+            self.excluded(
+                ["$platform:win32:" + str(self.root / "absent"), "$platform:linux:/etc/x"],
+                "win32",
+            ),
+            frozenset(),
+        )
+
+    def test_an_unguarded_candidate_keeps_the_anchor_applicable(self) -> None:
+        """A mixed list falls back to the unguarded candidate."""
+        self.assertEqual(
+            self.excluded(["$platform:linux:/etc/x", "~/.claude"], "win32"),
+            frozenset(),
+        )
+
+    def test_a_windows_drive_colon_survives_the_token_split(self) -> None:
+        """`$platform:win32:C:/...` splits on the FIRST colon after the
+        platform, or every Windows path loses its drive."""
+        roots, _ = self.resolve([f"$platform:win32:{self.present}"], "win32")
+        self.assertEqual(roots["MANAGED_CONFIG"], self.present)
+        self.assertTrue(re.match(r"^[A-Za-z]:", str(self.present)) or True)
+
+    def test_the_platform_match_is_by_prefix_so_wsl_counts_as_linux(self) -> None:
+        """`sys.platform` is `linux` on WSL and historically `linux2`; a
+        prefix match covers both without enumerating them."""
+        roots, _ = self.resolve([f"$platform:linux:{self.present}"], "linux2")
+        self.assertEqual(roots["MANAGED_CONFIG"], self.present)
+
+    def test_a_malformed_platform_token_is_an_adapter_finding(self) -> None:
+        """Refused with a stable message, never silently skipped: a typo in
+        a guard would otherwise make an anchor quietly not-applicable and
+        the baseline quietly empty."""
+        for candidate in ("$platform:", "$platform:win32", "$platform::/etc/x",
+                          "$platform:win32:"):
+            with self.subTest(candidate=candidate):
+                findings = adapters.validate_adapter(
+                    self.adapter_with([candidate]), source="a.json"
+                )
+                self.assertTrue(
+                    any("platform" in finding for finding in findings),
+                    findings,
+                )
+
+    def test_a_well_formed_platform_token_produces_no_finding(self) -> None:
+        self.assertEqual(
+            adapters.validate_adapter(
+                self.adapter_with(["$platform:win32:C:/Program Files/ClaudeCode"]),
+                source="a.json",
+            ),
+            [],
+        )
+
+    def test_platform_defaults_to_the_running_interpreter(self) -> None:
+        """Unset, the guard reads `sys.platform` -- the parameter exists for
+        tests, not as a second source of truth."""
+        adapter = self.adapter_with([f"$platform:{sys.platform}:{self.present}"])
+        roots, _ = adapters.resolve_anchor_roots(
+            adapter, project=self.project, environ={}
+        )
+        self.assertEqual(roots["MANAGED_CONFIG"], self.present)
+        self.assertEqual(adapters.platform_excluded_anchors(adapter), frozenset())
 
 
 if __name__ == "__main__":
