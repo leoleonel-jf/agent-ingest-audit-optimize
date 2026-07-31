@@ -42,6 +42,15 @@ from ledgerlib.validate import validate_ledger
 
 PAYLOAD_SCHEMA = 1
 
+# The bundle's only shell. Design spec section 3 gives `build` no
+# `--template` flag, so the layout `assets/scripts/ledgerlib/` ->
+# `assets/templates/` is written down exactly once, here, and both the
+# command and the shell's own test suite read the same constant: a template
+# that moves breaks one import rather than two silent path expressions.
+TEMPLATE_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "templates" / "dashboard.html"
+)
+
 # Design spec section 5: exactly the two dictionaries the shell embeds. A
 # `lang` naming anything else cannot select a dictionary the shell actually
 # has, so it degrades to English here rather than reaching the template as a

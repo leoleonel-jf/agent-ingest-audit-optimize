@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Governance ledger</title>
+<style>
+/* One stylesheet, no font file, no image, nothing to fetch. Every colour is
+   a custom property so the dark palette is a swap rather than a second set
+   of rules, and every box uses logical properties so a right-to-left
+   dictionary would need no CSS at all. */
+
+:root {
+  color-scheme: light dark;
+
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --gap: 1.5rem;
+  --step: 0.35rem;
+  --measure: 68ch;
+
+  /* Light palette. Every ink/background pair below clears WCAG 2.2 AA at
+     body size; the muted ink clears it too, so secondary text is readable
+     rather than decorative. */
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --ink: #1a1a1a;
+  --ink-muted: #55524d;
+  --rule: #d3d0ca;
+  --accent: #1f4f8b;
+  --error: #8c1d1d;
+  --warning: #6f4a00;
+  --info: #2a4b7c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181a;
+    --surface: #1e2124;
+    --ink: #ececec;
+    --ink-muted: #b3b6b8;
+    --rule: #34383c;
+    --accent: #8fb8ef;
+    --error: #f19a9a;
+    --warning: #e2b871;
+    --info: #9dbbe8;
+  }
+}
+
+body[data-density="compact"] {
+  --gap: 0.9rem;
+  --step: 0.2rem;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--bg); }
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+code { font-family: var(--font-mono); font-size: 0.9em; }
+
+[hidden] { display: none !important; }
+
+.skip-link {
+  position: absolute;
+  inset-block-start: -4rem;
+  inset-inline-start: var(--gap);
+  z-index: 3;
+  padding: 0.4rem 0.7rem;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--accent);
+  transition: inset-block-start 120ms ease;
+}
+
+.skip-link:focus { inset-block-start: 0.5rem; }
+
+/* Header ------------------------------------------------------------- */
+
+.chrome {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: calc(var(--gap) * 1.2) var(--gap) var(--gap);
+  border-block-end: 1px solid var(--rule);
+}
+
+.chrome h1 {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+
+.tagline {
+  margin: var(--step) 0 0;
+  max-inline-size: var(--measure);
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  align-items: center;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.group .label {
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+.hint {
+  margin: 0;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+button {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+}
+
+button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Panel navigation ---------------------------------------------------- */
+
+.panels {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  padding: 0.45rem var(--gap);
+  background: var(--bg);
+  border-block-end: 1px solid var(--rule);
+}
+
+.panels button {
+  background: transparent;
+  border-color: transparent;
+  padding: 0.3rem 0.65rem;
+}
+
+.panels button[aria-selected="true"] {
+  background: var(--surface);
+  border-color: var(--rule);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Panels -------------------------------------------------------------- */
+
+main { padding: var(--gap); }
+main:focus { outline: none; }
+
+.panel { max-inline-size: var(--measure); }
+
+.panel h2 {
+  margin: 0 0 var(--step);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.empty {
+  margin: 0 0 var(--gap);
+  color: var(--ink-muted);
+}
+
+.reference {
+  margin: 0 0 var(--gap);
+}
+
+.reference dt {
+  margin-block-start: var(--step);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.reference dd {
+  margin: 0 0 var(--step);
+  margin-inline-start: 0;
+  color: var(--ink-muted);
+}
+
+/* Status blocks. Severity is carried by a glyph and a word as well as by
+   the rule colour, so nothing depends on seeing the hue. */
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0 0 var(--gap);
+  padding: 0.55rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-inline-start: 3px solid var(--rule);
+}
+
+.status .status-label {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+}
+
+.status .status-text { flex: 1 1 20ch; }
+
+.status-error { border-inline-start-color: var(--error); }
+.status-error .glyph,
+.status-error .status-label { color: var(--error); }
+
+.status-warning { border-inline-start-color: var(--warning); }
+.status-warning .glyph,
+.status-warning .status-label { color: var(--warning); }
+
+.status-info { border-inline-start-color: var(--info); }
+.status-info .glyph,
+.status-info .status-label { color: var(--info); }
+
+.keys {
+  margin: 0;
+  padding-inline-start: 1.2rem;
+  color: var(--ink-muted);
+}
+
+/* Footer -------------------------------------------------------------- */
+
+footer {
+  margin-block-start: calc(var(--gap) * 2);
+  padding: var(--gap);
+  border-block-start: 1px solid var(--rule);
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 1.75rem;
+  margin: 0;
+}
+
+.meta div { display: flex; gap: 0.4rem; }
+.meta dt { font-weight: 600; }
+.meta dd { margin: 0; margin-inline-start: 0; font-family: var(--font-mono); }
+
+/* Narrow widths. The document is a single column already; below the
+   breakpoint the tables Tasks 4-5 add fold into labelled cards, and the
+   panel bar stops sticking so it never eats a short viewport. */
+
+@media (max-width: 720px) {
+  :root { --gap: 1rem; }
+
+  .chrome { align-items: flex-start; }
+  .panels { position: static; }
+
+  .grid-table thead {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .grid-table tr {
+    display: block;
+    margin-block-end: var(--gap);
+    padding: 0.5rem;
+    border: 1px solid var(--rule);
+  }
+
+  .grid-table td {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    padding: 0.1rem 0;
+    border: 0;
+  }
+
+  .grid-table td::before {
+    content: attr(data-label);
+    color: var(--ink-muted);
+    font-weight: 600;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Print: black on white, no controls, every panel in document order so the
+   PDF is the whole ledger rather than whichever tab was open. */
+
+@media print {
+  :root {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --ink: #000000;
+    --ink-muted: #2b2b2b;
+    --rule: #8a8a8a;
+    --accent: #000000;
+    --error: #000000;
+    --warning: #000000;
+    --info: #000000;
+  }
+
+  .skip-link,
+  .panels,
+  .actions { display: none !important; }
+
+  body { background: #ffffff; color: #000000; font-size: 11pt; }
+  main { padding: 0; }
+
+  .panel[hidden] { display: block !important; }
+
+  .panel {
+    max-inline-size: none;
+    margin-block-end: 1.5rem;
+    break-inside: avoid;
+  }
+}
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#aio-main" id="aio-skip"></a>
+
+<header class="chrome">
+  <div class="identity">
+    <h1 id="aio-title"></h1>
+    <p class="tagline" id="aio-tagline"></p>
+  </div>
+  <div class="actions" id="aio-actions"></div>
+</header>
+
+<nav class="panels" id="aio-nav" role="tablist"></nav>
+
+<main id="aio-main" tabindex="-1">
+  <noscript>
+    <p class="empty">This page reads its ledger from embedded data and needs scripting enabled to do it. The same content is available as text: see references/DASHBOARD.md.</p>
+  </noscript>
+  <section class="panel" data-panel="overview" id="aio-panel-overview" role="tabpanel" aria-labelledby="aio-tab-overview" tabindex="0" hidden></section>
+  <section class="panel" data-panel="inventory" id="aio-panel-inventory" role="tabpanel" aria-labelledby="aio-tab-inventory" tabindex="0" hidden></section>
+  <section class="panel" data-panel="changes" id="aio-panel-changes" role="tabpanel" aria-labelledby="aio-tab-changes" tabindex="0" hidden></section>
+  <section class="panel" data-panel="provenance" id="aio-panel-provenance" role="tabpanel" aria-labelledby="aio-tab-provenance" tabindex="0" hidden></section>
+  <section class="panel" data-panel="rollback" id="aio-panel-rollback" role="tabpanel" aria-labelledby="aio-tab-rollback" tabindex="0" hidden></section>
+  <section class="panel" data-panel="backlog" id="aio-panel-backlog" role="tabpanel" aria-labelledby="aio-tab-backlog" tabindex="0" hidden></section>
+  <section class="panel" data-panel="decisions" id="aio-panel-decisions" role="tabpanel" aria-labelledby="aio-tab-decisions" tabindex="0" hidden></section>
+  <section class="panel" data-panel="materials" id="aio-panel-materials" role="tabpanel" aria-labelledby="aio-tab-materials" tabindex="0" hidden></section>
+  <section class="panel" data-panel="help" id="aio-panel-help" role="tabpanel" aria-labelledby="aio-tab-help" tabindex="0" hidden></section>
+</main>
+
+<footer>
+  <dl class="meta" id="aio-footer"></dl>
+</footer>
+
+<script type="application/json" id="aio-payload">{"payload_schema":1,"mode":"static","generated_at":null,"tool_version":null,"lang":null,"ledger":null,"computed":null}</script>
+
+<script type="application/json" id="aio-i18n">
+{
+  "en": {
+    "app.title": "Governance ledger",
+    "app.tagline": "Every change this plugin made to your agent setup, and the evidence behind it.",
+
+    "action.skip_to_main": "Skip to the ledger",
+    "action.language": "Language",
+    "action.lang_en": "English",
+    "action.lang_pt_br": "Português (Brasil)",
+    "action.density": "Density",
+    "action.density_comfortable": "Comfortable",
+    "action.density_compact": "Compact",
+    "action.palette_hint": "Ctrl+K — search records, files, and keys",
+    "action.panels": "Panels",
+
+    "status.error": "Error",
+    "status.warning": "Warning",
+    "status.info": "Note",
+
+    "banner.static.title": "Static mode — no ledger has been injected",
+    "banner.static.detail": "This page was opened straight from the plugin bundle, so three guarantees are unavailable: digest verification, drift classification, and rollback preview. Nothing shown here has been checked against a file on disk.",
+    "banner.built.title": "Built from a verified ledger",
+    "banner.built.detail": "This page was generated by dashboard.py build, which refuses any ledger that verify would reject. Digests, drift states, and rollback previews below were computed, not merely reported.",
+    "banner.stale": "This page is more than seven days old and describes the ledger as it was then. Rebuild with: dashboard.py build \u003cledger>",
+    "banner.parse_error": "The embedded data could not be read, so nothing below can be trusted and nothing was rendered. Rebuild this page with: dashboard.py build \u003cledger>",
+    "banner.schema_unknown": "The embedded data uses a payload format this page does not know how to read. Rebuild it with a matching tool version: dashboard.py build \u003cledger>",
+    "banner.degraded": "Some computations failed while this page was built. The panels that depend on them are missing their guarantee and say so rather than showing a blank:",
+
+    "panel.overview.title": "Overview",
+    "panel.overview.empty": "No ledger is loaded. Generate this page from a ledger with: dashboard.py build \u003cledger>",
+    "panel.inventory.title": "Inventory",
+    "panel.inventory.empty": "No baseline has been captured. Record what a client currently has with: dashboard.py scan \u003cclient> --project \u003croot> — the workflow then appends that baseline to the ledger.",
+    "panel.changes.title": "Changes",
+    "panel.changes.empty": "No change has been recorded. This panel fills once a RUN record lands in the ledger, which happens after an authorized implementation writes one.",
+    "panel.provenance.title": "Provenance",
+    "panel.provenance.empty": "Nothing to trace yet. Provenance is built here from each RUN record back to its PROPOSAL, its MATERIAL, and that material's evidence, so it fills as soon as the first change is recorded.",
+    "panel.rollback.title": "Rollback",
+    "panel.rollback.empty": "No rollback preview is available. Compute one with: dashboard.py rollback-preview \u003cledger> RUN-ID — a built page computes it for every RUN that kept a backup.",
+    "panel.backlog.title": "Backlog",
+    "panel.backlog.empty": "The backlog is empty. Findings that were rejected, deferred, or judged not worth their risk are recorded here together with the trigger that would bring them back.",
+    "panel.decisions.title": "Decisions",
+    "panel.decisions.empty": "No decision has been recorded. ADR records are never filtered out of this panel: a decision that was later replaced stays visible, marked SUPERSEDED.",
+    "panel.materials.title": "Materials",
+    "panel.materials.empty": "No material has been audited. Each MATERIAL record carries the evidence its claims rest on, along with the date that evidence stops counting as current.",
+    "panel.help.title": "Help",
+    "panel.help.empty": "The reference below explains how to read the other panels. It is the short form; references/DASHBOARD.md in the plugin carries the full text.",
+
+    "state.IN_PLACE.tip": "The recorded change is still exactly as this ledger describes it: the digest taken from disk matches the one recorded.",
+    "state.DRIFTED.tip": "The file changed after the recorded change. Someone or something edited it since, and this ledger no longer describes what is on disk.",
+    "state.REVERTED.tip": "The file is back to what it was before the recorded change. The change is no longer in effect.",
+    "state.MISSING.tip": "The file this change targeted no longer exists at the anchor that was recorded for it.",
+    "state.UNVERIFIABLE.tip": "No digest could be compared. Either the anchor could not be resolved on this machine, or nothing was recorded to compare against.",
+    "state.HEALTHY.tip": "The backup is present and every target could be classified: this rollback should restore exactly what it claims.",
+    "state.AT_RISK.tip": "The backup is present, but at least one target changed or disappeared since the run. A rollback may not restore what it claims.",
+    "state.BROKEN.tip": "The backup itself cannot be trusted, because it is missing or unreadable. No promise about this rollback holds.",
+
+    "help.canonical_labels": "Operating states, classifications, statuses, and record IDs stay in English on every screen. They are the tool's vocabulary rather than prose: translating them would break the match between what you read here and what the commands print.",
+    "help.self_reported": "SELF-REPORTED marks anything the tooling did not check. An agent stated it and nothing verified it. Digests, drift states, and rollback previews count as verified only on a page produced by dashboard.py build.",
+    "help.modes": "A built page carries a ledger that already passed verification, because build refuses any ledger verify would reject. A static page carries whatever was last injected by hand, and says so.",
+
+    "footer.version": "Tool version",
+    "footer.mode": "Mode",
+    "footer.generated": "Generated",
+    "footer.age": "Age in days",
+    "footer.unknown": "unknown"
+  },
+  "pt-BR": {
+    "app.title": "Registro de governança",
+    "app.tagline": "Cada mudança que este plugin fez na sua configuração de agentes, e a evidência por trás dela.",
+
+    "action.skip_to_main": "Ir direto para o registro",
+    "action.language": "Idioma",
+    "action.lang_en": "English",
+    "action.lang_pt_br": "Português (Brasil)",
+    "action.density": "Densidade",
+    "action.density_comfortable": "Confortável",
+    "action.density_compact": "Compacta",
+    "action.palette_hint": "Ctrl+K — buscar registros, arquivos e chaves",
+    "action.panels": "Painéis",
+
+    "status.error": "Erro",
+    "status.warning": "Atenção",
+    "status.info": "Nota",
+
+    "banner.static.title": "Modo static — nenhum ledger foi injetado",
+    "banner.static.detail": "Esta página foi aberta direto do pacote do plugin, então três garantias não estão disponíveis: verificação de digest, classificação de drift e prévia de rollback. Nada do que aparece aqui foi conferido contra um arquivo em disco.",
+    "banner.built.title": "Gerada a partir de um ledger verificado",
+    "banner.built.detail": "Esta página foi gerada pelo dashboard.py build, que recusa qualquer ledger que o verify rejeitaria. Os digests, os estados de drift e as prévias de rollback abaixo foram calculados, e não apenas relatados.",
+    "banner.stale": "Esta página tem mais de sete dias e descreve o ledger como ele estava naquele momento. Gere de novo com: dashboard.py build \u003cledger>",
+    "banner.parse_error": "Não foi possível ler os dados embutidos, então nada abaixo seria confiável e nada foi exibido. Gere esta página de novo com: dashboard.py build \u003cledger>",
+    "banner.schema_unknown": "Os dados embutidos usam um formato de payload que esta página não sabe ler. Gere-a de novo com uma versão compatível da ferramenta: dashboard.py build \u003cledger>",
+    "banner.degraded": "Alguns cálculos falharam durante a geração desta página. Os painéis que dependem deles estão sem a garantia correspondente e dizem isso, em vez de mostrar um espaço em branco:",
+
+    "panel.overview.title": "Visão geral",
+    "panel.overview.empty": "Nenhum ledger carregado. Gere esta página a partir de um ledger com: dashboard.py build \u003cledger>",
+    "panel.inventory.title": "Inventário",
+    "panel.inventory.empty": "Nenhuma baseline foi capturada. Registre o que um cliente tem hoje com: dashboard.py scan \u003cclient> --project \u003croot> — o fluxo de trabalho depois anexa essa baseline ao ledger.",
+    "panel.changes.title": "Mudanças",
+    "panel.changes.empty": "Nenhuma mudança registrada. Este painel se preenche quando um registro RUN entra no ledger, o que acontece depois que uma implementação autorizada grava um.",
+    "panel.provenance.title": "Procedência",
+    "panel.provenance.empty": "Nada a rastrear ainda. A procedência é montada aqui de cada registro RUN de volta até seu PROPOSAL, seu MATERIAL e a evidência desse material, então ela se preenche assim que a primeira mudança for registrada.",
+    "panel.rollback.title": "Rollback",
+    "panel.rollback.empty": "Nenhuma prévia de rollback disponível. Calcule uma com: dashboard.py rollback-preview \u003cledger> RUN-ID — uma página gerada calcula isso para todo RUN que guardou um backup.",
+    "panel.backlog.title": "Backlog",
+    "panel.backlog.empty": "O backlog está vazio. Achados que foram rejeitados, adiados ou julgados sem retorno diante do risco ficam registrados aqui, junto com o gatilho que os traria de volta.",
+    "panel.decisions.title": "Decisões",
+    "panel.decisions.empty": "Nenhuma decisão registrada. Registros ADR nunca são filtrados deste painel: uma decisão que depois foi substituída continua visível, marcada como SUPERSEDED.",
+    "panel.materials.title": "Materiais",
+    "panel.materials.empty": "Nenhum material auditado. Cada registro MATERIAL carrega a evidência em que suas afirmações se apoiam, junto com a data em que essa evidência deixa de valer como atual.",
+    "panel.help.title": "Ajuda",
+    "panel.help.empty": "A referência abaixo explica como ler os outros painéis. É a versão curta; o arquivo references/DASHBOARD.md do plugin traz o texto completo.",
+
+    "state.IN_PLACE.tip": "A mudança registrada continua exatamente como este ledger a descreve: o digest tirado do disco confere com o que foi registrado.",
+    "state.DRIFTED.tip": "O arquivo mudou depois da alteração registrada. Alguém ou alguma outra ferramenta o editou desde então, e este ledger já não descreve o que está em disco.",
+    "state.REVERTED.tip": "O arquivo voltou a ser o que era antes da alteração registrada. A mudança não está mais em vigor.",
+    "state.MISSING.tip": "O arquivo que essa mudança alterou não existe mais no anchor que foi registrado para ele.",
+    "state.UNVERIFIABLE.tip": "Nenhum digest pôde ser comparado. Ou o anchor não pôde ser resolvido nesta máquina, ou nada foi registrado para servir de comparação.",
+    "state.HEALTHY.tip": "O backup está presente e todos os alvos puderam ser classificados: este rollback deve restaurar exatamente o que promete.",
+    "state.AT_RISK.tip": "O backup está presente, mas pelo menos um alvo mudou ou sumiu desde a execução. O rollback pode não restaurar o que promete.",
+    "state.BROKEN.tip": "O próprio backup não é confiável, porque está ausente ou ilegível. Nenhuma promessa sobre este rollback se sustenta.",
+
+    "help.canonical_labels": "Estados de operação, classificações, status e IDs de registro continuam em inglês em todas as telas. Eles são o vocabulário da ferramenta, e não texto corrido: traduzi-los quebraria a correspondência entre o que você lê aqui e o que os comandos imprimem.",
+    "help.self_reported": "SELF-REPORTED marca tudo o que a ferramenta não conferiu. Um agente afirmou e nada verificou. Digests, estados de drift e prévias de rollback só contam como verificados em uma página produzida pelo dashboard.py build.",
+    "help.modes": "Uma página built carrega um ledger que já passou pela verificação, porque o build recusa qualquer ledger que o verify rejeitaria. Uma página static carrega o que quer que tenha sido injetado à mão por último — e diz isso.",
+
+    "footer.version": "Versão da ferramenta",
+    "footer.mode": "Modo",
+    "footer.generated": "Gerada em",
+    "footer.age": "Idade em dias",
+    "footer.unknown": "desconhecida"
+  }
+}
+</script>
+
+<script>
+/* The shell.
+
+   Three rules hold this file together, and the static suite
+   (dashboard/tests/test_shell.py) pins all three by reading this source
+   rather than by rendering it:
+
+   1. Ledger content enters through exactly one place, the JSON island above,
+      and leaves through exactly one place, h() below. Text always lands as a
+      text node or a textContent assignment. No markup is ever assembled from
+      a string, which is why none of the DOM sinks the suite greps for
+      appears anywhere in this file -- not in code, and not in these comments
+      either, since that grep is deliberately unconditional.
+
+   2. Every user-visible string comes from the dictionaries. The one
+      exception is LAST_RESORT, which exists precisely for the case where the
+      dictionaries cannot be read.
+
+   3. The page asks for nothing. No fetch, no image, no font, no timer that
+      takes a string. Opening this file offline and opening it online produce
+      the same document. */
+
+(function () {
+  "use strict";
+
+  var PAYLOAD_SCHEMA = 1;
+
+  /* Panel order is the reading order of the whole tool: what happened, what
+     exists, what changed, where it came from, how to undo it, what was
+     deferred, what was decided, what it rests on, how to read any of it. */
+  const PANELS = [
+    "overview",
+    "inventory",
+    "changes",
+    "provenance",
+    "rollback",
+    "backlog",
+    "decisions",
+    "materials",
+    "help"
+  ];
+
+  var DEFAULT_PANEL = "overview";
+  var FALLBACK_LANG = "en";
+  var STALE_AFTER_DAYS = 7;
+  var DAY_MS = 86400000;
+  var DENSITIES = ["comfortable", "compact"];
+  var STORE_LANG = "aio.lang";
+  var STORE_DENSITY = "aio.density";
+
+  /* The canonical vocabulary, English on screen in every language (design
+     spec section 5). Held here as data so the Help panel and the Task 4-5
+     renderers name the same eight states from one list. */
+  var DRIFT_STATES = ["IN_PLACE", "DRIFTED", "REVERTED", "MISSING", "UNVERIFIABLE"];
+  var ROLLBACK_INDICATORS = ["HEALTHY", "AT_RISK", "BROKEN"];
+
+  /* Functional glyphs, not decoration: severity must be legible without
+     colour (design spec section 7, acceptance item 3), so every status
+     carries a shape and a word as well as a hue. */
+  var GLYPHS = { error: "✕", warning: "▲", info: "●" };
+
+  /* The only English sentence in this file. If the dictionary island itself
+     cannot be read there is no key left to look a message up by, and saying
+     nothing would leave a blank page that looks merely empty. */
+  var LAST_RESORT = "This page is damaged: its embedded text could not be read.";
+
+  var ALLOWED_ATTRS = [
+    "class", "id", "role", "title", "tabindex", "lang", "type", "for",
+    "href", "hidden", "colspan", "scope"
+  ];
+
+  var DICTS = null;
+  var LANG = FALLBACK_LANG;
+  var PAYLOAD = null;
+  var NAV_BUTTONS = [];
+
+  /* Building the DOM ------------------------------------------------- */
+
+  function attrAllowed(name) {
+    if (name.slice(0, 2) === "on") { return false; }
+    if (name.slice(0, 5) === "aria-") { return true; }
+    if (name.slice(0, 5) === "data-") { return true; }
+    return ALLOWED_ATTRS.indexOf(name) !== -1;
+  }
+
+  /* The gate every generated link passes through. Two shapes are legal: an
+     in-page fragment, and a file: link assembled from an anchor this tool
+     resolved itself. Anything else becomes "#" -- refusal is silent because
+     a rejected link is a rendering decision, not an event worth a message
+     the reader cannot act on. */
+  function safeHref(value) {
+    if (typeof value !== "string") { return "#"; }
+    if (value.charAt(0) === "#") { return value; }
+    if (value.lastIndexOf("file://", 0) === 0) { return value; }
+    return "#";
+  }
+
+  function h(tag, attrs, ...children) {
+    var node = document.createElement(tag);
+    if (attrs) {
+      Object.keys(attrs).forEach(function (name) {
+        var value = attrs[name];
+        if (value === null || value === undefined || value === false) { return; }
+        if (!attrAllowed(name)) { return; }
+        if (name === "href") {
+          node.setAttribute(name, safeHref(String(value)));
+          return;
+        }
+        node.setAttribute(name, String(value));
+      });
+    }
+    appendAll(node, children);
+    return node;
+  }
+
+  function appendAll(node, children) {
+    children.forEach(function (child) {
+      if (child === null || child === undefined || child === false) { return; }
+      if (Array.isArray(child)) { appendAll(node, child); return; }
+      if (typeof child === "string") {
+        node.appendChild(document.createTextNode(child));
+        return;
+      }
+      node.appendChild(child);
+    });
+  }
+
+  function clear(node) {
+    while (node.firstChild) { node.removeChild(node.firstChild); }
+  }
+
+  function statusBlock(severity, ...children) {
+    return h(
+      "p",
+      { class: "status status-" + severity, role: severity === "error" ? "alert" : null },
+      h("span", { class: "glyph", "aria-hidden": "true" }, GLYPHS[severity]),
+      h("span", { class: "status-label" }, t("status." + severity)),
+      h("span", { class: "status-text" }, children)
+    );
+  }
+
+  /* Language ---------------------------------------------------------- */
+
+  function t(key) {
+    var dict = DICTS ? DICTS[LANG] : null;
+    if (dict && typeof dict[key] === "string") { return dict[key]; }
+    var fallback = DICTS ? DICTS[FALLBACK_LANG] : null;
+    if (fallback && typeof fallback[key] === "string") { return fallback[key]; }
+    /* A key with no string anywhere renders as itself: visibly wrong, which
+       is the point -- the parity test exists so this never ships. */
+    return key;
+  }
+
+  function matchLang(code) {
+    if (typeof code !== "string" || code === "") { return null; }
+    var keys = DICTS ? Object.keys(DICTS) : [];
+    var wanted = code.toLowerCase();
+    var i;
+    for (i = 0; i !== keys.length; i += 1) {
+      if (keys[i].toLowerCase() === wanted) { return keys[i]; }
+    }
+    var prefix = wanted.split("-")[0];
+    for (i = 0; i !== keys.length; i += 1) {
+      if (keys[i].toLowerCase().split("-")[0] === prefix) { return keys[i]; }
+    }
+    return null;
+  }
+
+  /* Design spec section 5's order: the fragment wins, then what the build
+     recorded, then what this reader chose last time on this machine, then
+     the browser's own preference, then English. The stored preference sits
+     below the payload deliberately: a page built --lang pt-BR states a
+     choice someone made about this ledger, and a leftover preference should
+     not overrule it. */
+  function resolveLang(fragmentLang, payloadLang) {
+    var candidates = [fragmentLang, payloadLang, stored(STORE_LANG), navigatorLang()];
+    for (var i = 0; i !== candidates.length; i += 1) {
+      var matched = matchLang(candidates[i]);
+      if (matched) { return matched; }
+    }
+    return FALLBACK_LANG;
+  }
+
+  function navigatorLang() {
+    try {
+      return window.navigator.language || null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  /* Preferences ------------------------------------------------------- */
+
+  /* file: pages have an opaque origin in some browsers, so storage throws
+     rather than returning null. Design spec section 4 accepts that: the
+     preference simply resets per session. */
+  function stored(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function store(key, value) {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch (err) {
+      return;
+    }
+  }
+
+  function currentDensity() {
+    var saved = stored(STORE_DENSITY);
+    return DENSITIES.indexOf(saved) === -1 ? DENSITIES[0] : saved;
+  }
+
+  function applyDensity(value) {
+    document.body.setAttribute("data-density", value);
+  }
+
+  /* Routing ----------------------------------------------------------- */
+
+  function decode(value) {
+    try {
+      return decodeURIComponent(value);
+    } catch (err) {
+      return value;
+    }
+  }
+
+  function parseHash() {
+    var raw = String(window.location.hash || "");
+    if (raw.charAt(0) === "#") { raw = raw.slice(1); }
+    var state = { panel: DEFAULT_PANEL, lang: null, f: "" };
+    raw.split("&").forEach(function (part) {
+      if (part === "") { return; }
+      var split = part.indexOf("=");
+      var key = decode(split === -1 ? part : part.slice(0, split));
+      var value = split === -1 ? "" : decode(part.slice(split + 1));
+      if (key === "panel" && PANELS.indexOf(value) !== -1) {
+        state.panel = value;
+      } else if (key === "lang") {
+        state.lang = value;
+      } else if (key === "f") {
+        state.f = value;
+      }
+    });
+    return state;
+  }
+
+  function buildHash(state) {
+    var parts = ["panel=" + encodeURIComponent(state.panel)];
+    if (state.lang) { parts.push("lang=" + encodeURIComponent(state.lang)); }
+    if (state.f) { parts.push("f=" + encodeURIComponent(state.f)); }
+    return "#" + parts.join("&");
+  }
+
+  /* A panel switch is navigation and earns a history entry; a language or
+     filter change is a view preference and replaces instead, so the back
+     button still leaves the page rather than unwinding a dozen keystrokes
+     (design spec section 4). */
+  function goTo(state, replaceOnly) {
+    var next = buildHash(state);
+    if (window.location.hash === next) { render(); return; }
+    if (replaceOnly) { window.location.replace(next); return; }
+    window.location.hash = next;
+  }
+
+  /* Rendering --------------------------------------------------------- */
+
+  function render() {
+    var state = parseHash();
+    LANG = resolveLang(state.lang, PAYLOAD ? PAYLOAD.lang : null);
+    document.documentElement.lang = LANG;
+    document.title = t("app.title");
+    renderChrome(state);
+    renderNav(state);
+    renderPanels(state);
+    renderFooter();
+  }
+
+  function renderChrome(state) {
+    document.getElementById("aio-skip").textContent = t("action.skip_to_main");
+    document.getElementById("aio-title").textContent = t("app.title");
+    document.getElementById("aio-tagline").textContent = t("app.tagline");
+
+    var actions = document.getElementById("aio-actions");
+    clear(actions);
+
+    actions.appendChild(h(
+      "div",
+      { class: "group", role: "group", "aria-label": t("action.language") },
+      h("span", { class: "label" }, t("action.language")),
+      langButton("en", "action.lang_en", state),
+      langButton("pt-BR", "action.lang_pt_br", state)
+    ));
+
+    actions.appendChild(h(
+      "div",
+      { class: "group", role: "group", "aria-label": t("action.density") },
+      h("span", { class: "label" }, t("action.density")),
+      densityButton("comfortable", "action.density_comfortable"),
+      densityButton("compact", "action.density_compact")
+    ));
+
+    actions.appendChild(h("p", { class: "hint" }, t("action.palette_hint")));
+  }
+
+  function langButton(code, key, state) {
+    var node = h(
+      "button",
+      { type: "button", lang: code, "aria-pressed": String(code === LANG) },
+      t(key)
+    );
+    node.addEventListener("click", function () {
+      store(STORE_LANG, code);
+      goTo({ panel: state.panel, lang: code, f: state.f }, true);
+    });
+    return node;
+  }
+
+  function densityButton(value, key) {
+    var node = h(
+      "button",
+      { type: "button", "aria-pressed": String(value === currentDensity()) },
+      t(key)
+    );
+    node.addEventListener("click", function () {
+      store(STORE_DENSITY, value);
+      applyDensity(value);
+      render();
+    });
+    return node;
+  }
+
+  function buildNav() {
+    var nav = document.getElementById("aio-nav");
+    clear(nav);
+    NAV_BUTTONS = PANELS.map(function (panel) {
+      var node = h("button", {
+        type: "button",
+        role: "tab",
+        id: "aio-tab-" + panel,
+        "aria-controls": "aio-panel-" + panel,
+        "aria-selected": "false",
+        tabindex: "-1"
+      });
+      node.addEventListener("click", function () {
+        goTo({ panel: panel, lang: parseHash().lang, f: parseHash().f }, false);
+        node.focus();
+      });
+      node.addEventListener("keydown", onNavKey);
+      nav.appendChild(node);
+      return node;
+    });
+  }
+
+  /* Roving tabindex: the tab strip is one stop in the tab order and the
+     arrow keys move within it, which is what a tablist owes a keyboard. */
+  function onNavKey(event) {
+    var active = parseHash().panel;
+    var index = PANELS.indexOf(active);
+    var next = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      next = (index + 1) % PANELS.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      next = (index + PANELS.length - 1) % PANELS.length;
+    } else if (event.key === "Home") {
+      next = 0;
+    } else if (event.key === "End") {
+      next = PANELS.length - 1;
+    }
+    if (next === null) { return; }
+    event.preventDefault();
+    goTo({ panel: PANELS[next], lang: parseHash().lang, f: parseHash().f }, false);
+    NAV_BUTTONS[next].focus();
+  }
+
+  function renderNav(state) {
+    var nav = document.getElementById("aio-nav");
+    nav.hidden = false;
+    nav.setAttribute("aria-label", t("action.panels"));
+    PANELS.forEach(function (panel, index) {
+      var node = NAV_BUTTONS[index];
+      if (!node) { return; }
+      node.textContent = t("panel." + panel + ".title");
+      var selected = panel === state.panel;
+      node.setAttribute("aria-selected", String(selected));
+      node.setAttribute("tabindex", selected ? "0" : "-1");
+    });
+  }
+
+  function panelSection(panel) {
+    return document.getElementById("aio-panel-" + panel);
+  }
+
+  function renderPanels(state) {
+    PANELS.forEach(function (panel) {
+      var section = panelSection(panel);
+      if (!section) { return; }
+      section.hidden = panel !== state.panel;
+      clear(section);
+      section.appendChild(h("h2", null, t("panel." + panel + ".title")));
+      if (panel === "overview") {
+        renderOverview(section);
+      } else if (panel === "help") {
+        renderHelp(section);
+      } else {
+        /* Tasks 4-5 replace this with the real renderer. Until then a panel
+           states what would fill it and the command that does the filling,
+           which is what design spec section 4 asks empty states to do. */
+        section.appendChild(h("p", { class: "empty" }, t("panel." + panel + ".empty")));
+      }
+    });
+  }
+
+  function renderOverview(section) {
+    if (PAYLOAD.mode === "static") {
+      section.appendChild(statusBlock("warning", t("banner.static.title")));
+      section.appendChild(h("p", { class: "empty" }, t("banner.static.detail")));
+    } else {
+      section.appendChild(statusBlock("info", t("banner.built.title")));
+      section.appendChild(h("p", { class: "empty" }, t("banner.built.detail")));
+      var age = ageInDays(PAYLOAD.generated_at);
+      if (age !== null && age > STALE_AFTER_DAYS) {
+        section.appendChild(statusBlock("warning", t("banner.stale")));
+      }
+    }
+
+    var degraded = degradedKeys();
+    if (degraded.length !== 0) {
+      section.appendChild(statusBlock("warning", t("banner.degraded")));
+      section.appendChild(h(
+        "ul",
+        { class: "keys" },
+        degraded.map(function (key) { return h("li", null, h("code", null, key)); })
+      ));
+    }
+
+    if (!PAYLOAD.ledger) {
+      section.appendChild(h("p", { class: "empty" }, t("panel.overview.empty")));
+    }
+  }
+
+  /* Design spec section 14: a sub-computation that failed carries an error
+     message instead of a report, and the panel that depends on it must name
+     the missing guarantee rather than render a blank that reads as "none". */
+  function degradedKeys() {
+    var computed = PAYLOAD.computed;
+    if (!computed || typeof computed !== "object") { return []; }
+    var names = [];
+    ["drift", "previews", "expired_evidence", "unreachable_projects"].forEach(function (key) {
+      if (isError(computed[key])) { names.push("computed." + key); }
+    });
+    var previews = computed.previews;
+    if (previews && typeof previews === "object" && !isError(previews)) {
+      Object.keys(previews).forEach(function (runId) {
+        if (isError(previews[runId])) { names.push("computed.previews." + runId); }
+      });
+    }
+    return names;
+  }
+
+  function isError(value) {
+    return Boolean(value) && typeof value === "object" && typeof value.error === "string";
+  }
+
+  /* The Help panel needs no payload: it is dictionary content, so it is
+     already final. The canonical state names render as English text with
+     their translated gloss beside them -- the gloss is also the tooltip the
+     Task 4-5 renderers attach to the same label inline. */
+  function renderHelp(section) {
+    section.appendChild(h("p", { class: "empty" }, t("panel.help.empty")));
+    section.appendChild(h("p", { class: "empty" }, t("help.modes")));
+    section.appendChild(h("p", { class: "empty" }, t("help.self_reported")));
+    section.appendChild(h("p", { class: "empty" }, t("help.canonical_labels")));
+
+    var list = h("dl", { class: "reference" });
+    DRIFT_STATES.concat(ROLLBACK_INDICATORS).forEach(function (state) {
+      var tip = t("state." + state + ".tip");
+      list.appendChild(h("dt", null, h("code", { lang: "en", title: tip }, state)));
+      list.appendChild(h("dd", null, tip));
+    });
+    section.appendChild(list);
+  }
+
+  /* Design spec section 4's staleness deviation: a file: page cannot stat
+     the ledger without issuing a request, so the page reports when it was
+     generated and how long ago that was, and says plainly that a static
+     page shows whatever was last injected. Date.now() at view time is fine
+     here -- this is presentation, not evidence. */
+  function ageInDays(value) {
+    if (typeof value !== "string" || value === "") { return null; }
+    var when = Date.parse(value);
+    if (isNaN(when)) { return null; }
+    return Math.floor((Date.now() - when) / DAY_MS);
+  }
+
+  function renderFooter() {
+    var list = document.getElementById("aio-footer");
+    clear(list);
+    var age = ageInDays(PAYLOAD.generated_at);
+    [
+      [t("footer.version"), textOr(PAYLOAD.tool_version)],
+      [t("footer.mode"), textOr(PAYLOAD.mode)],
+      [t("footer.generated"), textOr(PAYLOAD.generated_at)],
+      [t("footer.age"), age === null ? t("footer.unknown") : String(age)]
+    ].forEach(function (pair) {
+      list.appendChild(h(
+        "div",
+        null,
+        h("dt", null, pair[0]),
+        h("dd", null, pair[1])
+      ));
+    });
+  }
+
+  function textOr(value) {
+    return typeof value === "string" && value !== "" ? value : t("footer.unknown");
+  }
+
+  /* Failure ----------------------------------------------------------- */
+
+  /* Design spec section 1.1: a payload that cannot be read never falls
+     through to a partial render. The panels are removed, not hidden, so
+     there is nothing stale left on screen to mistake for data. */
+  function fatal(message) {
+    var main = document.getElementById("aio-main");
+    clear(main);
+    main.appendChild(statusBlock("error", message));
+    var nav = document.getElementById("aio-nav");
+    if (nav) { nav.hidden = true; }
+    var footer = document.getElementById("aio-footer");
+    if (footer) { clear(footer); }
+  }
+
+  function readIsland(id) {
+    var node = document.getElementById(id);
+    if (!node) { throw new Error("island " + id + " is absent"); }
+    return JSON.parse(node.textContent);
+  }
+
+  /* Boot -------------------------------------------------------------- */
+
+  try {
+    DICTS = readIsland("aio-i18n");
+  } catch (err) {
+    DICTS = null;
+  }
+
+  if (!DICTS || typeof DICTS !== "object" || !DICTS[FALLBACK_LANG]) {
+    DICTS = null;
+    fatal(LAST_RESORT);
+    return;
+  }
+
+  applyDensity(currentDensity());
+  LANG = resolveLang(parseHash().lang, null);
+  document.documentElement.lang = LANG;
+
+  var skip = document.getElementById("aio-skip");
+  skip.textContent = t("action.skip_to_main");
+  /* The href is a real fragment so the link works without scripting, but
+     following it would rewrite the hash the router owns and silently reset
+     the open panel, so the handler moves focus directly instead. */
+  skip.addEventListener("click", function (event) {
+    event.preventDefault();
+    document.getElementById("aio-main").focus();
+  });
+
+  try {
+    PAYLOAD = readIsland("aio-payload");
+  } catch (err) {
+    fatal(t("banner.parse_error"));
+    return;
+  }
+
+  if (!PAYLOAD || typeof PAYLOAD !== "object" || Array.isArray(PAYLOAD)) {
+    fatal(t("banner.parse_error"));
+    return;
+  }
+
+  /* Forward compatibility: a payload written by a newer tool may mean
+     anything, so an unknown schema is treated exactly like an unreadable
+     one rather than being rendered on a guess. */
+  if (PAYLOAD.payload_schema !== PAYLOAD_SCHEMA) {
+    fatal(t("banner.schema_unknown"));
+    return;
+  }
+
+  buildNav();
+  window.addEventListener("hashchange", render);
+  render();
+}());
+</script>
+
+</body>
+</html>
