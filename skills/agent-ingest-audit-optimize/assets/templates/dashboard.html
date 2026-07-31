@@ -460,12 +460,69 @@ main:focus { outline: none; }
 
 /* An evidence source is frequently a URL, and it is rendered as text on
    purpose (design spec section 1.3): it wraps anywhere so a long one does
-   not push the table wider than the viewport. */
+   not push the table wider than the viewport. An anchor and a digest get the
+   same treatment for the same reason -- both are long, both are copied more
+   often than they are read. */
 .source,
-.path {
+.path,
+.digest {
   font-family: var(--font-mono);
   font-size: 0.82rem;
   overflow-wrap: anywhere;
+}
+
+/* Run blocks ------------------------------------------------------------
+   The Changes and Rollback panels list runs rather than rows: a run carries
+   a header, a set of targets, and -- in Rollback -- four labelled sets, none
+   of which fit one table row. The severity rule sits on the block's
+   inline-start edge, the same treatment an indicator card gets, so the two
+   panels agree with the cards about which colour means what. */
+
+.run {
+  margin: 0 0 var(--gap);
+  padding: 0.55rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-inline-start: 3px solid var(--rule);
+}
+
+.run h3 { margin-block-start: 0; }
+
+.run-error { border-inline-start-color: var(--error); }
+.run-warning { border-inline-start-color: var(--warning); }
+.run-info { border-inline-start-color: var(--info); }
+
+.panel h4 {
+  margin: var(--gap) 0 var(--step);
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Provenance chains -----------------------------------------------------
+   One native `details` per target: it opens with a click or with Enter, it
+   is in the tab order without a line of script, and it needs no ARIA. The
+   print block below unfolds them, because a collapsed chain would print as
+   its summary and the PDF would carry a Provenance panel with no
+   provenance in it. */
+
+.chain {
+  margin: 0 0 var(--step);
+  padding: 0.35rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+}
+
+.chain summary { cursor: pointer; }
+
+.chain-body { margin-block-start: var(--step); }
+
+.chain-list {
+  margin: 0 0 var(--step);
+  padding-inline-start: 1.2rem;
+  color: var(--ink-muted);
 }
 
 /* Footer -------------------------------------------------------------- */
@@ -580,6 +637,21 @@ footer {
     margin-block-end: 1.5rem;
     break-inside: avoid;
   }
+
+  /* The same failure mode as the hidden panels above, one level down: the
+     Provenance panel is nothing but collapsed `details`, so a printed ledger
+     would carry that panel's heading and none of its chains. Two rules
+     because engines hide the closed content two different ways -- older ones
+     by not laying the children out at all, current Chromium by putting
+     `content-visibility: hidden` on the generated content box -- and an
+     engine that knows neither selector ignores both, which is exactly where
+     it started. `open` is deliberately not set instead: it would unfold
+     every chain on screen too, and the panel would stop being a list. */
+  details > *:not(summary) { display: block !important; }
+  details::details-content { content-visibility: visible !important; }
+
+  .chain { break-inside: avoid; }
+  .chain summary { list-style: none; font-weight: 600; }
 }
 </style>
 </head>
@@ -708,15 +780,60 @@ footer {
     "table.updated": "Updated",
     "table.evidence": "Evidence",
     "table.links": "Links",
+    "table.key": "Key",
+    "table.before": "Before",
+    "table.after": "After",
+    "table.reversible": "Reversible",
+    "table.residual": "Residual effect",
 
     "value.yes": "yes",
     "value.no": "no",
+    "value.none": "none",
     "value.unknown": "not recorded",
 
     "filter.kind": "Kind",
     "filter.all": "All",
 
     "inventory.caption": "Everything the recorded baselines say this client has, one row per item.",
+
+    "changes.intro": "The ledger records a digest of each target before and after the change, not the file's text. What follows is therefore the digest pair and the key that was written — enough to tell one version from another, and not a line-by-line diff.",
+    "changes.caption": "Every target this run touched, with the digest recorded before and after each one.",
+    "changes.targets": "Targets",
+    "changes.result": "result",
+    "changes.proposal": "proposal",
+    "changes.authorized": "authorized on",
+    "changes.deviations": "Plan deviations",
+    "changes.self_reported": "The agent that ran this change stated this field; nothing checked it. Only a page produced by dashboard.py build carries verified digests, drift states, and rollback previews.",
+
+    "provenance.intro": "One entry per target, and under it every run that touched it: the proposal each run carried out, the material that proposal came from, and the evidence that material rests on.",
+    "provenance.runs": "runs",
+    "provenance.proposal": "proposal",
+    "provenance.material": "material",
+    "provenance.no_material": "No material is linked to this proposal, so the chain stops here.",
+
+    "rollback.intro": "For each run that kept a backup: what undoing it would restore, what it would leave alone, what it could not restore, and what it cannot undo at all. All four sets are listed every time, the empty ones included.",
+    "rollback.indicator": "outlook",
+    "rollback.backup": "backup",
+    "rollback.tested": "rollback tested",
+    "rollback.restorable": "Will be restored",
+    "rollback.cannot_restore": "Cannot be restored",
+    "rollback.not_touched": "Will not change",
+    "rollback.residual": "Residual effects — undoing the run does not undo these",
+    "rollback.no_backup_heading": "Runs with no backup",
+    "rollback.no_backup": "These runs recorded no backup, so there is nothing to preview and nothing to restore from. They are listed in the Changes panel like any other run.",
+    "rollback.preview_missing": "No preview was computed for this run, so nothing below it can be promised.",
+
+    "rollback.tested.NOT_TESTED.tip": "Nobody tried undoing this run: the rollback is written down and has never been exercised.",
+    "rollback.tested.PARTIAL.tip": "Part of the rollback was exercised, and the rest was not.",
+    "rollback.tested.PASSED.tip": "The rollback was exercised and it restored what it claims.",
+    "rollback.tested.FAILED.tip": "The rollback was exercised and it did not restore what it claims.",
+
+    "vocab.result.VALIDATED.tip": "Applied and checked afterwards: it did what it claimed.",
+    "vocab.result.VALIDATED WITH CAVEATS.tip": "Applied and checked, and it works with limits written down beside it.",
+    "vocab.result.PARTIALLY VALIDATED.tip": "Part of the change was checked afterwards and the rest was not.",
+    "vocab.result.NOT VALIDATED.tip": "Applied and never checked, so nothing here says it worked.",
+    "vocab.result.FAILED.tip": "The run did not do what it set out to do.",
+    "vocab.result.ROLLBACK COMPLETED.tip": "The change was undone. The record stays to say it happened.",
 
     "backlog.caption": "Findings that were not adopted, with the trigger that would bring each one back.",
     "backlog.revisit_due": "revisit date passed",
@@ -736,6 +853,7 @@ footer {
     "help.states": "Operating states",
     "help.classifications": "Classifications",
     "help.statuses": "Record statuses",
+    "help.results": "Run results",
     "help.commands": "Commands",
     "help.cmd.verify": "Check a ledger against the schema and against itself, and report what does not hold.",
     "help.cmd.scan": "Record what a client currently has, as a baseline, without changing anything.",
@@ -873,15 +991,60 @@ footer {
     "table.updated": "Atualizado",
     "table.evidence": "Evidência",
     "table.links": "Vínculos",
+    "table.key": "Chave",
+    "table.before": "Antes",
+    "table.after": "Depois",
+    "table.reversible": "Reversível",
+    "table.residual": "Efeito residual",
 
     "value.yes": "sim",
     "value.no": "não",
+    "value.none": "nenhum",
     "value.unknown": "sem registro",
 
     "filter.kind": "Tipo",
     "filter.all": "Todos",
 
     "inventory.caption": "Tudo o que as baselines registradas dizem que este cliente tem, uma linha por item.",
+
+    "changes.intro": "O ledger registra um digest de cada alvo antes e depois da mudança, e não o texto do arquivo. O que vem abaixo é, portanto, o par de digests e a chave que foi escrita — o suficiente para distinguir uma versão da outra, e não um diff linha a linha.",
+    "changes.caption": "Cada alvo que esta execução tocou, com o digest registrado antes e depois de cada um.",
+    "changes.targets": "Alvos",
+    "changes.result": "resultado",
+    "changes.proposal": "proposta",
+    "changes.authorized": "autorizada em",
+    "changes.deviations": "Desvios do plano",
+    "changes.self_reported": "O agente que executou esta mudança afirmou este campo; nada o conferiu. Só uma página produzida pelo dashboard.py build traz digests, estados de drift e prévias de rollback verificados.",
+
+    "provenance.intro": "Uma entrada por alvo e, embaixo dela, cada execução que o tocou: a proposta que cada execução cumpriu, o material de onde essa proposta veio e a evidência em que esse material se apoia.",
+    "provenance.runs": "execuções",
+    "provenance.proposal": "proposta",
+    "provenance.material": "material",
+    "provenance.no_material": "Nenhum material está vinculado a esta proposta, então a cadeia para aqui.",
+
+    "rollback.intro": "Para cada execução que guardou um backup: o que desfazê-la restauraria, o que ela deixaria intacto, o que não conseguiria restaurar e o que não dá para desfazer de jeito nenhum. Os quatro conjuntos aparecem sempre, inclusive os vazios.",
+    "rollback.indicator": "prognóstico",
+    "rollback.backup": "backup",
+    "rollback.tested": "rollback testado",
+    "rollback.restorable": "Será restaurado",
+    "rollback.cannot_restore": "Não dá para restaurar",
+    "rollback.not_touched": "Não será alterado",
+    "rollback.residual": "Efeitos residuais — desfazer a execução não desfaz estes",
+    "rollback.no_backup_heading": "Execuções sem backup",
+    "rollback.no_backup": "Estas execuções não registraram backup, então não há o que prever nem de onde restaurar. Elas aparecem no painel Mudanças como qualquer outra execução.",
+    "rollback.preview_missing": "Nenhuma prévia foi calculada para esta execução, então nada abaixo dela pode ser prometido.",
+
+    "rollback.tested.NOT_TESTED.tip": "Ninguém tentou desfazer esta execução: o rollback está escrito e nunca foi exercitado.",
+    "rollback.tested.PARTIAL.tip": "Parte do rollback foi exercitada, e o resto não.",
+    "rollback.tested.PASSED.tip": "O rollback foi exercitado e restaurou o que promete.",
+    "rollback.tested.FAILED.tip": "O rollback foi exercitado e não restaurou o que promete.",
+
+    "vocab.result.VALIDATED.tip": "Aplicada e conferida depois: fez o que prometia.",
+    "vocab.result.VALIDATED WITH CAVEATS.tip": "Aplicada e conferida, e funciona com limites escritos ao lado.",
+    "vocab.result.PARTIALLY VALIDATED.tip": "Parte da mudança foi conferida depois e o resto não.",
+    "vocab.result.NOT VALIDATED.tip": "Aplicada e nunca conferida, então nada aqui diz que ela funcionou.",
+    "vocab.result.FAILED.tip": "A execução não fez o que se propunha a fazer.",
+    "vocab.result.ROLLBACK COMPLETED.tip": "A mudança foi desfeita. O registro fica para dizer que aconteceu.",
 
     "backlog.caption": "Achados que não foram adotados, com o gatilho que traria cada um de volta.",
     "backlog.revisit_due": "data de revisão vencida",
@@ -901,6 +1064,7 @@ footer {
     "help.states": "Estados de operação",
     "help.classifications": "Classificações",
     "help.statuses": "Status dos registros",
+    "help.results": "Resultados de execução",
     "help.commands": "Comandos",
     "help.cmd.verify": "Confere um ledger contra o schema e contra ele mesmo, e relata o que não se sustenta.",
     "help.cmd.scan": "Registra o que um cliente tem hoje, como baseline, sem alterar nada.",
@@ -1042,6 +1206,18 @@ footer {
     BROKEN: "error"
   };
 
+  /* `rollback.tested` as severities. A rollback nobody exercised is a
+     warning rather than a note: the record promises an undo that has never
+     been tried, and reading that as quiet is how a promise nobody tested
+     ends up believed. A rollback that was tried and failed is the error --
+     there is a written undo and it is known not to work. */
+  var TESTED_SEVERITY = {
+    NOT_TESTED: "warning",
+    PARTIAL: "warning",
+    PASSED: "info",
+    FAILED: "error"
+  };
+
   /* The date fields a row may carry, in the order recency prefers them.
      Every date this ledger stores is YYYY-MM-DD, which sorts
      lexicographically in date order, so the comparison needs no parsing and
@@ -1055,6 +1231,32 @@ footer {
      to say the change is no longer in effect. */
   var ROLLED_BACK_STATUS = "ROLLBACK";
   var ROLLED_BACK_RESULT = "ROLLBACK COMPLETED";
+
+  /* The six results a RUN may record (ledger.schema.json). Exactly one of
+     them says the change was applied, checked afterwards, and did what it
+     claimed; the other five each name a way it did not, which is what the
+     Changes panel's severity turns on. */
+  var RUN_RESULTS = [
+    "VALIDATED",
+    "VALIDATED WITH CAVEATS",
+    "PARTIALLY VALIDATED",
+    "NOT VALIDATED",
+    "FAILED",
+    "ROLLBACK COMPLETED"
+  ];
+
+  var CLEAN_RESULT = "VALIDATED";
+
+  /* The badge design spec section 5 puts on anything the tooling did not
+     check. It is canonical vocabulary: the word stays English on every
+     screen -- the Help panel glosses it under this same spelling -- and the
+     sentence that explains it is translated and travels as the tooltip. */
+  var SELF_REPORTED = "SELF-REPORTED";
+
+  /* A digest is 64 hex characters and nobody reads 64 of anything. Twelve
+     tell two digests apart at a glance; the full value stays in the title
+     attribute, so shortening it on screen loses nothing. */
+  var DIGEST_CHARS = 12;
 
   /* The separator the lookup keys below are joined on: U+0000, which no
      path, name, kind, or evidence source can contain. With a printable
@@ -1381,6 +1583,70 @@ footer {
       h("span", { class: "glyph", "aria-hidden": "true" }, GLYPHS.warning),
       t(key)
     );
+  }
+
+  function resultChip(value, severity) {
+    if (typeof value !== "string" || value === "") { return t("value.unknown"); }
+    return vocabChip(value, severity, "vocab.result." + value + ".tip");
+  }
+
+  /* A drift state's severity, with the one branch that matters spelled out:
+     a state this page does not know is a warning, never a note. An unknown
+     classification is exactly the case where the reader should look, and
+     `own` is what keeps a ledger string of "constructor" from reading back
+     the inherited function instead of undefined. */
+  function driftSeverityOf(state) {
+    var severity = own(DRIFT_SEVERITY, state);
+    return severity === undefined ? "warning" : severity;
+  }
+
+  /* Self-reported fields ------------------------------------------------
+     A RUN record lists, by name, the fields nothing verified. They are
+     ledger strings, and they are matched by value against a name this file
+     supplies -- never used as a key into an object, which is the shape
+     `own` exists to guard. */
+
+  function selfReportedFields(record) {
+    var listed = record.self_reported;
+    if (!Array.isArray(listed)) { return []; }
+    return listed.filter(function (name) {
+      return typeof name === "string" && name !== "";
+    });
+  }
+
+  function isSelfReported(record, field) {
+    return selfReportedFields(record).indexOf(field) !== -1;
+  }
+
+  /* The badge, or nothing at all -- `appendAll` drops a null child, so the
+     call site reads the same whether the run named the field or not. The
+     field name travels in `data-field` so a badge cannot quietly drift onto
+     a field the run never listed: the rendered tree says which field each
+     badge belongs to, and a test can check that against the record. */
+  function selfReportedBadge(record, field) {
+    if (!isSelfReported(record, field)) { return null; }
+    return h(
+      "span",
+      {
+        class: "marker",
+        "data-field": field,
+        title: tipFor("changes.self_reported")
+      },
+      h("span", { class: "glyph", "aria-hidden": "true" }, GLYPHS.warning),
+      h("span", { lang: "en" }, SELF_REPORTED)
+    );
+  }
+
+  /* The digest pair is what "before and after" means here: the ledger stores
+     digests, not file bodies, so there is nothing in this document to diff.
+     Twelve hex characters on screen, the whole value in the tooltip. A null
+     digest is "none" rather than "not recorded" -- for a target that did not
+     exist before the change, nothing is exactly what was there. */
+  function digestCell(value) {
+    if (typeof value !== "string" || value === "") { return t("value.none"); }
+    var at = value.indexOf(":");
+    var hex = at === -1 ? value : value.slice(at + 1);
+    return h("code", { class: "digest", title: value }, hex.slice(0, DIGEST_CHARS));
   }
 
   /* Tables -------------------------------------------------------------
@@ -1755,6 +2021,12 @@ footer {
         renderOverview(section);
       } else if (panel === "inventory") {
         renderInventory(section, state);
+      } else if (panel === "changes") {
+        renderChanges(section);
+      } else if (panel === "provenance") {
+        renderProvenance(section);
+      } else if (panel === "rollback") {
+        renderRollback(section);
       } else if (panel === "backlog") {
         renderBacklog(section);
       } else if (panel === "decisions") {
@@ -1764,10 +2036,13 @@ footer {
       } else if (panel === "help") {
         renderHelp(section);
       } else {
-        /* Task 5 replaces this with the real renderer for Changes,
-           Provenance, and Rollback. Until then a panel states what would
-           fill it and the command that does the filling, which is what
-           design spec section 4 asks empty states to do. */
+        /* Every panel in PANELS has a renderer above, so nothing reaches
+           this branch today. It stays because the failure it catches is a
+           panel added to PANELS without one: a section with a heading and
+           nothing under it, which reads as "there is nothing here" rather
+           than as an unfinished panel. The instructional empty state says
+           what would fill it and the command that does the filling, which
+           is what design spec section 4 asks of every empty state. */
         section.appendChild(h("p", { class: "empty" }, t("panel." + panel + ".empty")));
       }
     });
@@ -1946,9 +2221,19 @@ footer {
 
   function countActiveChanges() {
     return records("RUN").filter(function (record) {
-      return record.status !== ROLLED_BACK_STATUS
-        && record.result !== ROLLED_BACK_RESULT;
+      return !isRolledBack(record);
     }).length;
+  }
+
+  /* One reading of "this change is no longer in effect", used by the card
+     that counts active changes and by the Changes panel that ranks them.
+     The schema spells the two halves differently -- the record's `status`
+     and the run's `result` -- and either alone is enough. Two copies of this
+     test would eventually disagree, and the disagreement would show as a
+     card counting one thing while the panel beneath it ranked another. */
+  function isRolledBack(record) {
+    return record.status === ROLLED_BACK_STATUS
+      || record.result === ROLLED_BACK_RESULT;
   }
 
   /* A built page asks the filesystem; a static page cannot, but the ledger
@@ -2035,12 +2320,12 @@ footer {
     ));
   }
 
+  /* No drift report for this item means no claim about it, which is a note.
+     A state that is there goes through `driftSeverityOf`, the one place the
+     five states -- and anything that is not one of them -- are ranked. */
   function inventorySeverity(entry) {
     if (entry.drift === null) { return "info"; }
-    var severity = own(DRIFT_SEVERITY, entry.drift);
-    /* A state this page does not know is not quietly a note: an unknown
-       classification is exactly the case where the reader should look. */
-    return severity === undefined ? "warning" : severity;
+    return driftSeverityOf(entry.drift);
   }
 
   function inventoryRow(entry) {
@@ -2088,6 +2373,577 @@ footer {
 
   function itemKey(item) {
     return [item.kind, item.name, item.anchor].join(SEPARATOR);
+  }
+
+  /* Changes ------------------------------------------------------------
+     The run timeline. One block per RUN record, worst first and, within a
+     severity, the one that moved last first -- the same ordering every other
+     record panel uses, through the same function.
+
+     What a block shows about a target is the digest recorded before it and
+     the digest recorded after, plus the key that was written. That is the
+     whole of the "inline before/after diff" at this version, and the panel
+     says so in as many words: the ledger stores digests, not file bodies, so
+     there is nothing here to diff and claiming otherwise would be inventing
+     a guarantee. */
+
+  function renderChanges(section) {
+    var runs = records("RUN");
+    if (runs.length === 0) {
+      section.appendChild(h("p", { class: "empty" }, t("panel.changes.empty")));
+      return;
+    }
+    var drift = computedFor("drift");
+    section.appendChild(h("p", { class: "note" }, t("changes.intro")));
+    wide(section);
+    sortBySeverityThenRecency(runs, runSeverity).forEach(function (record) {
+      section.appendChild(runBlock(record, driftTargetStates(drift, record.id)));
+    });
+  }
+
+  /* A run's severity, in three branches and in this order.
+
+     A run that was undone is history rather than a fault -- the reading
+     `countActiveChanges` takes of the same two fields, through the same
+     function, and the reading the Decisions panel takes of a SUPERSEDED
+     record. Ranking it as a finding would float every rolled-back change
+     above the live ones that actually describe the setup.
+
+     A run that recorded a deviation from its plan is a finding: the plan is
+     what was authorized, and a departure from it is the thing this panel
+     exists to surface.
+
+     So is any result but the one clean outcome. `VALIDATED` is the only one
+     of the schema's six that says the change was applied, checked, and did
+     what it claimed; the other five each name a way it did not. A missing or
+     unrecognised result is a warning for the same reason an unknown drift
+     state is: not knowing how a run ended is exactly where to look. */
+  function runSeverity(record) {
+    if (isRolledBack(record)) { return "info"; }
+    if (deviationsOf(record).length !== 0) { return "warning"; }
+    return record.result === CLEAN_RESULT ? "info" : "warning";
+  }
+
+  function deviationsOf(record) {
+    var listed = record.deviations;
+    if (!Array.isArray(listed)) { return []; }
+    return listed.filter(function (value) {
+      return typeof value === "string" && value !== "";
+    });
+  }
+
+  function runBlock(record, states) {
+    var severity = runSeverity(record);
+    var block = h("div", { class: "run run-" + severity });
+    block.appendChild(h(
+      "h3",
+      null,
+      h("code", { lang: "en" }, textOrDash(record.id)),
+      " ",
+      textOrDash(record.title)
+    ));
+    block.appendChild(h(
+      "p",
+      { class: "note" },
+      statusChip(record.status, "info"),
+      " ",
+      t("changes.result") + " ",
+      resultChip(record.result, severity),
+      " ",
+      selfReportedBadge(record, "result"),
+      " ",
+      t("changes.proposal") + " ",
+      h("code", { lang: "en" }, textOrDash(record.proposal)),
+      " ",
+      t("table.updated") + " " + textOrDash(record.updated),
+      " ",
+      t("changes.authorized") + " " + authorizedOn(record)
+    ));
+    var deviations = deviationsOf(record);
+    if (deviations.length !== 0) {
+      block.appendChild(h("h4", null, t("changes.deviations")));
+      block.appendChild(h("ul", { class: "keys" }, deviations.map(function (line) {
+        return h("li", null, line);
+      })));
+    }
+    block.appendChild(h(
+      "h4",
+      null,
+      t("changes.targets"),
+      " ",
+      selfReportedBadge(record, "targets")
+    ));
+    block.appendChild(targetsTable(record, states));
+    return block;
+  }
+
+  function authorizedOn(record) {
+    var authorization = record.authorization;
+    if (!authorization || typeof authorization !== "object") {
+      return t("value.unknown");
+    }
+    return textOrDash(authorization.recorded_on);
+  }
+
+  /* The state column exists only when a drift report classified this run's
+     targets. A column of "not recorded" would be worse than no column: it
+     reads as "the ledger left it blank" when the truth is that this page
+     never compared anything against disk. */
+  function targetsTable(record, states) {
+    var targets = Array.isArray(record.targets) ? record.targets : [];
+    var headers = ["table.anchor", "table.kind", "table.key"];
+    if (states !== null) { headers.push("table.state"); }
+    headers = headers.concat([
+      "table.before", "table.after", "table.reversible", "table.residual"
+    ]);
+    return gridTable("changes.caption", headers, targets.map(function (target) {
+      return targetRow(target, states);
+    }));
+  }
+
+  function targetRow(target, states) {
+    var row = target && typeof target === "object" ? target : {};
+    var state = states === null ? undefined : own(states, targetKey(row));
+    var severity = typeof state === "string" ? driftSeverityOf(state) : "info";
+    var cells = [
+      cell("table.anchor", h("code", { class: "path" }, textOrDash(row.anchor))),
+      cell("table.kind", h("code", { lang: "en" }, textOrDash(row.kind))),
+      cell("table.key", h("code", { class: "path" }, textOrDash(row.key)))
+    ];
+    if (states !== null) {
+      cells.push(cell("table.state", typeof state === "string"
+        ? vocabChip(state, severity, "state." + state + ".tip")
+        : t("value.unknown")));
+    }
+    cells.push(cell("table.before", digestCell(row.before_digest)));
+    cells.push(cell("table.after", digestCell(row.after_digest)));
+    cells.push(cell("table.reversible", flagText(row.reversible)));
+    cells.push(cell("table.residual", residualText(row.residual_effect)));
+    return tableRow(severity, false, cells);
+  }
+
+  /* A recorded residual effect is prose the run wrote; its absence is not a
+     gap in the record but a statement that undoing the change leaves nothing
+     behind, so it reads "none" rather than "not recorded". */
+  function residualText(value) {
+    if (typeof value === "string" && value !== "") { return value; }
+    if (value === null || value === undefined) { return t("value.none"); }
+    return textOrDash(value);
+  }
+
+  /* The run-target half of the drift report, joined the way the baseline
+     half is joined in `driftStatesFor`: on the fields that identify a target
+     inside its run rather than on position, so a report computed before the
+     run gained a target still lines up and a row that does not line up gets
+     no state at all instead of its neighbour's.
+
+     Null, not an empty map, when there is no report for this run: "nothing
+     on this page compared anything" and "this report classified none of
+     these targets" are different claims, and only the second may render a
+     column of states. */
+  function driftTargetStates(report, runId) {
+    if (!report || typeof report !== "object") { return null; }
+    var entries = Array.isArray(report.runs) ? report.runs : [];
+    /* Object.create(null): the key is built from ledger content, and a
+       target anchored at "constructor" would otherwise read back the
+       inherited function instead of undefined. */
+    var found = Object.create(null);
+    var matched = false;
+    entries.forEach(function (entry) {
+      if (!entry || typeof entry !== "object" || entry.id !== runId) { return; }
+      matched = true;
+      var targets = Array.isArray(entry.targets) ? entry.targets : [];
+      targets.forEach(function (target) {
+        if (target && typeof target === "object") {
+          found[targetKey(target)] = target.state;
+        }
+      });
+    });
+    return matched ? found : null;
+  }
+
+  function targetKey(target) {
+    return [target.anchor, target.kind].join(SEPARATOR);
+  }
+
+  /* Provenance ----------------------------------------------------------
+     The index the ledger does not keep. It records what each run touched;
+     the question this panel answers is the other direction -- for one file,
+     which runs touched it, and what evidence each of those runs rests on.
+
+     Built here rather than by the build command on purpose: it is a view of
+     the ledger and nothing else, so a static page owes exactly the same
+     answer as a built one and gets it.
+
+     One native `details` per target, which is keyboard-reachable, needs no
+     ARIA, and costs no script. The print block unfolds them. */
+
+  function renderProvenance(section) {
+    var index = anchorIndex(records("RUN"));
+    if (index.length === 0) {
+      section.appendChild(h("p", { class: "empty" }, t("panel.provenance.empty")));
+      return;
+    }
+    var byId = recordIndex();
+    var expired = expiredEvidenceIndex();
+    section.appendChild(h("p", { class: "note" }, t("provenance.intro")));
+    section.appendChild(h("p", { class: "note" }, t("materials.source_is_text")));
+    index.forEach(function (entry) {
+      section.appendChild(chainBlock(entry, byId, expired));
+    });
+  }
+
+  /* Anchor *and* key together are the identity: two runs writing two
+     different keys inside one settings file made two different changes, and
+     merging them would put one run's evidence under the other's edit.
+
+     Each entry carries the date of the newest run that touched it under the
+     name `recencyKey` reads, so the shared sort orders the anchors by the
+     run that moved last. Severity is deliberately flat: an anchor is not a
+     finding -- the runs listed under it are, and each of those carries its
+     own severity in the Changes panel. */
+  function anchorIndex(runs) {
+    /* Object.create(null): both halves of the key are ledger content. */
+    var found = Object.create(null);
+    var order = [];
+    runs.forEach(function (record) {
+      var targets = Array.isArray(record.targets) ? record.targets : [];
+      targets.forEach(function (target) {
+        if (!target || typeof target !== "object") { return; }
+        var anchor = typeof target.anchor === "string" ? target.anchor : "";
+        var key = typeof target.key === "string" ? target.key : "";
+        var id = [anchor, key].join(SEPARATOR);
+        var entry = own(found, id);
+        if (entry === undefined) {
+          entry = { anchor: anchor, key: key, runs: [], updated: "" };
+          found[id] = entry;
+          order.push(entry);
+        }
+        if (entry.runs.indexOf(record) === -1) { entry.runs.push(record); }
+        var when = recencyKey(record);
+        if (when > entry.updated) { entry.updated = when; }
+      });
+    });
+    order.forEach(function (entry) {
+      entry.runs = sortBySeverityThenRecency(entry.runs, flatSeverity);
+    });
+    return sortBySeverityThenRecency(order, flatSeverity);
+  }
+
+  /* Recency only, for the two sorts whose rows are not findings. */
+  function flatSeverity() {
+    return "info";
+  }
+
+  /* Every record by id, for the hops the chain makes: a run names its
+     proposal, a proposal names its materials, and neither carries the other
+     record inline. Null-prototype because every one of those ids is ledger
+     content. */
+  function recordIndex() {
+    var found = Object.create(null);
+    ledgerList("records").forEach(function (record) {
+      if (record && typeof record === "object" && typeof record.id === "string") {
+        found[record.id] = record;
+      }
+    });
+    return found;
+  }
+
+  function chainBlock(entry, byId, expired) {
+    var body = h("div", { class: "chain-body" });
+    entry.runs.forEach(function (record) {
+      body.appendChild(h(
+        "p",
+        { class: "note" },
+        h("code", { lang: "en" }, textOrDash(record.id)),
+        " ",
+        textOrDash(record.title),
+        " ",
+        textOrDash(record.updated)
+      ));
+      body.appendChild(chainList(record, byId, expired));
+    });
+    return h(
+      "details",
+      { class: "chain" },
+      h(
+        "summary",
+        null,
+        h(
+          "code",
+          { class: "path" },
+          entry.anchor === "" ? t("value.unknown") : entry.anchor
+        ),
+        entry.key === "" ? null : [" ", h("code", { class: "path" }, entry.key)],
+        " ",
+        h(
+          "span",
+          { class: "note" },
+          t("provenance.runs") + " " + String(entry.runs.length)
+        )
+      ),
+      body
+    );
+  }
+
+  function chainList(record, byId, expired) {
+    var list = h("ul", { class: "chain-list" });
+    var proposal = recordById(byId, record.proposal);
+    list.appendChild(h(
+      "li",
+      null,
+      t("provenance.proposal") + " ",
+      h("code", { lang: "en" }, textOrDash(record.proposal)),
+      proposal === null ? null : " " + textOrDash(proposal.title)
+    ));
+    var materials = materialIdsFor(record, proposal);
+    if (materials.length === 0) {
+      list.appendChild(h("li", null, t("provenance.no_material")));
+      return list;
+    }
+    materials.forEach(function (id) {
+      var material = recordById(byId, id);
+      var item = h(
+        "li",
+        null,
+        t("provenance.material") + " ",
+        h("code", { lang: "en" }, id),
+        material === null ? null : " " + textOrDash(material.title)
+      );
+      if (material !== null) {
+        item.appendChild(evidenceList(material, expired));
+      }
+      list.appendChild(item);
+    });
+    return list;
+  }
+
+  function recordById(byId, id) {
+    if (typeof id !== "string" || id === "") { return null; }
+    var found = own(byId, id);
+    return found === undefined ? null : found;
+  }
+
+  /* The chain design spec section 4 asks for is run → proposal → material,
+     and the material link lives on the proposal. A run links its materials
+     directly as well, and both are followed: a run recorded without a
+     proposal, or a proposal edited after the run, would otherwise end the
+     chain silently -- and a chain that stops without saying so is worse than
+     no chain, because it reads as "this change rests on nothing". */
+  function materialIdsFor(record, proposal) {
+    var ids = [];
+    [proposal, record].forEach(function (source) {
+      linkedMaterials(source).forEach(function (id) {
+        if (ids.indexOf(id) === -1) { ids.push(id); }
+      });
+    });
+    return ids;
+  }
+
+  function linkedMaterials(record) {
+    if (!record || typeof record !== "object") { return []; }
+    var links = record.links;
+    if (!links || typeof links !== "object") { return []; }
+    var listed = links.materials;
+    if (!Array.isArray(listed)) { return []; }
+    return listed.filter(function (value) {
+      return typeof value === "string" && value !== "";
+    });
+  }
+
+  /* Rollback ------------------------------------------------------------
+     One block per RUN that kept a backup: the indicator, what the recorded
+     backup says versus what the preview recomputed, and design spec section
+     11's four sets.
+
+     All four sets are rendered every time, empty ones included. They
+     partition the run's targets, so an empty one is a real answer -- and a
+     panel that dropped it would make "nothing could be restored" and "this
+     was never computed" look identical on screen.
+
+     Runs with no backup are listed underneath, plainly: there is nothing to
+     preview and nothing to restore from, and saying so is the only honest
+     thing this panel can do about them. */
+
+  function renderRollback(section) {
+    var runs = records("RUN");
+    if (runs.length === 0) {
+      section.appendChild(h("p", { class: "empty" }, t("panel.rollback.empty")));
+      return;
+    }
+    var previews = computedFor("previews");
+    var kept = runs.filter(hasBackup);
+    var unbacked = runs.filter(function (record) { return !hasBackup(record); });
+
+    if (previews === null) {
+      /* Two different absences, told apart by the same helper the overview
+         cards use: a static page is one command away from the preview, and
+         a build whose previews failed is not. */
+      section.appendChild(statusBlock(
+        "warning",
+        t(unavailableNoteKey("previews", "panel.rollback.empty"))
+      ));
+    } else {
+      section.appendChild(h("p", { class: "note" }, t("rollback.intro")));
+    }
+
+    sortBySeverityThenRecency(kept, function (record) {
+      return previewSeverity(previewFor(previews, record.id));
+    }).forEach(function (record) {
+      section.appendChild(rollbackBlock(record, previewFor(previews, record.id)));
+    });
+
+    if (unbacked.length !== 0) {
+      section.appendChild(h("h3", null, t("rollback.no_backup_heading")));
+      section.appendChild(h("p", { class: "note" }, t("rollback.no_backup")));
+      section.appendChild(h("ul", { class: "keys" }, unbacked.map(function (record) {
+        return h(
+          "li",
+          null,
+          h("code", { lang: "en" }, textOrDash(record.id)),
+          " ",
+          textOrDash(record.title)
+        );
+      })));
+    }
+  }
+
+  function hasBackup(record) {
+    return Boolean(record.backup) && typeof record.backup === "object";
+  }
+
+  function previewFor(previews, runId) {
+    if (!previews || typeof previews !== "object") { return null; }
+    var found = own(previews, runId);
+    if (!found || typeof found !== "object" || isError(found)) { return null; }
+    return found;
+  }
+
+  /* No preview is a warning rather than a note: a run that kept a backup and
+     has no preview on this page is precisely the one nobody can promise
+     anything about, so it sorts above the ones that verified. */
+  function previewSeverity(preview) {
+    if (preview === null) { return "warning"; }
+    var severity = own(INDICATOR_SEVERITY, preview.indicator);
+    return severity === undefined ? "warning" : severity;
+  }
+
+  function rollbackBlock(record, preview) {
+    var severity = previewSeverity(preview);
+    var block = h("div", { class: "run run-" + severity });
+    block.appendChild(h(
+      "h3",
+      null,
+      h("code", { lang: "en" }, textOrDash(record.id)),
+      " ",
+      textOrDash(record.title)
+    ));
+    block.appendChild(h(
+      "p",
+      { class: "note" },
+      t("rollback.indicator") + " ",
+      preview === null
+        ? t("value.unknown")
+        : vocabChip(
+            preview.indicator,
+            severity,
+            "state." + preview.indicator + ".tip"
+          ),
+      " ",
+      t("rollback.backup") + " ",
+      backupCell(record, preview),
+      " ",
+      selfReportedBadge(record, "backup"),
+      " ",
+      t("rollback.tested") + " ",
+      testedChip(record),
+      " ",
+      selfReportedBadge(record, "rollback.tested")
+    ));
+    if (preview === null) {
+      block.appendChild(h("p", { class: "note" }, t("rollback.preview_missing")));
+      return block;
+    }
+    appendSet(block, "rollback.restorable", preview.will_be_restored, false);
+    appendSet(block, "rollback.cannot_restore", preview.cannot_be_restored, true);
+    appendSet(block, "rollback.not_touched", preview.will_not_change, false);
+    appendSet(block, "rollback.residual", preview.residual_effects, false);
+    return block;
+  }
+
+  /* Two different facts about one backup, and blurring them would be the
+     whole point of the badge lost. The run's own `backup.verified` is the
+     run's claim, which is why it carries the SELF-REPORTED badge when the
+     run lists the field; the preview's is what `rollback-preview`
+     recomputed against the file. The recomputed answer wins whenever it is
+     on the page, and its reason is shown beside it, because "not verified"
+     and "not verified because the backup is missing" ask for different
+     next steps. */
+  function backupCell(record, preview) {
+    var reported = record.backup && typeof record.backup === "object"
+      ? record.backup.verified
+      : null;
+    var computed = preview && preview.backup && typeof preview.backup === "object"
+      ? preview.backup
+      : null;
+    if (computed === null) { return flagText(reported); }
+    var reason = computed.reason;
+    if (typeof reason !== "string" || reason === "") {
+      return flagText(computed.verified);
+    }
+    return [
+      flagText(computed.verified),
+      " ",
+      h("code", { lang: "en" }, reason)
+    ];
+  }
+
+  function testedChip(record) {
+    var rollback = record.rollback;
+    var value = rollback && typeof rollback === "object" ? rollback.tested : null;
+    if (typeof value !== "string" || value === "") { return t("value.unknown"); }
+    var severity = own(TESTED_SEVERITY, value);
+    return vocabChip(
+      value,
+      severity === undefined ? "warning" : severity,
+      "rollback.tested." + value + ".tip"
+    );
+  }
+
+  /* The heading is appended before the list is looked at, which is the whole
+     rule: four headings, always, whatever the sets hold. An empty set says
+     "none" -- a real answer -- rather than vanishing. */
+  function appendSet(block, labelKey, rows, withReason) {
+    block.appendChild(h("h4", null, t(labelKey)));
+    var listed = Array.isArray(rows) ? rows : [];
+    if (listed.length === 0) {
+      block.appendChild(h("p", { class: "note" }, t("value.none")));
+      return;
+    }
+    block.appendChild(h("ul", { class: "keys" }, listed.map(function (row) {
+      return h("li", null, setRow(row, withReason));
+    })));
+  }
+
+  /* Three shapes reach here. `residual_effects` holds the target's recorded
+     effect verbatim, which is prose; the other three sets hold target rows.
+     Anything else is reported as unrecorded rather than stringified into
+     something that looks like data. */
+  function setRow(row, withReason) {
+    if (typeof row === "string" && row !== "") { return row; }
+    if (!row || typeof row !== "object") { return t("value.unknown"); }
+    return [
+      h("code", { class: "path" }, textOrDash(row.anchor)),
+      " ",
+      h("code", { lang: "en" }, textOrDash(row.kind)),
+      withReason && typeof row.reason === "string" && row.reason !== ""
+        ? [
+            " ",
+            h("span", { class: "note" }, t("table.reason") + " "),
+            h("code", { lang: "en" }, row.reason)
+          ]
+        : null
+    ];
   }
 
   /* Backlog ------------------------------------------------------------ */
@@ -2327,7 +3183,13 @@ footer {
     return severity;
   }
 
-  function materialRow(record, expired) {
+  /* One evidence list, built here rather than twice: the Materials panel
+     shows a material's evidence under the material, and the Provenance panel
+     shows the same evidence at the end of a chain. Two copies would
+     eventually disagree about which dates are shown or which entry is
+     marked expired, and the two panels would then describe the same evidence
+     differently on the same page. */
+  function evidenceList(record, expired) {
     var list = h("ul", { class: "evidence" });
     evidenceOf(record).forEach(function (item) {
       list.appendChild(h(
@@ -2357,6 +3219,11 @@ footer {
         isExpiredEvidence(record, item, expired) ? marker("materials.expired") : null
       ));
     });
+    return list;
+  }
+
+  function materialRow(record, expired) {
+    var list = evidenceList(record, expired);
     return tableRow(materialSeverity(record, expired), false, [
       cell("table.record", h("code", { lang: "en" }, textOrDash(record.id))),
       cell("table.title", textOrDash(record.title)),
@@ -2418,6 +3285,17 @@ footer {
     section.appendChild(glossary(
       RECORD_STATUSES,
       function (name) { return "vocab.status." + name + ".tip"; }
+    ));
+
+    /* A record's status and a run's result are different words for
+       different facts -- one says where the record stands, the other says
+       how the run ended -- and the Changes panel shows both side by side.
+       Glossing only one of them here would leave the reader to guess which
+       of the two chips they were looking at. */
+    section.appendChild(h("h3", null, t("help.results")));
+    section.appendChild(glossary(
+      RUN_RESULTS,
+      function (name) { return "vocab.result." + name + ".tip"; }
     ));
 
     /* Commands, not prose: the entries stay English while their one-line

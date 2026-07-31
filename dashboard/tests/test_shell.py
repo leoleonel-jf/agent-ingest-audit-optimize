@@ -108,8 +108,7 @@ PANEL_IDS = (
     "help",
 )
 
-# Task 4's six renderers. `changes`, `provenance`, and `rollback` are Task 5's
-# and still fall through to the instructional empty state.
+# Task 4's six renderers.
 TASK_4_RENDERERS = (
     "function renderOverview(section)",
     "function renderInventory(section, state)",
@@ -117,6 +116,15 @@ TASK_4_RENDERERS = (
     "function renderDecisions(section, state)",
     "function renderMaterials(section)",
     "function renderHelp(section)",
+)
+
+# Task 5's three. With these, every panel in `PANELS` has a renderer and the
+# instructional fall-through in `renderPanels` is unreachable -- it stays as
+# the guard for a tenth panel added without one.
+TASK_5_RENDERERS = (
+    "function renderChanges(section)",
+    "function renderProvenance(section)",
+    "function renderRollback(section)",
 )
 
 # The severity vocabulary, worst first. The rank is the index, so this tuple
@@ -141,6 +149,30 @@ INDICATOR_SEVERITY = {
     "AT_RISK": "warning",
     "BROKEN": "error",
 }
+
+# `rollback.tested` from `ledger.schema.json`, mapped the same way. An
+# untested rollback is a warning rather than a note on purpose: the record
+# promises an undo nobody has ever exercised, and reading that as quiet is
+# how an untested promise ends up believed. A rollback that was tried and
+# failed is the error -- the undo exists and is known not to work.
+TESTED_SEVERITY = {
+    "NOT_TESTED": "warning",
+    "PARTIAL": "warning",
+    "PASSED": "info",
+    "FAILED": "error",
+}
+
+# The six results a `RUN` may record. Exactly one of them -- `VALIDATED` --
+# says the change was applied, checked, and did what it claimed; the Changes
+# panel ranks every other result as a finding.
+RUN_RESULTS = (
+    "VALIDATED",
+    "VALIDATED WITH CAVEATS",
+    "PARTIALLY VALIDATED",
+    "NOT VALIDATED",
+    "FAILED",
+    "ROLLBACK COMPLETED",
+)
 
 # The two closed vocabularies the Help panel glosses and the record panels
 # use as tooltips, straight from `ledger.schema.json`.
@@ -230,6 +262,43 @@ TASK_4_KEYS = (
     "help.cmd.build",
 )
 
+# Every i18n key Task 5 adds, named for the same reason Task 4's are: the
+# parity test says only that the two dictionaries agree, and two dictionaries
+# that lost the same key agree perfectly.
+TASK_5_KEYS = (
+    "table.key",
+    "table.before",
+    "table.after",
+    "table.reversible",
+    "table.residual",
+    "value.none",
+    "changes.intro",
+    "changes.caption",
+    "changes.targets",
+    "changes.result",
+    "changes.proposal",
+    "changes.authorized",
+    "changes.deviations",
+    "changes.self_reported",
+    "provenance.intro",
+    "provenance.runs",
+    "provenance.proposal",
+    "provenance.material",
+    "provenance.no_material",
+    "rollback.intro",
+    "rollback.indicator",
+    "rollback.backup",
+    "rollback.tested",
+    "rollback.restorable",
+    "rollback.cannot_restore",
+    "rollback.not_touched",
+    "rollback.residual",
+    "rollback.no_backup_heading",
+    "rollback.no_backup",
+    "rollback.preview_missing",
+    "help.results",
+)
+
 # `class: "a b"` literals in the shell whose last token ends in `-` are
 # completed at runtime from a closed family. The families are declared here
 # so the stylesheet seam can still be checked end to end.
@@ -238,6 +307,7 @@ DYNAMIC_CLASS_FAMILIES = {
     "card-": SEVERITY_ORDER,
     "row-": SEVERITY_ORDER,
     "vocab-": SEVERITY_ORDER,
+    "run-": SEVERITY_ORDER,
 }
 
 CLASS_LITERAL = re.compile(r'class:\s*"([^"]*)"')
@@ -465,6 +535,12 @@ PROBE = r"""
 
 DIGEST = "sha256:" + "0" * 64
 
+# A second digest, so a target's before and after are visibly different and
+# the twelve-character abbreviation has something to abbreviate. The repeated
+# pair makes the expected prefix readable in an assertion rather than a count
+# of zeroes.
+DIGEST_AFTER = "sha256:" + "9f" * 32
+
 # The stored-XSS regression, verbatim. `serialize_payload` rewrites every
 # `<` as a JSON escape, so this string cannot close the island; the
 # assertion below is that the shell then renders it as one literal text node
@@ -481,7 +557,7 @@ FIXTURE_LEDGER = {
     "created": "2026-07-01",
     "updated": "2026-07-31",
     "id_authority": True,
-    "sequences": {"MAT": 1, "PROP": 1, "RUN": 1, "ADR": 2, "BASE": 1},
+    "sequences": {"MAT": 2, "PROP": 2, "RUN": 4, "ADR": 2, "BASE": 1},
     "known_projects": [
         {
             "project_root": "/gone",
@@ -553,6 +629,166 @@ FIXTURE_LEDGER = {
             ],
             "backup": {"digest": DIGEST, "verified": True},
             "rollback": {"tested": "NOT_TESTED"},
+            "self_reported": ["targets"],
+        },
+        # The second material and proposal exist for one reason: the
+        # Provenance chain has to be provably per-run. Both runs below touch
+        # `$USER_CONFIG/settings.json`, and each must reach its *own*
+        # evidence through its own proposal -- a chain that merged them would
+        # still look plausible on screen.
+        {
+            "id": "MAT-2026-001",
+            "type": "MATERIAL",
+            "title": "A second reading of the same subject",
+            "status": "ANALYZED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-05-05",
+            "updated": "2026-05-05",
+            "file": "records/MAT-2026-001.md",
+            "links": {},
+            "evidence": [
+                {
+                    "source": "release notes, second edition",
+                    "kind": "vendor documentation",
+                    "verified_on": "2026-05-05",
+                    "time_sensitive": True,
+                    "expires_on": "2027-05-05",
+                }
+            ],
+        },
+        {
+            "id": "PROP-2026-001",
+            "type": "PROPOSAL",
+            "title": "Rewrite the hook command",
+            "status": "DECIDED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-02",
+            "updated": "2026-07-02",
+            "file": "records/PROP-2026-001.md",
+            "links": {"materials": ["MAT-2026-001"]},
+            "evidence": [],
+        },
+        # The deviating run, and the oldest of the four: it must still sort
+        # above every clean run, which is the only way to tell severity-first
+        # ordering from recency-first ordering by looking at the panel.
+        {
+            "id": "RUN-2026-001",
+            "type": "RUN",
+            "title": "Rewrite the hook command",
+            "status": "IMPLEMENTED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-02",
+            "updated": "2026-07-02",
+            "file": "records/RUN-2026-001.md",
+            "links": {},
+            "evidence": [],
+            "proposal": "PROP-2026-001",
+            "authorization": {"quote": "do it", "recorded_on": "2026-07-02"},
+            "result": "PARTIALLY VALIDATED",
+            "targets": [
+                # Shares an anchor with RUN-2026-000, and carries no key, so
+                # the two runs land under one Provenance entry.
+                {
+                    "anchor": "$USER_CONFIG/settings.json",
+                    "kind": "instruction-file",
+                    "before_digest": DIGEST,
+                    "after_digest": DIGEST_AFTER,
+                    "reversible": True,
+                    "residual_effect": None,
+                },
+                {
+                    "anchor": "$USER_CONFIG/hooks/guard.js",
+                    "kind": "json field",
+                    "before_digest": None,
+                    "after_digest": DIGEST_AFTER,
+                    "reversible": True,
+                    "residual_effect": None,
+                    "key": "/hooks/0/command",
+                },
+                # The stored-XSS regression, moved into a run target: an
+                # anchor and a residual effect are both ledger strings that
+                # reach the page through a different renderer than the
+                # material title does.
+                {
+                    "anchor": XSS_TITLE,
+                    "kind": "markdown document",
+                    "before_digest": DIGEST,
+                    "after_digest": None,
+                    "reversible": False,
+                    "residual_effect": XSS_TITLE,
+                },
+            ],
+            "backup": {"digest": DIGEST, "verified": True},
+            "rollback": {"tested": "PARTIAL"},
+            "self_reported": ["targets", "result", "backup", "rollback.tested"],
+        },
+        # A run with a plan deviation and an otherwise clean result: the
+        # second of the two triggers that make a run a finding.
+        {
+            "id": "RUN-2026-002",
+            "type": "RUN",
+            "title": "Add the second hook",
+            "status": "IMPLEMENTED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-06",
+            "updated": "2026-07-06",
+            "file": "records/RUN-2026-002.md",
+            "links": {"materials": ["MAT-2026-001"]},
+            "evidence": [],
+            "proposal": "PROP-2026-001",
+            "authorization": {"quote": "go on", "recorded_on": "2026-07-06"},
+            "result": "VALIDATED",
+            "deviations": ["the second hook was left out"],
+            "targets": [
+                {
+                    "anchor": "$USER_CONFIG/CLAUDE.md",
+                    "kind": "instruction-file",
+                    "before_digest": DIGEST,
+                    "after_digest": DIGEST_AFTER,
+                    "reversible": True,
+                    "residual_effect": None,
+                }
+            ],
+            # No backup: this run and the one below are what the Rollback
+            # panel has to be honest about rather than silently omit.
+            "backup": None,
+            "rollback": {"tested": "NOT_TESTED"},
+            "self_reported": ["targets"],
+        },
+        # The newest run of the four, and undone: it must sort *below* both
+        # findings despite being the most recent, because a change that was
+        # rolled back is history rather than a fault.
+        {
+            "id": "RUN-2026-003",
+            "type": "RUN",
+            "title": "Pin the skill version",
+            "status": "ROLLBACK",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-07",
+            "updated": "2026-07-07",
+            "file": "records/RUN-2026-003.md",
+            "links": {},
+            "evidence": [],
+            "proposal": "PROP-2026-001",
+            "authorization": {"quote": "try it", "recorded_on": "2026-07-07"},
+            "result": "ROLLBACK COMPLETED",
+            "targets": [
+                {
+                    "anchor": "$USER_CONFIG/skills/drifted-skill",
+                    "kind": "skill",
+                    "before_digest": DIGEST,
+                    "after_digest": DIGEST,
+                    "reversible": True,
+                    "residual_effect": None,
+                }
+            ],
+            "backup": None,
+            "rollback": {"tested": "PASSED"},
             "self_reported": ["targets"],
         },
         {
@@ -701,6 +937,11 @@ FIXTURE_COMPUTED = {
             "UNVERIFIABLE": 0,
         },
     },
+    # One preview per RUN that kept a backup, which is two of the four runs.
+    # Between them they cover the two shapes the panel must get right: a
+    # BROKEN preview whose three other sets are empty -- the case that proves
+    # all four headings render whatever the sets hold -- and an AT_RISK
+    # preview with every set populated.
     "previews": {
         "RUN-2026-000": {
             "run": "RUN-2026-000",
@@ -717,7 +958,37 @@ FIXTURE_COMPUTED = {
                 }
             ],
             "residual_effects": [],
-        }
+        },
+        "RUN-2026-001": {
+            "run": "RUN-2026-001",
+            "indicator": "AT_RISK",
+            "backup": {"verified": True, "reason": None},
+            "will_be_restored": [
+                {
+                    "anchor": "$USER_CONFIG/settings.json",
+                    "kind": "instruction-file",
+                    "state": "IN_PLACE",
+                }
+            ],
+            "will_not_change": [
+                {
+                    "anchor": "$USER_CONFIG/hooks/guard.js",
+                    "kind": "json field",
+                    "state": "REVERTED",
+                }
+            ],
+            "cannot_be_restored": [
+                {
+                    "anchor": XSS_TITLE,
+                    "kind": "markdown document",
+                    "state": "MISSING",
+                    "reason": "MISSING",
+                }
+            ],
+            # Verbatim, as `rollback_preview` records it: the string the
+            # target itself carried.
+            "residual_effects": [XSS_TITLE],
+        },
     },
     "expired_evidence": [
         {
@@ -1035,6 +1306,27 @@ PANEL_PROBE = r"""
     return node;
   }
 
+  /* The Changes and Rollback panels list runs as blocks rather than rows, so
+     the facts a case wants are per block: the severity it was painted with,
+     which fields carry a SELF-REPORTED badge, and the set headings under it.
+     `data-field` is what makes the badge check exact -- the rendered tree
+     names the field each badge belongs to. */
+  function runBlocks(root) {
+    return byClass(root, "run").map(function (node) {
+      return {
+        classes: classes(node),
+        badges: byClass(node, "marker").map(function (badge) {
+          return {
+            field: badge.attributes["data-field"] || null,
+            text: badge.textContent
+          };
+        }),
+        headings: byTag(node, "H4").map(function (n) { return n.textContent; }),
+        text: node.textContent
+      };
+    });
+  }
+
   function report(code) {
     process.stdout.write(JSON.stringify(facts, null, 2) + "\n");
     process.exit(code);
@@ -1049,6 +1341,9 @@ PANEL_PROBE = r"""
 
   var overview = panel("overview");
   var inventory = panel("inventory");
+  var changes = panel("changes");
+  var provenance = panel("provenance");
+  var rollback = panel("rollback");
   var backlog = panel("backlog");
   var decisions = panel("decisions");
   var materials = panel("materials");
@@ -1085,6 +1380,40 @@ PANEL_PROBE = r"""
       return node.attributes["data-label"];
     }),
     text: inventory.textContent
+  };
+
+  facts.changes = {
+    runs: runBlocks(changes),
+    headers: byTag(changes, "TH").map(function (n) { return n.textContent; }),
+    labels: byTag(changes, "TD").map(function (n) {
+      return n.attributes["data-label"];
+    }),
+    digests: byClass(changes, "digest").map(function (n) {
+      return { text: n.textContent, title: n.attributes.title || null };
+    }),
+    vocab: byClass(changes, "vocab").map(function (n) { return n.textContent; }),
+    texts: textValues(changes),
+    anchors: byTag(changes, "A").length,
+    text: changes.textContent
+  };
+
+  facts.provenance = {
+    summaries: byTag(provenance, "SUMMARY").map(function (n) {
+      return n.textContent;
+    }),
+    chains: byTag(provenance, "DETAILS").map(function (n) { return n.textContent; }),
+    texts: textValues(provenance),
+    anchors: byTag(provenance, "A").length,
+    text: provenance.textContent
+  };
+
+  facts.rollback = {
+    runs: runBlocks(rollback),
+    headings: byTag(rollback, "H4").map(function (n) { return n.textContent; }),
+    vocab: byClass(rollback, "vocab").map(function (n) { return n.textContent; }),
+    texts: textValues(rollback),
+    anchors: byTag(rollback, "A").length,
+    text: rollback.textContent
   };
 
   facts.backlog = {
@@ -1604,6 +1933,21 @@ class GateSourceTests(ShellTemplateTestCase):
         self.assertIn("Do not optimize renderPanels", self.text)
         self.assertIn("Do not optimize this loop", self.text)
 
+    def test_print_stylesheet_unfolds_the_provenance_chains(self) -> None:
+        """M8's failure mode one level down.
+
+        The print block unhides all nine panel sections so a printed page is
+        the whole ledger. Provenance is nothing but collapsed `details`, so
+        unhiding its section alone would print that panel's heading and none
+        of its chains -- the same silent loss, and just as invisible to a
+        test that inspects the screen. Two selectors because engines hide the
+        closed content two different ways, and an engine that knows neither
+        is no worse off than before.
+        """
+        block = self.text[self.text.index("@media print"):]
+        self.assertIn("details > *:not(summary) { display: block !important; }", block)
+        self.assertIn("details::details-content", block)
+
     def test_attribute_prefix_check_is_labelled_as_not_the_guard(self) -> None:
         """The `on` prefix test is case sensitive; the allow-list is the gate."""
         body = slice_function(self.shell, "function attrAllowed(name)")
@@ -1746,6 +2090,91 @@ class PanelRendererSourceTests(ShellTemplateTestCase):
             with self.subTest(renderer=name):
                 self.assertIn(name + "(section", body)
 
+    def test_every_task_5_renderer_is_defined(self) -> None:
+        for signature in TASK_5_RENDERERS:
+            with self.subTest(renderer=signature):
+                self.assertIn(signature, self.shell)
+
+    def test_every_task_5_renderer_is_dispatched_by_render_panels(self) -> None:
+        """Same reason as Task 4's: the three panels each have an
+        instructional empty state, and a renderer that is defined but never
+        dispatched leaves that empty state on screen for a ledger that is
+        full of runs -- which reads as "nothing was ever recorded"."""
+        body = slice_function(self.shell, "function renderPanels(state)")
+        for signature in TASK_5_RENDERERS:
+            name = signature.split("(")[0].replace("function ", "")
+            with self.subTest(renderer=name):
+                self.assertIn(name + "(section", body)
+
+    def test_task_5_panels_build_no_link_elements(self) -> None:
+        """Anchors and evidence sources are text in these panels too.
+
+        The `file:` Open links belong to Task 6, which adds them behind
+        `safeHref` deliberately and all at once. Until then a target anchor
+        is exactly what an evidence source already is -- a string that is
+        frequently a path and is never a click -- and the way to keep that
+        true is for these renderers to build no `a` at all.
+        """
+        for signature in (
+            "function renderChanges(section)",
+            "function runBlock(record, states)",
+            "function targetRow(target, states)",
+            "function renderProvenance(section)",
+            "function chainBlock(entry, byId, expired)",
+            "function chainList(record, byId, expired)",
+            "function renderRollback(section)",
+            "function rollbackBlock(record, preview)",
+            "function setRow(row, withReason)",
+        ):
+            with self.subTest(function=signature):
+                body = slice_function(self.shell, signature)
+                self.assertNotIn('h("a"', body)
+                self.assertNotIn("href", body)
+
+    def test_the_self_reported_badge_reads_the_records_own_list(self) -> None:
+        """Design spec section 5's marker is driven by the ledger field that
+        names it, not by a guess about which fields look unverified.
+
+        This is the grep half of the ablation the plan asks for: delete the
+        branch and `RuntimePanelTests` fails on the rendered tree, but a
+        machine with no node would otherwise notice nothing.
+        """
+        body = slice_function(self.shell, "function selfReportedFields(record)")
+        self.assertIn("record.self_reported", body)
+        gate = slice_function(self.shell, "function selfReportedBadge(record, field)")
+        self.assertIn("isSelfReported(record, field)", gate)
+        self.assertIn("SELF_REPORTED", gate)
+
+    def test_rollback_tested_values_map_to_the_documented_severities(self) -> None:
+        """An untested rollback is a warning, a failed one an error.
+
+        Mapping `NOT_TESTED` to `info` would paint an undo nobody has ever
+        exercised exactly like one that passed.
+        """
+        listing = re.search(r"var TESTED_SEVERITY = \{(.*?)\};", self.shell, re.DOTALL)
+        assert listing is not None
+        pairs = dict(re.findall(r'(\w+):\s*"(\w+)"', listing.group(1)))
+        self.assertEqual(pairs, TESTED_SEVERITY)
+
+    def test_the_run_result_vocabulary_matches_the_schema(self) -> None:
+        """The six results, in the schema's own order, from one list."""
+        listing = re.search(r"var RUN_RESULTS = \[(.*?)\];", self.shell, re.DOTALL)
+        assert listing is not None
+        found = tuple(re.findall(r'"([^"]+)"', listing.group(1)))
+        self.assertEqual(found, RUN_RESULTS)
+        self.assertIn('var CLEAN_RESULT = "VALIDATED";', self.shell)
+
+    def test_the_digest_abbreviation_keeps_the_whole_value_in_reach(self) -> None:
+        """Twelve characters on screen, and the full digest in the tooltip.
+
+        Truncating without the tooltip would make two digests that share a
+        prefix indistinguishable on the page with no way to tell from here.
+        """
+        self.assertIn("var DIGEST_CHARS = 12;", self.shell)
+        body = slice_function(self.shell, "function digestCell(value)")
+        self.assertIn("title: value", body)
+        self.assertIn("hex.slice(0, DIGEST_CHARS)", body)
+
     def test_severity_order_is_error_then_warning_then_info(self) -> None:
         """The one list the whole sort depends on, in the one order it means."""
         listing = re.search(r"var SEVERITY_ORDER = \[(.*?)\];", self.shell, re.DOTALL)
@@ -1790,6 +2219,12 @@ class PanelRendererSourceTests(ShellTemplateTestCase):
             "function renderBacklog(section)",
             "function renderDecisions(section, state)",
             "function renderMaterials(section)",
+            "function renderChanges(section)",
+            "function renderRollback(section)",
+            # Provenance sorts two lists -- the anchors, and the runs under
+            # each -- and both happen inside the index it builds, so that is
+            # the function the rule has to hold in.
+            "function anchorIndex(runs)",
         ):
             with self.subTest(renderer=renderer):
                 body = slice_function(self.shell, renderer)
@@ -1814,6 +2249,9 @@ class PanelRendererSourceTests(ShellTemplateTestCase):
         for signature in (
             "function renderMaterials(section)",
             "function materialRow(record, expired)",
+            # Where the source actually lands since Task 5 shared this list
+            # with the Provenance chain.
+            "function evidenceList(record, expired)",
         ):
             with self.subTest(function=signature):
                 body = slice_function(self.shell, signature)
@@ -1896,6 +2334,49 @@ class PanelDictionaryTests(ShellTemplateTestCase):
             for key in TASK_4_KEYS:
                 with self.subTest(lang=code, key=key):
                     self.assertIn(key, self.dicts[code])
+
+    def test_every_task_5_key_is_in_both_dictionaries(self) -> None:
+        for code in ("en", "pt-BR"):
+            for key in TASK_5_KEYS:
+                with self.subTest(lang=code, key=key):
+                    self.assertIn(key, self.dicts[code])
+
+    def test_the_self_reported_badge_has_a_translated_explanation(self) -> None:
+        """The word stays English; the sentence under it does not.
+
+        `SELF-REPORTED` is canonical vocabulary -- it is what the commands
+        and the records call it -- so it is not translated. The tooltip that
+        says what it means is prose, and a reader who needs the tooltip is
+        precisely the reader who is not reading English by choice.
+        """
+        for code in ("en", "pt-BR"):
+            with self.subTest(lang=code):
+                self.assertIn("changes.self_reported", self.dicts[code])
+        self.assertNotEqual(
+            self.dicts["en"]["changes.self_reported"],
+            self.dicts["pt-BR"]["changes.self_reported"],
+        )
+
+    def test_every_run_result_has_a_gloss_in_both_languages(self) -> None:
+        """The result chips in the Changes panel, and Help's own list."""
+        for code in ("en", "pt-BR"):
+            for name in RUN_RESULTS:
+                with self.subTest(lang=code, result=name):
+                    self.assertIn("vocab.result." + name + ".tip", self.dicts[code])
+
+    def test_every_rollback_tested_value_has_a_gloss_in_both_languages(self) -> None:
+        for code in ("en", "pt-BR"):
+            for name in TESTED_SEVERITY:
+                with self.subTest(lang=code, tested=name):
+                    self.assertIn("rollback.tested." + name + ".tip", self.dicts[code])
+
+    def test_no_task_5_gloss_was_filled_by_paste(self) -> None:
+        """A pt-BR value identical to its English twin is an untranslated key."""
+        keys = ["vocab.result." + name + ".tip" for name in RUN_RESULTS]
+        keys += ["rollback.tested." + name + ".tip" for name in TESTED_SEVERITY]
+        for key in keys:
+            with self.subTest(key=key):
+                self.assertNotEqual(self.dicts["en"][key], self.dicts["pt-BR"][key])
 
     def test_every_classification_has_a_gloss_in_both_languages(self) -> None:
         """The Help panel's vocabulary list, and the chips' tooltips."""
@@ -2010,8 +2491,13 @@ class RuntimePanelTests(ShellTemplateTestCase):
         self.assertEqual(len(self._panel("overview")["cards"]), 5)
 
     def test_overview_counts_active_changes_from_the_records(self) -> None:
-        """One RUN, not rolled back."""
-        self.assertEqual(self._card("Active changes")["count"], "1")
+        """Four RUN records, one of them rolled back and so not active.
+
+        The count and the Changes panel read the same two fields through the
+        same function, which is what stops this card from disagreeing with
+        the panel it links to.
+        """
+        self.assertEqual(self._card("Active changes")["count"], "3")
 
     def test_overview_counts_drift_from_the_computed_summary(self) -> None:
         """Two DRIFTED in the summary, and nothing else off IN_PLACE."""
@@ -2020,8 +2506,9 @@ class RuntimePanelTests(ShellTemplateTestCase):
         self.assertIn("card-error", card["severity"])
 
     def test_overview_counts_rollbacks_at_risk_from_the_previews(self) -> None:
+        """Two previews, `BROKEN` and `AT_RISK`; the card takes the worse."""
         card = self._card("Rollbacks at risk")
-        self.assertEqual(card["count"], "1")
+        self.assertEqual(card["count"], "2")
         self.assertIn("card-error", card["severity"])
 
     def test_overview_counts_expired_evidence_and_unreachable_projects(self) -> None:
@@ -2064,6 +2551,267 @@ class RuntimePanelTests(ShellTemplateTestCase):
     def test_inventory_renders_the_proposal_origin_as_text(self) -> None:
         self.assertIn("PROP-2026-000", self._panel("inventory")["text"])
 
+    # --- Changes -------------------------------------------------------
+
+    def _run_block(self, panel: str, run_id: str) -> dict:
+        for block in self._panel(panel)["runs"]:
+            if run_id in block["text"]:
+                return block
+        raise AssertionError("no " + panel + " block for " + run_id)
+
+    def test_changes_renders_one_block_per_run(self) -> None:
+        self.assertEqual(len(self._panel("changes")["runs"]), 4)
+
+    def test_changes_sorts_the_deviating_runs_above_the_clean_ones(self) -> None:
+        """Severity first, recency second -- and the fixture is built so the
+        two rules disagree.
+
+        `RUN-2026-002` recorded a plan deviation and `RUN-2026-001` a result
+        that is not `VALIDATED`; both must sort above `RUN-2026-003`, which
+        is the newest record of the four. A panel that ordered by date alone
+        would put the newest first and look perfectly reasonable.
+        """
+        order = [block["text"][:40] for block in self._panel("changes")["runs"]]
+        self.assertIn("RUN-2026-002", order[0])
+        self.assertIn("RUN-2026-001", order[1])
+        self.assertIn("RUN-2026-003", order[2])
+        self.assertIn("RUN-2026-000", order[3])
+
+    def test_changes_paints_the_two_kinds_of_finding_as_warnings(self) -> None:
+        """A deviation and a non-clean result each earn the same severity."""
+        self.assertIn("run-warning", self._run_block("changes", "RUN-2026-002")["classes"])
+        self.assertIn("run-warning", self._run_block("changes", "RUN-2026-001")["classes"])
+
+    def test_changes_treats_a_rolled_back_run_as_history(self) -> None:
+        """`ROLLBACK COMPLETED` is not a fault: the change was undone on
+        purpose and the record stays to say so. Ranking it as a finding would
+        float every undone change above the ones still in effect."""
+        self.assertIn("run-info", self._run_block("changes", "RUN-2026-003")["classes"])
+
+    def test_changes_names_the_deviation_it_sorted_on(self) -> None:
+        """The reason a run outranks the rest is on the page, not only in the
+        sort: a block painted as a finding with nothing in it that says why
+        is a block the reader cannot act on."""
+        block = self._run_block("changes", "RUN-2026-002")
+        self.assertIn("Plan deviations", block["headings"])
+        self.assertIn("the second hook was left out", block["text"])
+
+    def test_changes_abbreviates_every_digest_to_twelve_characters(self) -> None:
+        """And keeps the whole value in the tooltip.
+
+        Twelve is enough to tell two digests apart at a glance; the title is
+        what makes the shortening lossless. A digest rendered whole would push
+        the table past any viewport, and one rendered short with no title
+        would be a fact the page destroyed on the way in.
+        """
+        digests = self._panel("changes")["digests"]
+        self.assertTrue(digests)
+        for entry in digests:
+            with self.subTest(digest=entry["text"]):
+                self.assertEqual(len(entry["text"]), 12)
+                self.assertTrue(entry["title"].startswith("sha256:"), entry["title"])
+                self.assertEqual(len(entry["title"]), len("sha256:") + 64)
+                # The shown text is the head of the value in the tooltip, so
+                # the two cannot describe different digests.
+                self.assertTrue(
+                    entry["title"][len("sha256:"):].startswith(entry["text"]),
+                    entry,
+                )
+        self.assertIn(DIGEST_AFTER, {entry["title"] for entry in digests})
+        self.assertIn(
+            DIGEST_AFTER[len("sha256:"):][:12], {entry["text"] for entry in digests}
+        )
+
+    def test_changes_renders_the_target_key_beside_the_digest_pair(self) -> None:
+        """0.4.0's whole "before/after diff": the digest pair plus the key.
+
+        The ledger stores digests, not file bodies, so there is nothing here
+        to diff -- and the panel says exactly that rather than implying more.
+        """
+        panel = self._panel("changes")
+        self.assertIn("/hooks/0/command", panel["text"])
+        self.assertIn("Key", panel["headers"])
+        self.assertIn("not a line-by-line diff", panel["text"])
+
+    def test_changes_badges_exactly_the_fields_the_run_named(self) -> None:
+        """Design spec section 5's marker, driven by `self_reported`.
+
+        `RUN-2026-000` lists only `targets`; `RUN-2026-001` lists `result`
+        too. A badge on a field the run did not name would be this page
+        inventing a doubt, and a missing badge would be it hiding one --
+        so the assertion is set equality, in both directions, per run.
+        """
+        first = self._run_block("changes", "RUN-2026-000")
+        self.assertEqual({badge["field"] for badge in first["badges"]}, {"targets"})
+        second = self._run_block("changes", "RUN-2026-001")
+        self.assertEqual(
+            {badge["field"] for badge in second["badges"]}, {"targets", "result"}
+        )
+        for badge in first["badges"] + second["badges"]:
+            with self.subTest(field=badge["field"]):
+                self.assertIn("SELF-REPORTED", badge["text"])
+
+    def test_changes_labels_every_cell_for_the_card_fold(self) -> None:
+        labels = self._panel("changes")["labels"]
+        self.assertTrue(labels)
+        self.assertTrue(all(isinstance(label, str) and label for label in labels))
+
+    def test_changes_annotates_a_target_with_its_computed_drift_state(self) -> None:
+        """The run-target half of the drift report, joined by anchor and kind.
+
+        Only `RUN-2026-000` is in the report's `runs`, so only its block may
+        carry a state -- a page that showed a state for the others would be
+        claiming a comparison nobody made.
+        """
+        panel = self._panel("changes")
+        self.assertIn("State", panel["headers"])
+        self.assertIn("DRIFTED", self._run_block("changes", "RUN-2026-000")["text"])
+        self.assertNotIn("DRIFTED", self._run_block("changes", "RUN-2026-002")["text"])
+
+    def test_changes_builds_no_link_elements(self) -> None:
+        """Target anchors are text at 0.4.0; Task 6 owns the `file:` links."""
+        self.assertEqual(self._panel("changes")["anchors"], 0)
+
+    def test_a_script_payload_in_a_target_anchor_lands_as_one_text_node(self) -> None:
+        """The stored-XSS regression, through a second renderer.
+
+        A target anchor and a residual effect are ledger strings that reach
+        the document by a different path than a material title does. The
+        payload is the same one; the assertion is the same one -- it arrives
+        as a value and leaves as text.
+        """
+        self.assertIn(XSS_TITLE, self._panel("changes")["texts"])
+
+    def test_a_script_payload_in_a_residual_effect_lands_as_one_text_node(self) -> None:
+        texts = self._panel("changes")["texts"]
+        self.assertGreaterEqual(texts.count(XSS_TITLE), 2)
+
+    # --- Provenance ----------------------------------------------------
+
+    def _chain(self, needle: str) -> str:
+        for text in self._panel("provenance")["chains"]:
+            if needle in text:
+                return text
+        raise AssertionError("no provenance chain mentioning " + needle)
+
+    def test_provenance_indexes_every_distinct_target(self) -> None:
+        """Five targets across four runs, two of them the same anchor and key.
+
+        The shared anchor is the point: the index is keyed on anchor *and*
+        key, so two runs that wrote the same file land under one entry and
+        two runs that wrote different keys inside one file do not.
+        """
+        self.assertEqual(len(self._panel("provenance")["summaries"]), 5)
+
+    def test_provenance_puts_both_runs_under_the_shared_anchor(self) -> None:
+        chain = self._chain("$USER_CONFIG/settings.json")
+        self.assertIn("RUN-2026-000", chain)
+        self.assertIn("RUN-2026-001", chain)
+
+    def test_provenance_reaches_each_runs_own_evidence(self) -> None:
+        """The whole chain, end to end and per run: run → proposal → material
+        → the evidence that material rests on, with its dates.
+
+        Both runs touched one file, and each has to arrive at its *own*
+        evidence. A chain that followed only the first proposal would look
+        complete and would attribute one run's change to the other's source.
+        """
+        chain = self._chain("$USER_CONFIG/settings.json")
+        for token in (
+            "PROP-2026-000",
+            "MAT-2026-000",
+            "vendor documentation, page 4",
+            "2026-01-02",
+            "PROP-2026-001",
+            "MAT-2026-001",
+            "release notes, second edition",
+            "2026-05-05",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, chain)
+
+    def test_provenance_orders_anchors_by_the_run_that_moved_last(self) -> None:
+        summaries = self._panel("provenance")["summaries"]
+        self.assertIn("$USER_CONFIG/skills/drifted-skill", summaries[0])
+        self.assertIn("$USER_CONFIG/CLAUDE.md", summaries[1])
+        self.assertIn("$USER_CONFIG/settings.json", summaries[2])
+
+    def test_provenance_shows_the_key_that_distinguishes_two_targets(self) -> None:
+        self.assertIn("/hooks/0/command", self._chain("$USER_CONFIG/hooks/guard.js"))
+
+    def test_provenance_builds_no_link_elements(self) -> None:
+        self.assertEqual(self._panel("provenance")["anchors"], 0)
+
+    def test_a_script_payload_in_an_anchor_is_inert_in_provenance(self) -> None:
+        self.assertIn(XSS_TITLE, self._panel("provenance")["texts"])
+
+    # --- Rollback ------------------------------------------------------
+
+    def test_rollback_renders_a_block_for_every_run_with_a_backup(self) -> None:
+        """Two of the four runs kept one."""
+        self.assertEqual(len(self._panel("rollback")["runs"]), 2)
+
+    def test_rollback_lists_all_four_sets_even_when_they_are_empty(self) -> None:
+        """Design spec section 11's four sets partition the run's targets, so
+        an empty set is an answer -- `BROKEN` restores nothing, and that is
+        the finding. A panel that dropped the empty ones would make "nothing
+        could be restored" and "this was never computed" look identical.
+        """
+        block = self._run_block("rollback", "RUN-2026-000")
+        self.assertEqual(
+            block["headings"],
+            [
+                "Will be restored",
+                "Cannot be restored",
+                "Will not change",
+                "Residual effects — undoing the run does not undo these",
+            ],
+        )
+        self.assertEqual(block["text"].count("none"), 3)
+
+    def test_rollback_shows_the_broken_indicator_and_its_reason(self) -> None:
+        block = self._run_block("rollback", "RUN-2026-000")
+        self.assertIn("BROKEN", block["text"])
+        self.assertIn("backup_missing", block["text"])
+        self.assertIn("run-error", block["classes"])
+
+    def test_rollback_fills_all_four_sets_when_the_preview_does(self) -> None:
+        block = self._run_block("rollback", "RUN-2026-001")
+        self.assertIn("AT_RISK", block["text"])
+        self.assertIn("$USER_CONFIG/settings.json", block["text"])
+        self.assertIn("$USER_CONFIG/hooks/guard.js", block["text"])
+        self.assertIn("MISSING", block["text"])
+        self.assertNotIn("none", block["text"])
+
+    def test_rollback_sorts_the_broken_preview_above_the_at_risk_one(self) -> None:
+        first = self._panel("rollback")["runs"][0]
+        self.assertIn("RUN-2026-000", first["text"])
+
+    def test_rollback_badges_the_backup_fields_the_run_named(self) -> None:
+        """`RUN-2026-001` lists `backup` and `rollback.tested`; the run above
+        it lists neither, and its block must carry no badge at all."""
+        self.assertEqual(self._run_block("rollback", "RUN-2026-000")["badges"], [])
+        self.assertEqual(
+            {b["field"] for b in self._run_block("rollback", "RUN-2026-001")["badges"]},
+            {"backup", "rollback.tested"},
+        )
+
+    def test_rollback_names_the_runs_that_kept_no_backup(self) -> None:
+        """Two runs recorded none, and the panel says so in words rather than
+        leaving them out: a run missing from this panel would read as a run
+        that can be undone, which is the opposite of the truth."""
+        text = self._panel("rollback")["text"]
+        self.assertIn("Runs with no backup", text)
+        self.assertIn("RUN-2026-002", text)
+        self.assertIn("RUN-2026-003", text)
+        self.assertIn("recorded no backup", text)
+
+    def test_rollback_builds_no_link_elements(self) -> None:
+        self.assertEqual(self._panel("rollback")["anchors"], 0)
+
+    def test_a_script_payload_in_a_preview_set_is_inert(self) -> None:
+        self.assertIn(XSS_TITLE, self._panel("rollback")["texts"])
+
     # --- Backlog -------------------------------------------------------
 
     def test_backlog_sorts_the_overdue_entry_first(self) -> None:
@@ -2102,7 +2850,7 @@ class RuntimePanelTests(ShellTemplateTestCase):
     # --- Materials -----------------------------------------------------
 
     def test_materials_renders_the_material_record(self) -> None:
-        self.assertEqual(self._panel("materials")["rows"], 1)
+        self.assertEqual(self._panel("materials")["rows"], 2)
 
     def test_materials_marks_the_expired_evidence(self) -> None:
         text = self._panel("materials")["text"]
@@ -2220,6 +2968,68 @@ class RuntimeStaticModePanelTests(RuntimePanelTests):
         self.assertIn("dashboard.py build", text)
         self.assertIn("2026-04-02", text)
 
+    def test_changes_annotates_a_target_with_its_computed_drift_state(self) -> None:
+        """No drift report, so no state column at all.
+
+        A column of "not recorded" would read as a gap in the ledger. The
+        gap is in this page: nothing here compared a target against disk.
+        """
+        panel = self._panel("changes")
+        self.assertNotIn("State", panel["headers"])
+        self.assertNotIn("DRIFTED", panel["text"])
+
+    def test_rollback_renders_a_block_for_every_run_with_a_backup(self) -> None:
+        """The blocks still exist -- the runs did keep backups -- and each one
+        says its preview is missing rather than showing four empty sets."""
+        blocks = self._panel("rollback")["runs"]
+        self.assertEqual(len(blocks), 2)
+        for block in blocks:
+            with self.subTest(block=block["text"][:24]):
+                self.assertEqual(block["headings"], [])
+                self.assertIn("No preview was computed", block["text"])
+
+    def test_rollback_lists_all_four_sets_even_when_they_are_empty(self) -> None:
+        """There are no sets to list: the panel names the command instead.
+
+        This is the distinction the whole static mode rests on. Four headings
+        with "none" under each would say a preview ran and found nothing,
+        which is a claim no static page is entitled to make.
+        """
+        panel = self._panel("rollback")
+        self.assertEqual(panel["headings"], [])
+        self.assertIn("dashboard.py rollback-preview", panel["text"])
+
+    def test_rollback_shows_the_broken_indicator_and_its_reason(self) -> None:
+        """No preview, so no indicator: `BROKEN` is a computed verdict.
+
+        The only chips left are the two the ledger itself recorded -- what
+        each run said about testing its own rollback -- and each still
+        carries its severity glyph, which is what makes it legible without
+        colour.
+        """
+        panel = self._panel("rollback")
+        self.assertNotIn("BROKEN", panel["text"])
+        self.assertEqual(
+            [chip.lstrip("▲✕●") for chip in panel["vocab"]],
+            ["NOT_TESTED", "PARTIAL"],
+        )
+
+    def test_rollback_fills_all_four_sets_when_the_preview_does(self) -> None:
+        """Nothing to fill them from, and the run still has to be listed."""
+        block = self._run_block("rollback", "RUN-2026-001")
+        self.assertNotIn("AT_RISK", block["text"])
+        self.assertIn("No preview was computed", block["text"])
+
+    def test_rollback_sorts_the_broken_preview_above_the_at_risk_one(self) -> None:
+        """With no previews every run ranks the same, so recency decides and
+        the newer of the two backed-up runs comes first."""
+        self.assertIn("RUN-2026-000", self._panel("rollback")["runs"][0]["text"])
+
+    def test_a_script_payload_in_a_preview_set_is_inert(self) -> None:
+        """The payload reaches this panel only through a preview, and there
+        is none -- so the assertion is that it is absent, not inert."""
+        self.assertNotIn(XSS_TITLE, self._panel("rollback")["texts"])
+
 
 @unittest.skipUnless(NODE, "node is not on PATH -- this suite needs it")
 class RuntimeDegradedPanelTests(ShellTemplateTestCase):
@@ -2267,7 +3077,7 @@ class RuntimeDegradedPanelTests(ShellTemplateTestCase):
 
     def test_the_other_cards_still_hold_their_numbers(self) -> None:
         """One panel degrades, not all of them (design spec section 14)."""
-        self.assertEqual(self._card("Rollbacks at risk")["count"], "1")
+        self.assertEqual(self._card("Rollbacks at risk")["count"], "2")
         self.assertEqual(self._card("Expired evidence")["count"], "1")
 
     def test_inventory_falls_back_to_the_recorded_state(self) -> None:
