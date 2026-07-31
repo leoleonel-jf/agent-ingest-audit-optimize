@@ -196,12 +196,18 @@ def classify_item(
         recorded_reason = (
             attributes.get("reason") if isinstance(attributes, dict) else None
         )
-        if recorded_reason in ("pointer_unresolved", "no_match"):
-            # The baseline verified an absence *inside* this file, not of the
-            # file -- which existed at scan time too, or there would have been
-            # no document to walk. Its presence now answers nothing; the
-            # recorded location has to be re-resolved.
+        # The recorded pointer -- not the reason -- is what marks an in-file
+        # absence: `no_match` is also what a literal, wildcard-free glob
+        # records when it matches nothing, and for that item the file
+        # appearing IS the drift. The baseline verified an absence *inside*
+        # a file only when it recorded the location it walked; its presence
+        # now answers nothing, so that location is re-resolved.
+        if isinstance(attributes, dict) and "pointer" in attributes:
             return _recheck_pointer(path, attributes, patterns)
+        if recorded_reason == "pointer_unresolved":
+            # An in-file absence from a baseline that predates the recorded
+            # pointer: nothing to re-resolve, no verified answer either way.
+            return UNVERIFIABLE, "pointer_unrecorded"
         # A digest, a directory, a FIFO: something exists where the baseline
         # verified nothing did.
         return DRIFTED, "appeared"

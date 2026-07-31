@@ -338,6 +338,18 @@ class PointerRecheckTests(DriftTestCase):
         state, reason = classify_item(self.pointer_item(), self.roots)
         self.assertEqual((state, reason), ("IN_PLACE", None))
 
+    def test_a_no_match_without_a_pointer_is_a_file_level_absence(self) -> None:
+        # `no_match` is also what a literal, wildcard-free glob records when
+        # it matches nothing -- the dogfood's `$PROJECT/CLAUDE.md`. With no
+        # recorded pointer there is no in-file location, and the file
+        # appearing IS the drift.
+        self.write(self.user_config / "settings.json", '{"model": "opus"}\n')
+        item = self.pointer_item(reason="no_match")
+        del item["attributes"]["pointer"]
+        del item["attributes"]["parse"]
+        state, reason = classify_item(item, self.roots)
+        self.assertEqual((state, reason), ("DRIFTED", "appeared"))
+
 
 class RunTargetTests(DriftTestCase):
     """Design spec section 10's table, literally, plus the tie rule."""
