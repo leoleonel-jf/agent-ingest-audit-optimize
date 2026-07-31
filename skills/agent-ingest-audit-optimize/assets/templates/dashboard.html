@@ -1197,6 +1197,7 @@ footer {
     "overview.projects": "Known projects",
     "projects.open_root": "Open folder",
     "projects.open_ledger": "Open ledger",
+    "table.open": "Open",
     "projects.no_path": "No absolute path was recorded, so there is nothing to open from here.",
     "projects.unreachable_note": "The recorded root could not be reached, so it is not offered as a link.",
 
@@ -1453,6 +1454,7 @@ footer {
     "overview.projects": "Projetos conhecidos",
     "projects.open_root": "Abrir pasta",
     "projects.open_ledger": "Abrir ledger",
+    "table.open": "Abrir",
     "projects.no_path": "Nenhum caminho absoluto foi registrado, então não há o que abrir daqui.",
     "projects.unreachable_note": "A raiz registrada não pôde ser alcançada, então ela não vira link.",
 
@@ -2579,21 +2581,21 @@ footer {
     host.appendChild(drawer);
   }
 
-  /* A file: URL for a path the ledger recorded *as a path*, and never for
+  /* A file: URL for a path the payload recorded *as a path*, and never for
      an anchor.
 
-     This is the one place Task 6 had to narrow design spec section 12.2.
-     The section offers to open "the record, the backup, or the changed
-     file", and none of the three is reachable from this payload: an anchor
-     is stored as "$NAME/..." by construction -- `resolve_anchored` refuses
-     an absolute one -- and neither the drift report nor the rollback
-     preview carries the path it actually opened, only the anchor it
-     classified. A record's `file` is relative to the ledger, which this
-     page cannot resolve without knowing where the ledger is. So the honest
-     set of linkable paths is the one the ledger stores as real paths:
-     `known_projects[].project_root` and `.ledger_path`, which `build`
-     itself stats directly. Everything else gets no link rather than a
-     guess.
+     An anchor is stored as "$NAME/..." by construction -- `resolve_anchored`
+     refuses an absolute one -- so an anchor string itself is never linkable.
+     What IS linkable is what the payload carries already resolved: the real
+     paths the ledger stores (`known_projects[].project_root` and
+     `.ledger_path`, which `build` itself stats directly) and, since 0.5.0,
+     the `path` each drift row, preview row, and preview backup records
+     beside its anchor -- the very answer the Python side's
+     `resolve_anchored` gave when it classified that row, which is what
+     closed the gap Task 6 had to narrow at 0.4.0. A record's `file` is
+     still not linkable: it is relative to a ledger whose location this page
+     does not know. Anything without a recorded absolute path gets no link
+     rather than a guess.
 
      Returns null for anything that is not an absolute local path, which is
      what makes "no path, no Open button" a property of this function
@@ -2625,6 +2627,21 @@ footer {
     var url = fileUrl(path);
     if (url === null) { return null; }
     return h("a", { class: "action", href: url, title: path }, t(labelKey));
+  }
+
+  /* The anchor column with its Open action beside it, where the payload
+     recorded which absolute path the anchor resolved to (0.5.0: drift and
+     preview rows carry `path`). The anchor stays the visible text -- it is
+     the recorded fact -- and the link sits beside it as an action rather
+     than rewriting it. A row with no path, or a path `fileUrl` refuses,
+     keeps the plain cell: `openLink` already answers null for both, and
+     `h` drops a null child. */
+  function anchorCell(anchor, path) {
+    return cell(
+      "table.anchor",
+      h("code", { class: "path" }, textOrDash(anchor)),
+      openLink("table.open", path)
+    );
   }
 
   /* Language ---------------------------------------------------------- */
@@ -3583,7 +3600,8 @@ footer {
         rows.push({
           item: item,
           captured_on: typeof entry.captured_on === "string" ? entry.captured_on : null,
-          drift: typeof found === "string" ? found : null
+          drift: found && typeof found.state === "string" ? found.state : null,
+          path: found && typeof found.path === "string" ? found.path : null
         });
       });
     });
@@ -3640,7 +3658,7 @@ footer {
     return tableRow(inventorySeverity(entry), false, [
       cell("table.kind", h("code", { lang: "en" }, textOrDash(item.kind))),
       cell("table.name", textOrDash(item.name)),
-      cell("table.anchor", h("code", { class: "path" }, textOrDash(item.anchor))),
+      anchorCell(item.anchor, entry.path),
       cell("table.state", inventoryStateCell(entry)),
       cell("table.origin", h("code", { lang: "en" }, textOrDash(item.origin))),
       cell("table.portable", flagText(item.portable))
@@ -3665,14 +3683,21 @@ footer {
      the ledger gained an item still lines up, and a row that does not line
      up has no state at all rather than borrowing its neighbour's. */
   function driftStatesFor(report, baselineId) {
-    var found = {};
+    /* Object.create(null), as `driftTargetStates` already does: the key is
+       built from ledger content, and an item anchored at "constructor"
+       would otherwise read back the inherited function. Each entry keeps
+       the two report facts the panel renders -- the state, and (0.5.0) the
+       resolved path the classification looked at. */
+    var found = Object.create(null);
     if (!report || typeof report !== "object") { return found; }
     var entries = Array.isArray(report.baselines) ? report.baselines : [];
     entries.forEach(function (entry) {
       if (!entry || typeof entry !== "object" || entry.id !== baselineId) { return; }
       var items = Array.isArray(entry.items) ? entry.items : [];
       items.forEach(function (item) {
-        if (item && typeof item === "object") { found[itemKey(item)] = item.state; }
+        if (item && typeof item === "object") {
+          found[itemKey(item)] = { state: item.state, path: item.path };
+        }
       });
     });
     return found;
@@ -3839,10 +3864,12 @@ footer {
 
   function targetRow(target, states) {
     var row = target && typeof target === "object" ? target : {};
-    var state = states === null ? undefined : own(states, targetKey(row));
+    var found = states === null ? undefined : own(states, targetKey(row));
+    var state = found && typeof found.state === "string" ? found.state : undefined;
+    var path = found && typeof found.path === "string" ? found.path : null;
     var severity = typeof state === "string" ? driftSeverityOf(state) : "info";
     var cells = [
-      cell("table.anchor", h("code", { class: "path" }, textOrDash(row.anchor))),
+      anchorCell(row.anchor, path),
       cell("table.kind", h("code", { lang: "en" }, textOrDash(row.kind))),
       cell("table.key", h("code", { class: "path" }, textOrDash(row.key)))
     ];
@@ -3891,7 +3918,7 @@ footer {
       var targets = Array.isArray(entry.targets) ? entry.targets : [];
       targets.forEach(function (target) {
         if (target && typeof target === "object") {
-          found[targetKey(target)] = target.state;
+          found[targetKey(target)] = { state: target.state, path: target.path };
         }
       });
     });
@@ -4355,14 +4382,20 @@ footer {
       ? preview.backup
       : null;
     if (computed === null) { return flagText(reported); }
+    /* 0.5.0: the preview records the backup's resolved path, so the file
+       the verdict is about is one click away -- beside the verdict, never
+       instead of it. Only the recomputed backup gets a link: the run's own
+       claim carries no path, and inventing one would be a guess. */
+    var link = openLink("table.open", computed.path);
     var reason = computed.reason;
     if (typeof reason !== "string" || reason === "") {
-      return flagText(computed.verified);
+      return [flagText(computed.verified), link === null ? null : [" ", link]];
     }
     return [
       flagText(computed.verified),
       " ",
-      h("code", { lang: "en" }, reason)
+      h("code", { lang: "en" }, reason),
+      link === null ? null : [" ", link]
     ];
   }
 
@@ -4400,8 +4433,10 @@ footer {
   function setRow(row, withReason) {
     if (typeof row === "string" && row !== "") { return row; }
     if (!row || typeof row !== "object") { return t("value.unknown"); }
+    var link = openLink("table.open", row.path);
     return [
       h("code", { class: "path" }, textOrDash(row.anchor)),
+      link === null ? null : [" ", link],
       " ",
       h("code", { lang: "en" }, textOrDash(row.kind)),
       withReason && typeof row.reason === "string" && row.reason !== ""

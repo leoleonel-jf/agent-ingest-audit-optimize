@@ -260,6 +260,32 @@ def classify_target(
     return DRIFTED, None
 
 
+def resolved_path(anchor: object, resolved: Mapping[str, Path]) -> str | None:
+    """The absolute path `resolve_anchored` gives `anchor`, or None.
+
+    0.5.0: report rows carry the path they classified so the dashboard can
+    offer to open it -- design spec section 12.2's Open, which the 0.4.0
+    shell had to narrow to known projects because the reports recorded
+    anchors only. This is the same resolution the classifiers perform,
+    through the same resolver; a second resolver here would eventually
+    disagree with them about which file a row describes.
+
+    None -- never a raise -- for everything that has no single local file to
+    open: a non-string, a glob pattern (`scan` stores a matchless probe's
+    PATTERN as its anchor), and any anchor the path-safety layer refuses.
+    The refusal is already the row's classification (`UNVERIFIABLE` with the
+    refusal's reason); repeating it here would give one refusal two rows.
+    A MISSING row keeps its path: resolution is textual for a file that is
+    not there, and "which file is gone" is what that row's reader asks next.
+    """
+    if not isinstance(anchor, str) or any(char in _GLOB_CHARS for char in anchor):
+        return None
+    try:
+        return str(resolve_anchored(anchor, resolved))
+    except PathSafetyError:
+        return None
+
+
 def _current_digest(path: Path) -> tuple[str | None, str | None]:
     """The digest of `path`'s bytes now, or `(None, why_not)`.
 
@@ -557,11 +583,13 @@ def drift_report(
             scope = (
                 attributes.get("scope") if isinstance(attributes, dict) else None
             )
+            anchor = item.get("anchor") if isinstance(item, dict) else None
             rows.append(
                 {
                     "kind": item.get("kind") if isinstance(item, dict) else None,
                     "name": item.get("name") if isinstance(item, dict) else None,
-                    "anchor": item.get("anchor") if isinstance(item, dict) else None,
+                    "anchor": anchor,
+                    "path": resolved_path(anchor, roots),
                     "scope": scope if isinstance(scope, str) else None,
                     "recorded_state": (
                         item.get("state") if isinstance(item, dict) else None
@@ -601,12 +629,12 @@ def drift_report(
         for target in targets:
             state, reason = classify_target(target, roots)
             classified(state)
+            anchor = target.get("anchor") if isinstance(target, dict) else None
             rows.append(
                 {
                     "kind": target.get("kind") if isinstance(target, dict) else None,
-                    "anchor": (
-                        target.get("anchor") if isinstance(target, dict) else None
-                    ),
+                    "anchor": anchor,
+                    "path": resolved_path(anchor, roots),
                     "state": state,
                     "reason": reason,
                 }

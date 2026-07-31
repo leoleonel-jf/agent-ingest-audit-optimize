@@ -57,7 +57,9 @@ from ledgerlib.drift import (  # noqa: E402
     classify_target,
     drift_command,
     drift_report,
+    resolved_path,
 )
+from ledgerlib.paths import resolve_anchored  # noqa: E402
 
 
 class DriftTestCase(unittest.TestCase):
@@ -1216,6 +1218,115 @@ class DriftWritesNothingTests(DriftCliTestCase):
             )
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out.getvalue())["summary"]["IN_PLACE"], 1)
+
+
+class ResolvedPathHelperTests(DriftTestCase):
+    """`resolved_path`: the row-level answer to "which file was classified".
+
+    The helper exists so the reports can say where a classification looked
+    without growing a second resolver: a resolvable anchor's path IS
+    `resolve_anchored`'s answer, stringified, and everything that has no
+    single local file -- a pattern, a refusal, a non-string -- is None,
+    which is what makes "no path, no Open link" a property of the reports
+    rather than of the page that renders them.
+    """
+
+    def test_a_resolvable_anchor_is_resolve_anchoreds_answer_stringified(
+        self,
+    ) -> None:
+        self.assertEqual(
+            resolved_path("$USER_CONFIG/CLAUDE.md", self.roots),
+            str(resolve_anchored("$USER_CONFIG/CLAUDE.md", self.roots)),
+        )
+
+    def test_a_missing_file_still_has_the_path_it_would_occupy(self) -> None:
+        """Resolution is textual for a file that is not there: MISSING rows
+        carry a path too, because "which file is gone" is exactly what the
+        reader of that row asks next."""
+        self.assertEqual(
+            resolved_path("$USER_CONFIG/never/written.json", self.roots),
+            str(self.user_config / "never" / "written.json"),
+        )
+
+    def test_a_glob_pattern_is_none(self) -> None:
+        self.assertIsNone(
+            resolved_path("$USER_CONFIG/plugins/*/manifest.json", self.roots)
+        )
+
+    def test_a_refused_anchor_is_none_never_a_raise(self) -> None:
+        for stored in (
+            "$USER_CONFIG/../escape.json",
+            "$UNKNOWN/settings.json",
+            "/etc/passwd",
+        ):
+            with self.subTest(stored=stored):
+                self.assertIsNone(resolved_path(stored, self.roots))
+
+    def test_a_non_string_anchor_is_none(self) -> None:
+        for stored in (None, 7, ["$USER_CONFIG/CLAUDE.md"]):
+            with self.subTest(stored=stored):
+                self.assertIsNone(resolved_path(stored, self.roots))
+
+    def test_the_dashboard_module_re_exports_the_helper(self) -> None:
+        self.assertIs(dashboard.resolved_path, resolved_path)
+
+
+class ResolvedPathReportTests(DriftReportTestCase):
+    """0.5.0: every classified row records the path it classified.
+
+    Design spec section 12.2 offers Open for "the changed file", and the
+    0.4.0 shell narrowed it to known projects because these reports carried
+    anchors only. Each row's `path` closes that gap; it is None exactly
+    where no single local file exists to open.
+    """
+
+    def test_a_baseline_row_carries_the_resolved_absolute_path(self) -> None:
+        memory = self.write(self.user_config / "CLAUDE.md", "# memory\n")
+        report, _, _ = self.report(
+            self.ledger(items=[self.item(digest=self.digest_of(memory))])
+        )
+        self.assertEqual(
+            report["baselines"][0]["items"][0]["path"], str(memory.resolve())
+        )
+
+    def test_a_missing_items_row_still_carries_its_path(self) -> None:
+        report, _, _ = self.report(
+            self.ledger(items=[self.item(digest="sha256:" + "a" * 64)])
+        )
+        row = report["baselines"][0]["items"][0]
+        self.assertEqual(row["state"], "MISSING")
+        self.assertEqual(row["path"], str(self.user_config / "CLAUDE.md"))
+
+    def test_a_run_target_row_carries_the_resolved_absolute_path(self) -> None:
+        settings = self.write(self.user_config / "settings.json", "{}\n")
+        report, _, _ = self.report(
+            self.ledger(targets=[self.target(after_digest=self.digest_of(settings))])
+        )
+        self.assertEqual(
+            report["runs"][0]["targets"][0]["path"], str(settings.resolve())
+        )
+
+    def test_an_unresolvable_anchors_row_has_a_null_path(self) -> None:
+        item = self.item(
+            anchor="$SYSTEM_CONFIG/config.toml", digest="sha256:" + "a" * 64
+        )
+        report, _, _ = self.report(self.ledger(items=[item]))
+        self.assertIsNone(report["baselines"][0]["items"][0]["path"])
+
+    def test_an_absent_glob_patterns_row_has_a_null_path(self) -> None:
+        item = self.item(
+            state="not_present",
+            digest=None,
+            anchor="$USER_CONFIG/plugins/*/manifest.json",
+        )
+        report, _, _ = self.report(self.ledger(items=[item]))
+        self.assertIsNone(report["baselines"][0]["items"][0]["path"])
+
+    def test_a_malformed_items_row_has_a_null_path(self) -> None:
+        report, _, _ = self.report(self.ledger(items=[42]))
+        row = report["baselines"][0]["items"][0]
+        self.assertEqual(row["state"], "UNVERIFIABLE")
+        self.assertIsNone(row["path"])
 
 
 if __name__ == "__main__":
