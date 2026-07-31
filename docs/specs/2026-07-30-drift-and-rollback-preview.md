@@ -140,8 +140,11 @@ the environment, not a crash in the tool.
 | `present`, digest D | file exists, digest D | `IN_PLACE` |
 | `present`, digest D | file exists, digest ≠ D | `DRIFTED` |
 | `present`, digest D | file gone | `MISSING` |
-| `not_present` | still absent | `IN_PLACE` |
-| `not_present` | file exists now | `DRIFTED` |
+| `not_present` (file) | still absent | `IN_PLACE` |
+| `not_present` (file) | file exists now | `DRIFTED` |
+| `not_present` (in-file: `pointer_unresolved`, `no_match`) | pointer still absent or empty | `IN_PLACE` |
+| `not_present` (in-file) | pointer resolves now | `DRIFTED` |
+| `not_present` (in-file) | pointer not recorded (pre-0.3.0 baseline), or the file no longer parses | `UNVERIFIABLE` |
 | `present`, digest null (unreadable at scan) | any | `UNVERIFIABLE` |
 | any | unreadable now | `UNVERIFIABLE`, with the reason |
 
@@ -150,6 +153,19 @@ nothing, and nothing is still there. A file appearing where none was is `DRIFTED
 of the strongest drift signals there is: configuration arriving from outside. `REVERTED` cannot
 occur for a baseline item — there is no before/after pair to revert between — and the report does
 not manufacture one.
+
+An absence recorded *inside* a file — a pointer that did not resolve, or resolved to an empty
+mapping — cannot be re-verified from the file's existence: the file existed at scan time too, or
+there would have been no document to walk. The first real dogfood run proved the distinction by
+reporting three such items `DRIFTED` minutes after their scan. So `scan` records the pointer and
+its parse format on pointer-absent items, and `drift` re-resolves that location the very way
+`scan` resolved it — parse, redact with the same adapter patterns, walk the same pointer — and
+emits only a state; nothing the parse produces reaches the report. This is the one place `drift`
+parses a configuration file, and the redaction mirror is load-bearing: a pointer `scan` could not
+resolve through a redacted marker must stay unresolvable at drift time, or an absence that never
+stopped holding would be reported as configuration arriving. A baseline written before the
+pointer was recorded degrades to `UNVERIFIABLE`, `pointer_unrecorded` — the honest answer in
+neither direction.
 
 **Classification of a run target** follows design spec §10's table literally: current digest
 equals `after_digest` → `IN_PLACE`; equals `before_digest` → `REVERTED`; equals neither →
@@ -170,11 +186,12 @@ is reported as a finding on the entry; items are still classified. An adapter pa
 
 **Digest semantics are inherited, not reimplemented.** An item digest is the file's bytes; a
 glob-derived item re-resolves to its recorded per-file anchor. The per-value digests inside
-redacted markers are *not* recomputed by `drift` in this increment: doing so would re-run parse
-and redaction against the live file, and the file-level digest already answers "did this file
-change" — which is the classification contract. The finer answer ("this server's token changed,
-that one's is gone") remains available to a reader comparing two baselines, which is `scan`'s job
-to produce, not `drift`'s to duplicate.
+redacted markers are *not* recomputed by `drift` in this increment: the file-level digest already
+answers "did this file change" — which is the classification contract for `present` items. The
+finer answer ("this server's token changed, that one's is gone") remains available to a reader
+comparing two baselines, which is `scan`'s job to produce, not `drift`'s to duplicate. The single
+parse `drift` performs is the pointer recheck above, whose entire output is one state and one
+reason.
 
 **Exit codes**, aligned with `verify`: `0` when every classified thing is `IN_PLACE`, `1` when
 anything is `DRIFTED`, `REVERTED`, `MISSING`, or `UNVERIFIABLE`, or any finding was raised, `2` on
