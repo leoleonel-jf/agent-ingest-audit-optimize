@@ -201,6 +201,10 @@ backlog.
 Read [references/LEDGER.md](references/LEDGER.md) for the storage layout, scope routing,
 identifier rules, evidence expiry, and the validation command.
 
+Run `dashboard.py build` to turn a ledger into a single offline dashboard when reporting on or
+reviewing its contents. Read [references/DASHBOARD.md](references/DASHBOARD.md) for the nine
+panels, the static-injection procedure for machines without Python, and the degraded text view.
+
 ## Capture a baseline of an unknown client
 
 `dashboard.py scan` reads one client's configuration and prints a single baseline entry. It is

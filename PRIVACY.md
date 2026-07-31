@@ -28,6 +28,12 @@ A baseline is a local file like any other in the ledger, and it is never transmi
 
 Their reports carry digests, classification states, and data the ledger already recorded — never a configuration value read from the environment. A report still names recorded anchors, item names, and record identifiers, so review it like any other ledger content before pasting it anywhere public.
 
+## What the `build` command does
+
+`build` reads one ledger and writes exactly one local HTML file — `dashboard.html` next to the ledger by default, or the path given with `--out` — and nothing else. It makes no network request and transmits nothing; the file is meant to be opened directly in a browser from disk. It also reads the same configuration files `drift` and `rollback-preview` read, to compute the drift and rollback-preview data the dashboard embeds.
+
+The generated dashboard contains ledger data verbatim — record titles, evidence sources, backlog reasons, file anchors, and everything else `ledger.json` holds — rendered as inert text, never as executable content. Treat it exactly as you would treat the ledger itself: at project scope, it belongs in `.gitignore` alongside the rest of what a project ledger excludes. `.agent-audit/.gitignore` is written to cover `dashboard.html` specifically (see [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md)), because unlike the ledger's records, a generated dashboard is disposable: it can always be regenerated from the ledger and carries no information the ledger itself lacks.
+
 ## External material and tools
 
 The workflow may recommend consulting websites, documentation, repositories, files, or connected services. Access occurs only through the capabilities and permissions available in the user's agent environment. The plugin does not receive a separate copy of credentials or connected-service data.

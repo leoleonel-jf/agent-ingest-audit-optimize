@@ -5721,5 +5721,51 @@ class RuntimePaletteExactMatchTests(ShellTemplateTestCase):
         self.assertEqual(self.facts.get("hashAfterEnter"), "#panel=materials&f=hooks")
 
 
+# Task 8: the docs-shell lockstep test. `references/DASHBOARD.md` documents the shell this
+# module tests -- the nine panels and the five commands -- and nothing pins the two together
+# except this test. A panel added to `PANELS` (line 1536 of the template) or a command added
+# to dashboard.py without a matching mention in the reference is invisible to every other suite
+# in this file, because they all read the shell, never the doc.
+DASHBOARD_REFERENCE = (
+    REPO_ROOT
+    / "skills"
+    / "agent-ingest-audit-optimize"
+    / "references"
+    / "DASHBOARD.md"
+)
+
+# The five subcommands `dashboard.py` implements, per `references/LEDGER.md` and this
+# module's own SCRIPT invocations above.
+DASHBOARD_COMMANDS = ("verify", "scan", "drift", "rollback-preview", "build")
+
+
+class DashboardReferenceLockstepTests(unittest.TestCase):
+    """`references/DASHBOARD.md` must exist and name every panel id and command."""
+
+    def test_reference_file_exists(self) -> None:
+        self.assertTrue(
+            DASHBOARD_REFERENCE.is_file(),
+            f"missing {DASHBOARD_REFERENCE} -- the brief's Step 1 deliverable",
+        )
+
+    def test_reference_names_every_panel_id(self) -> None:
+        text = DASHBOARD_REFERENCE.read_text(encoding="utf-8")
+        for panel_id in PANEL_IDS:
+            self.assertIn(
+                panel_id,
+                text,
+                f"references/DASHBOARD.md never mentions panel id {panel_id!r}",
+            )
+
+    def test_reference_names_every_command(self) -> None:
+        text = DASHBOARD_REFERENCE.read_text(encoding="utf-8")
+        for command in DASHBOARD_COMMANDS:
+            self.assertIn(
+                command,
+                text,
+                f"references/DASHBOARD.md never mentions command {command!r}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

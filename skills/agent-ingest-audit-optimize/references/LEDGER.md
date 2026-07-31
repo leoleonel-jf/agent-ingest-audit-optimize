@@ -34,8 +34,22 @@ Project scope, at the project root:
 Backups always live in the global scope, even for project-scoped changes. Backups may contain
 configuration values and must never be committed by accident.
 
+When first creating a project-scope `.agent-audit/`, also write `.agent-audit/.gitignore`
+containing exactly one line, `dashboard.html`. Records are meant to be committed; a generated
+dashboard is not — it is regenerable from the ledger with `dashboard.py build` (see
+[references/DASHBOARD.md](DASHBOARD.md)) and carries no information the ledger itself lacks.
+
 This layout is a convention `verify` does not check — `verify` validates the ledger document's
 contents only, never the directory structure or where backups are stored.
+
+## Viewing the ledger
+
+`dashboard.py build` renders `ledger.json` into a single offline `dashboard.html`: nine panels
+(overview, inventory, changes, provenance, rollback, backlog, decisions, materials, help), no
+network request. It writes exactly one file, next to the ledger by default, and refuses to
+overwrite a file that is not already a dashboard. Read
+[references/DASHBOARD.md](DASHBOARD.md) for panel semantics, the `build` flags, the no-Python
+static-injection procedure, and the degraded text view for machines with no browser at all.
 
 ## The ledger document
 
