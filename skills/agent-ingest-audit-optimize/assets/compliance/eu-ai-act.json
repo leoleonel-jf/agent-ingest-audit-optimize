@@ -1,0 +1,42 @@
+{
+  "mapping_version": 1,
+  "framework": "eu-ai-act",
+  "title": "Regulation (EU) 2024/1689 — the AI Act",
+  "expires_on": "2027-01-31",
+  "source": "https://eur-lex.europa.eu/eli/reg/2024/1689/oj",
+  "verified_on": "2026-07-31",
+  "retention_days": 180,
+  "controls": [
+    {
+      "id": "art-11",
+      "title": "Technical documentation",
+      "requires": { "collection": "records", "min_count": 1 },
+      "note": "MATERIAL, PROPOSAL and ADR records carry the analysis, the decision and the dated evidence behind each change. This reports that such records exist and how many; whether they document the system adequately is the auditor's judgement."
+    },
+    {
+      "id": "art-12",
+      "title": "Automatic recording of events over the lifetime",
+      "requires": {
+        "collection": "records",
+        "every": { "field": "created", "non_empty": true }
+      },
+      "note": "Every record is dated, so the ledger is an event log over the system's lifetime. A record without a creation date is one that cannot be placed in that timeline."
+    },
+    {
+      "id": "art-13",
+      "title": "Human oversight, documented",
+      "requires": {
+        "collection": "records",
+        "where": { "type": "RUN" },
+        "every": { "field": "authorization.quote", "non_empty": true }
+      },
+      "note": "Each RUN records the user's own authorising words verbatim. A run without one is a change nobody can show was authorised."
+    },
+    {
+      "id": "art-19",
+      "title": "Retention of automatically generated logs",
+      "requires": { "collection": "records", "min_count": 1 },
+      "note": "The ledger is append-oriented and nothing in this tool deletes a record. The retention window is reported beside this report rather than enforced: deciding what to keep is the operator's, not the tool's."
+    }
+  ]
+}
