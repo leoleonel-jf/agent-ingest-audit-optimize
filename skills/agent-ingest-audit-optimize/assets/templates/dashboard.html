@@ -278,6 +278,196 @@ main:focus { outline: none; }
   color: var(--ink-muted);
 }
 
+.note {
+  margin: 0 0 var(--step);
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+
+/* Indicator cards ------------------------------------------------------
+   One card per overview indicator: glyph, count, label, and a note. The
+   severity reaches the reader three ways -- shape, word, and hue -- so the
+   card is still readable in greyscale (design spec section 7, acceptance
+   item 3). Each card is a link to the panel that details it. */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.7rem;
+  margin: 0 0 var(--gap);
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  padding: 0.55rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-inline-start: 3px solid var(--rule);
+}
+
+.card-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.card-link:hover .card-label { text-decoration: underline; }
+
+.card-count {
+  font-family: var(--font-mono);
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.card-label {
+  display: block;
+  font-size: 0.9rem;
+}
+
+.card-note {
+  margin: var(--step) 0 0;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+}
+
+.unavailable {
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.card-error { border-inline-start-color: var(--error); }
+.card-error .glyph,
+.card-error .card-count { color: var(--error); }
+
+.card-warning { border-inline-start-color: var(--warning); }
+.card-warning .glyph,
+.card-warning .card-count { color: var(--warning); }
+
+.card-info { border-inline-start-color: var(--info); }
+.card-info .glyph,
+.card-info .card-count { color: var(--info); }
+
+/* Filter bar ----------------------------------------------------------- */
+
+.filters {
+  position: sticky;
+  inset-block-start: 2.6rem;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0 0 var(--gap);
+  padding: 0.4rem 0;
+  background: var(--bg);
+  border-block-end: 1px solid var(--rule);
+}
+
+.filter-label {
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+/* Tables ---------------------------------------------------------------
+   The record panels are wide by nature, so a panel that carries one opts
+   out of the prose measure rather than squeezing six columns into 68ch.
+   Below the breakpoint further down, these same rows fold into cards. */
+
+.panel[data-wide="true"] { max-inline-size: none; }
+
+.panel h3 {
+  margin: var(--gap) 0 var(--step);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.grid-table {
+  inline-size: 100%;
+  margin: 0 0 var(--gap);
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.grid-table caption {
+  margin-block-end: var(--step);
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+  text-align: start;
+}
+
+.grid-table th,
+.grid-table td {
+  padding: 0.35rem 0.6rem;
+  text-align: start;
+  vertical-align: top;
+  border-block-end: 1px solid var(--rule);
+}
+
+.grid-table th {
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* The severity rule sits on the row's first cell rather than on the row:
+   under border-collapse a `tr` border is not painted reliably, and the
+   first cell is the inline-start edge in either writing direction. */
+.row-error > td:first-child { border-inline-start: 3px solid var(--error); }
+.row-warning > td:first-child { border-inline-start: 3px solid var(--warning); }
+.row-info > td:first-child { border-inline-start: 3px solid var(--info); }
+.row-focus > td:first-child { border-inline-start-width: 7px; }
+
+/* Canonical vocabulary --------------------------------------------------
+   Design spec section 5: the token stays English and mono, the gloss is
+   the translated tooltip, and the glyph carries the severity. */
+
+.vocab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.vocab code { font-weight: 600; }
+
+.vocab-error .glyph,
+.vocab-error code { color: var(--error); }
+
+.vocab-warning .glyph,
+.vocab-warning code { color: var(--warning); }
+
+.vocab-info .glyph,
+.vocab-info code { color: var(--info); }
+
+.marker {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  color: var(--warning);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.evidence {
+  margin: 0;
+  padding-inline-start: 1.1rem;
+}
+
+/* An evidence source is frequently a URL, and it is rendered as text on
+   purpose (design spec section 1.3): it wraps anywhere so a long one does
+   not push the table wider than the viewport. */
+.source,
+.path {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
 /* Footer -------------------------------------------------------------- */
 
 footer {
@@ -308,6 +498,8 @@ footer {
 
   .chrome { align-items: flex-start; }
   .panels { position: static; }
+  .filters { position: static; }
+  .cards { grid-template-columns: 1fr; }
 
   .grid-table thead {
     position: absolute;
@@ -375,6 +567,7 @@ footer {
 
   .skip-link,
   .panels,
+  .filters,
   .actions { display: none !important; }
 
   body { background: #ffffff; color: #000000; font-size: 11pt; }
@@ -481,6 +674,100 @@ footer {
     "panel.help.title": "Help",
     "panel.help.empty": "The reference below explains how to read the other panels. It is the short form; references/DASHBOARD.md in the plugin carries the full text.",
 
+    "overview.cards": "Indicators",
+    "overview.unreachable": "Projects whose recorded root could not be reached",
+
+    "card.active_changes": "Active changes",
+    "card.active_changes.note": "RUN records that have not been rolled back.",
+    "card.drift": "Drifted items",
+    "card.drift.note": "Recorded items and run targets no longer classified IN_PLACE.",
+    "card.rollbacks_at_risk": "Rollbacks at risk",
+    "card.rollbacks_at_risk.note": "Runs whose rollback preview came back AT_RISK or BROKEN.",
+    "card.expired_evidence": "Expired evidence",
+    "card.expired_evidence.note": "Evidence entries whose expiry date has already passed.",
+    "card.unreachable_projects": "Unreachable projects",
+    "card.unreachable_projects.note": "Known projects this ledger recorded as unreachable.",
+    "card.unavailable": "unavailable",
+    "card.unavailable.drift": "Not computed on this page. Compute it with: dashboard.py drift \u003cledger>",
+    "card.unavailable.previews": "Not computed on this page. Compute it with: dashboard.py rollback-preview \u003cledger> RUN-ID",
+    "card.unavailable.expired_evidence": "Not computed on this page. Compute it with: dashboard.py build \u003cledger>",
+    "card.degraded": "This computation failed while the page was built, so the count below is missing rather than zero.",
+
+    "table.kind": "Kind",
+    "table.name": "Name",
+    "table.anchor": "Anchor",
+    "table.state": "State",
+    "table.origin": "Origin",
+    "table.portable": "Portable",
+    "table.record": "Record",
+    "table.title": "Title",
+    "table.status": "Status",
+    "table.classification": "Classification",
+    "table.reason": "Reason",
+    "table.revisit": "Revisit",
+    "table.updated": "Updated",
+    "table.evidence": "Evidence",
+    "table.links": "Links",
+
+    "value.yes": "yes",
+    "value.no": "no",
+    "value.unknown": "not recorded",
+
+    "filter.kind": "Kind",
+    "filter.all": "All",
+
+    "inventory.caption": "Everything the recorded baselines say this client has, one row per item.",
+
+    "backlog.caption": "Findings that were not adopted, with the trigger that would bring each one back.",
+    "backlog.revisit_due": "revisit date passed",
+    "backlog.trigger_only": "no date — trigger only",
+
+    "decisions.caption": "Every ADR record. A superseded decision stays here; it is sorted, never hidden.",
+    "decisions.superseded_by": "superseded by →",
+    "decisions.supersedes": "supersedes →",
+
+    "materials.caption": "Every audited material and the evidence its claims rest on.",
+    "materials.expired": "evidence expired",
+    "materials.expiry_unchecked": "Expiry is only checked on a page produced by dashboard.py build. The dates below are what the ledger recorded.",
+    "materials.source_is_text": "Evidence sources are shown as text, never as links: this page issues no request of any kind.",
+    "materials.verified_on": "verified",
+    "materials.expires_on": "expires",
+
+    "help.states": "Operating states",
+    "help.classifications": "Classifications",
+    "help.statuses": "Record statuses",
+    "help.commands": "Commands",
+    "help.cmd.verify": "Check a ledger against the schema and against itself, and report what does not hold.",
+    "help.cmd.scan": "Record what a client currently has, as a baseline, without changing anything.",
+    "help.cmd.drift": "Compare every recorded item and run target against the files on disk now.",
+    "help.cmd.rollback_preview": "Show what undoing one run would restore, leave alone, and fail to restore.",
+    "help.cmd.build": "Generate this page from a ledger. It refuses any ledger that verify would reject.",
+
+    "vocab.class.ADOPT GLOBALLY.tip": "Worth applying to every project, in the user-global configuration.",
+    "vocab.class.ADOPT AS A DEFAULT FOR NEW PROJECTS.tip": "Worth building into new projects, without touching the ones that exist.",
+    "vocab.class.MIGRATE EXISTING PROJECTS.tip": "Worth applying to projects already running, one at a time.",
+    "vocab.class.ADOPT LOCALLY.tip": "Worth applying to this project only, and to nothing outside it.",
+    "vocab.class.TEST IN ISOLATION.tip": "Promising, but it has to be tried somewhere disposable first.",
+    "vocab.class.ADAPT.tip": "The idea holds, the form does not: adopt it rewritten for this setup.",
+    "vocab.class.MONITOR.tip": "Not now. Something upstream has to move before it is worth revisiting.",
+    "vocab.class.REJECT.tip": "Checked and turned down: the claim does not survive current evidence.",
+    "vocab.class.OBSOLETE.tip": "It described a version of the tool that no longer works this way.",
+    "vocab.class.ALREADY IMPLEMENTED.tip": "This setup already does it, so there is nothing to change.",
+    "vocab.class.NOT APPLICABLE.tip": "It addresses a client, platform, or scope this setup does not use.",
+    "vocab.class.NEEDS MORE EVIDENCE.tip": "Plausible, and one source is not enough to act on it.",
+    "vocab.class.RISK EXCEEDS BENEFIT.tip": "It would work, and what it could break is worth more than what it gains.",
+
+    "vocab.status.ANALYZED.tip": "The material was read and audited; nothing has been proposed from it yet.",
+    "vocab.status.PROPOSED.tip": "A change was written up and is waiting for a decision.",
+    "vocab.status.DECIDED.tip": "A decision was taken and recorded; implementation is a separate step.",
+    "vocab.status.IMPLEMENTED.tip": "The change was applied and the run that applied it was recorded.",
+    "vocab.status.VALIDATED.tip": "The change was applied and checked afterwards, and it did what it claimed.",
+    "vocab.status.VALIDATED WITH CAVEATS.tip": "It was checked and it works, with limits that are written down beside it.",
+    "vocab.status.NOT IMPLEMENTED.tip": "Decided and deliberately not carried out.",
+    "vocab.status.PENDING.tip": "Recorded and still waiting on something before it can move.",
+    "vocab.status.ROLLBACK.tip": "The change was undone, and the record stays to say it happened.",
+    "vocab.status.SUPERSEDED.tip": "A later record replaced this one. It stays visible so the history reads straight.",
+
     "state.IN_PLACE.tip": "The recorded change is still exactly as this ledger describes it: the digest taken from disk matches the one recorded.",
     "state.DRIFTED.tip": "The file changed after the recorded change. Someone or something edited it since, and this ledger no longer describes what is on disk.",
     "state.REVERTED.tip": "The file is back to what it was before the recorded change. The change is no longer in effect.",
@@ -551,6 +838,100 @@ footer {
     "panel.materials.empty": "Nenhum material auditado. Cada registro MATERIAL carrega a evidência em que suas afirmações se apoiam, junto com a data em que essa evidência deixa de valer como atual.",
     "panel.help.title": "Ajuda",
     "panel.help.empty": "A referência abaixo explica como ler os outros painéis. É a versão curta; o arquivo references/DASHBOARD.md do plugin traz o texto completo.",
+
+    "overview.cards": "Indicadores",
+    "overview.unreachable": "Projetos cuja raiz registrada não pôde ser alcançada",
+
+    "card.active_changes": "Mudanças em vigor",
+    "card.active_changes.note": "Registros RUN que ainda não foram revertidos.",
+    "card.drift": "Itens com drift",
+    "card.drift.note": "Itens registrados e alvos de execução que já não estão classificados como IN_PLACE.",
+    "card.rollbacks_at_risk": "Rollbacks em risco",
+    "card.rollbacks_at_risk.note": "Execuções cuja prévia de rollback voltou como AT_RISK ou BROKEN.",
+    "card.expired_evidence": "Evidências vencidas",
+    "card.expired_evidence.note": "Entradas de evidência cuja data de validade já passou.",
+    "card.unreachable_projects": "Projetos inacessíveis",
+    "card.unreachable_projects.note": "Projetos conhecidos que este ledger registrou como inacessíveis.",
+    "card.unavailable": "indisponível",
+    "card.unavailable.drift": "Não foi calculado nesta página. Calcule com: dashboard.py drift \u003cledger>",
+    "card.unavailable.previews": "Não foi calculado nesta página. Calcule com: dashboard.py rollback-preview \u003cledger> RUN-ID",
+    "card.unavailable.expired_evidence": "Não foi calculado nesta página. Calcule com: dashboard.py build \u003cledger>",
+    "card.degraded": "Este cálculo falhou durante a geração da página, então o número abaixo está faltando — não é zero.",
+
+    "table.kind": "Tipo",
+    "table.name": "Nome",
+    "table.anchor": "Anchor",
+    "table.state": "Estado",
+    "table.origin": "Origem",
+    "table.portable": "Portátil",
+    "table.record": "Registro",
+    "table.title": "Título",
+    "table.status": "Status",
+    "table.classification": "Classificação",
+    "table.reason": "Motivo",
+    "table.revisit": "Revisitar",
+    "table.updated": "Atualizado",
+    "table.evidence": "Evidência",
+    "table.links": "Vínculos",
+
+    "value.yes": "sim",
+    "value.no": "não",
+    "value.unknown": "não registrado",
+
+    "filter.kind": "Tipo",
+    "filter.all": "Todos",
+
+    "inventory.caption": "Tudo o que as baselines registradas dizem que este cliente tem, uma linha por item.",
+
+    "backlog.caption": "Achados que não foram adotados, com o gatilho que traria cada um de volta.",
+    "backlog.revisit_due": "data de revisão vencida",
+    "backlog.trigger_only": "sem data — só gatilho",
+
+    "decisions.caption": "Todos os registros ADR. Uma decisão substituída continua aqui: ela é ordenada, nunca escondida.",
+    "decisions.superseded_by": "substituída por →",
+    "decisions.supersedes": "substitui →",
+
+    "materials.caption": "Cada material auditado e a evidência em que suas afirmações se apoiam.",
+    "materials.expired": "evidência vencida",
+    "materials.expiry_unchecked": "A validade só é conferida em uma página gerada pelo dashboard.py build. As datas abaixo são o que o ledger registrou.",
+    "materials.source_is_text": "As fontes de evidência aparecem como texto, nunca como link: esta página não faz nenhuma requisição.",
+    "materials.verified_on": "conferida em",
+    "materials.expires_on": "vence em",
+
+    "help.states": "Estados de operação",
+    "help.classifications": "Classificações",
+    "help.statuses": "Status dos registros",
+    "help.commands": "Comandos",
+    "help.cmd.verify": "Confere um ledger contra o schema e contra ele mesmo, e relata o que não se sustenta.",
+    "help.cmd.scan": "Registra o que um cliente tem hoje, como baseline, sem alterar nada.",
+    "help.cmd.drift": "Compara cada item registrado e cada alvo de execução com os arquivos que estão em disco agora.",
+    "help.cmd.rollback_preview": "Mostra o que desfazer uma execução restauraria, deixaria intacto e não conseguiria restaurar.",
+    "help.cmd.build": "Gera esta página a partir de um ledger. Ele recusa qualquer ledger que o verify rejeitaria.",
+
+    "vocab.class.ADOPT GLOBALLY.tip": "Vale aplicar em todos os projetos, na configuração global do usuário.",
+    "vocab.class.ADOPT AS A DEFAULT FOR NEW PROJECTS.tip": "Vale embutir em projetos novos, sem mexer nos que já existem.",
+    "vocab.class.MIGRATE EXISTING PROJECTS.tip": "Vale aplicar nos projetos que já estão rodando, um de cada vez.",
+    "vocab.class.ADOPT LOCALLY.tip": "Vale aplicar só neste projeto, e em nada fora dele.",
+    "vocab.class.TEST IN ISOLATION.tip": "Promissor, mas precisa ser testado antes em algum lugar descartável.",
+    "vocab.class.ADAPT.tip": "A ideia se sustenta, a forma não: adote reescrevendo para esta configuração.",
+    "vocab.class.MONITOR.tip": "Agora não. Algo lá na origem precisa mudar antes de valer a pena revisitar.",
+    "vocab.class.REJECT.tip": "Conferido e recusado: a afirmação não sobrevive à evidência atual.",
+    "vocab.class.OBSOLETE.tip": "Descrevia uma versão da ferramenta que já não funciona desse jeito.",
+    "vocab.class.ALREADY IMPLEMENTED.tip": "Esta configuração já faz isso, então não há o que mudar.",
+    "vocab.class.NOT APPLICABLE.tip": "Trata de um cliente, plataforma ou escopo que esta configuração não usa.",
+    "vocab.class.NEEDS MORE EVIDENCE.tip": "Plausível, e uma fonte só não basta para agir.",
+    "vocab.class.RISK EXCEEDS BENEFIT.tip": "Funcionaria, e o que poderia quebrar vale mais do que o que se ganha.",
+
+    "vocab.status.ANALYZED.tip": "O material foi lido e auditado; ainda não saiu nenhuma proposta dele.",
+    "vocab.status.PROPOSED.tip": "Uma mudança foi redigida e está esperando uma decisão.",
+    "vocab.status.DECIDED.tip": "A decisão foi tomada e registrada; implementar é um passo separado.",
+    "vocab.status.IMPLEMENTED.tip": "A mudança foi aplicada e a execução que a aplicou ficou registrada.",
+    "vocab.status.VALIDATED.tip": "A mudança foi aplicada e conferida depois, e fez o que prometia.",
+    "vocab.status.VALIDATED WITH CAVEATS.tip": "Foi conferida e funciona, com limites que estão escritos ao lado.",
+    "vocab.status.NOT IMPLEMENTED.tip": "Decidida e deliberadamente não executada.",
+    "vocab.status.PENDING.tip": "Registrada e ainda esperando alguma coisa para poder andar.",
+    "vocab.status.ROLLBACK.tip": "A mudança foi desfeita, e o registro fica para dizer que aconteceu.",
+    "vocab.status.SUPERSEDED.tip": "Um registro posterior substituiu este. Ele continua visível para o histórico fazer sentido.",
 
     "state.IN_PLACE.tip": "A mudança registrada continua exatamente como este ledger a descreve: o digest tirado do disco confere com o que foi registrado.",
     "state.DRIFTED.tip": "O arquivo mudou depois da alteração registrada. Alguém ou alguma outra ferramenta o editou desde então, e este ledger já não descreve o que está em disco.",
@@ -634,6 +1015,97 @@ footer {
      colour (design spec section 7, acceptance item 3), so every status
      carries a shape and a word as well as a hue. */
   var GLYPHS = { error: "✕", warning: "▲", info: "●" };
+
+  /* Severity, worst first. The rank *is* the index, so this array is the
+     whole ordering rule: there is no second list anywhere in this file, and
+     `sortBySeverityThenRecency` is the one place it is applied. */
+  var SEVERITY_ORDER = ["error", "warning", "info"];
+
+  /* The five drift states as severities. DRIFTED and MISSING both mean this
+     ledger no longer describes what is on disk, which is precisely the
+     finding the drift machinery exists to surface; UNVERIFIABLE means nobody
+     could tell, which is a warning rather than a failure; the other two are
+     the quiet outcomes. Mapping a drifted item to `info` would sort it below
+     a note and paint it like one -- a silent downgrade. */
+  var DRIFT_SEVERITY = {
+    IN_PLACE: "info",
+    DRIFTED: "error",
+    REVERTED: "info",
+    MISSING: "error",
+    UNVERIFIABLE: "warning"
+  };
+
+  /* The three rollback indicators, same three words. */
+  var INDICATOR_SEVERITY = {
+    HEALTHY: "info",
+    AT_RISK: "warning",
+    BROKEN: "error"
+  };
+
+  /* The date fields a row may carry, in the order recency prefers them.
+     Every date this ledger stores is YYYY-MM-DD, which sorts
+     lexicographically in date order, so the comparison needs no parsing and
+     no Date object -- and cannot be wrong about a timezone. */
+  var DATE_FIELDS = [
+    "updated", "revisit_after", "captured_on", "expires_on", "created"
+  ];
+
+  /* A run that was undone. The schema spells the two halves differently --
+     the record's `status` and the run's `result` -- and either one is enough
+     to say the change is no longer in effect. */
+  var ROLLED_BACK_STATUS = "ROLLBACK";
+  var ROLLED_BACK_RESULT = "ROLLBACK COMPLETED";
+
+  /* The separator the lookup keys below are joined on: U+0000, which no
+     path, name, kind, or evidence source can contain. With a printable
+     separator two different items could concatenate into the same key and
+     silently share one drift state or one expiry marker. Built with
+     fromCharCode rather than written out so this template stays plain text
+     that a diff, an editor, and `grep` all treat as text. */
+  var SEPARATOR = String.fromCharCode(0);
+
+  /* The remaining closed vocabularies, from ledger.schema.json. They are
+     here for the same reason DRIFT_STATES is: the Help panel glosses them
+     and the record panels use the same glosses as tooltips, from one list. */
+  var CLASSIFICATIONS = [
+    "ADOPT GLOBALLY",
+    "ADOPT AS A DEFAULT FOR NEW PROJECTS",
+    "MIGRATE EXISTING PROJECTS",
+    "ADOPT LOCALLY",
+    "TEST IN ISOLATION",
+    "ADAPT",
+    "MONITOR",
+    "REJECT",
+    "OBSOLETE",
+    "ALREADY IMPLEMENTED",
+    "NOT APPLICABLE",
+    "NEEDS MORE EVIDENCE",
+    "RISK EXCEEDS BENEFIT"
+  ];
+
+  var RECORD_STATUSES = [
+    "ANALYZED",
+    "PROPOSED",
+    "DECIDED",
+    "IMPLEMENTED",
+    "VALIDATED",
+    "VALIDATED WITH CAVEATS",
+    "NOT IMPLEMENTED",
+    "PENDING",
+    "ROLLBACK",
+    "SUPERSEDED"
+  ];
+
+  /* Help's command examples. English in every language, like the rest of the
+     tool's vocabulary: the reader types these, and a translated command is a
+     command that does not run. */
+  var COMMANDS = [
+    ["dashboard.py verify LEDGER", "help.cmd.verify"],
+    ["dashboard.py scan CLIENT --project ROOT", "help.cmd.scan"],
+    ["dashboard.py drift LEDGER", "help.cmd.drift"],
+    ["dashboard.py rollback-preview LEDGER RUN-ID", "help.cmd.rollback_preview"],
+    ["dashboard.py build LEDGER", "help.cmd.build"]
+  ];
 
   /* The only English sentence in this file. If the dictionary island itself
      cannot be read there is no key left to look a message up by, and saying
@@ -768,6 +1240,210 @@ footer {
       h("span", { class: "status-label" }, severityLabel(severity)),
       h("span", { class: "status-text" }, children)
     );
+  }
+
+  /* Ordering ---------------------------------------------------------- */
+
+  function severityRank(severity) {
+    var at = SEVERITY_ORDER.indexOf(severity);
+    return at === -1 ? SEVERITY_ORDER.length : at;
+  }
+
+  function recencyKey(row) {
+    if (!row || typeof row !== "object") { return ""; }
+    for (var i = 0; i !== DATE_FIELDS.length; i += 1) {
+      var value = row[DATE_FIELDS[i]];
+      if (typeof value === "string" && value !== "") { return value; }
+    }
+    return "";
+  }
+
+  /* Design spec section 4's default ordering, in one function, used by every
+     panel that lists records. Severity first, because the reason to open
+     this page at all is to find what is wrong; recency second, descending,
+     because among equally serious rows the one that moved last is the one
+     being asked about.
+
+     Sorts a copy: the payload is the document as it was built, and a panel
+     that reordered it in place would change what a later panel reads. The
+     sort is stable, so rows with neither a severity nor a date keep the
+     order the ledger recorded them in. */
+  function sortBySeverityThenRecency(rows, severityOf) {
+    return rows.slice().sort(function (left, right) {
+      var bySeverity = severityRank(severityOf(left)) - severityRank(severityOf(right));
+      if (bySeverity !== 0) { return bySeverity; }
+      var a = recencyKey(left);
+      var b = recencyKey(right);
+      if (a === b) { return 0; }
+      return a < b ? 1 : -1;
+    });
+  }
+
+  /* Presentation, not evidence -- the same licence ageInDays takes. This
+     date decides whether a revisit is marked overdue and nothing else, so
+     being a day out at a timezone boundary changes a marker, never a fact. */
+  function todayISO() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  /* Reading the payload ----------------------------------------------- */
+
+  function ledgerList(key) {
+    var ledger = PAYLOAD.ledger;
+    if (!ledger || typeof ledger !== "object") { return []; }
+    var value = ledger[key];
+    return Array.isArray(value) ? value : [];
+  }
+
+  function records(type) {
+    return ledgerList("records").filter(function (record) {
+      return Boolean(record) && typeof record === "object" && record.type === type;
+    });
+  }
+
+  /* One reader for every computed sub-report, so "this page is static" and
+     "this computation failed" reach the panels through the same door the
+     overview banner and degradedKeys already use. Null means the guarantee
+     is not on this page, whichever of the two reasons applies -- and a panel
+     that gets null must say so rather than render a zero, because a zero
+     here reads as "nothing is wrong". */
+  function computedFor(key) {
+    var computed = PAYLOAD.computed;
+    if (!computed || typeof computed !== "object") { return null; }
+    var value = computed[key];
+    if (value === null || value === undefined || isError(value)) { return null; }
+    return value;
+  }
+
+  /* Shared cells ------------------------------------------------------- */
+
+  function textOrDash(value) {
+    if (typeof value === "string" && value !== "") { return value; }
+    if (typeof value === "number") { return String(value); }
+    return t("value.unknown");
+  }
+
+  function flagText(value) {
+    if (value === true) { return t("value.yes"); }
+    if (value === false) { return t("value.no"); }
+    return t("value.unknown");
+  }
+
+  /* A dictionary miss renders as the key itself (see t()), which is honest
+     in a paragraph -- it is visibly wrong -- and useless in a tooltip, where
+     it would put "vocab.status.FOO.tip" under the reader's cursor. */
+  function tipFor(key) {
+    var value = t(key);
+    return value === key ? null : value;
+  }
+
+  /* The canonical token exactly as the commands print it, in English, with
+     its translated gloss as the tooltip and a glyph carrying the severity
+     (design spec section 5, and section 7's acceptance item 3: no indicator
+     depends on seeing a colour). */
+  function vocabChip(token, severity, tipKey) {
+    return h(
+      "span",
+      { class: "vocab vocab-" + severity },
+      h("span", { class: "glyph", "aria-hidden": "true" }, GLYPHS[severity]),
+      h("code", { lang: "en", title: tipKey ? tipFor(tipKey) : null }, token)
+    );
+  }
+
+  function classificationChip(value, severity) {
+    if (typeof value !== "string" || value === "") { return t("value.unknown"); }
+    return vocabChip(value, severity, "vocab.class." + value + ".tip");
+  }
+
+  function statusChip(value, severity) {
+    if (typeof value !== "string" || value === "") { return t("value.unknown"); }
+    return vocabChip(value, severity, "vocab.status." + value + ".tip");
+  }
+
+  function marker(key) {
+    return h(
+      "span",
+      { class: "marker" },
+      h("span", { class: "glyph", "aria-hidden": "true" }, GLYPHS.warning),
+      t(key)
+    );
+  }
+
+  /* Tables -------------------------------------------------------------
+     Every table is the same shape, built here rather than per panel, so the
+     class names the stylesheet knows about are written once. Each cell
+     carries its column heading in data-label: that is what the narrow-width
+     stylesheet prints in front of the value once the row folds into a card,
+     so a cell built without one loses its heading at 360px and nowhere
+     else -- which is exactly the kind of break nothing notices. */
+
+  function gridTable(captionKey, headerKeys, rows) {
+    return h(
+      "table",
+      { class: "grid-table" },
+      h("caption", null, t(captionKey)),
+      h("thead", null, h("tr", null, headerKeys.map(function (key) {
+        return h("th", { scope: "col" }, t(key));
+      }))),
+      h("tbody", null, rows)
+    );
+  }
+
+  function cell(labelKey, ...children) {
+    return h("td", { "data-label": t(labelKey) }, children);
+  }
+
+  /* Two literals rather than one expression: the stylesheet seam test reads
+     `class:` literals out of this file, and a class assembled entirely from
+     variables would be invisible to it. */
+  function tableRow(severity, focused, cells) {
+    if (focused) {
+      return h(
+        "tr",
+        { class: "row-focus row-" + severity, "aria-current": "true" },
+        cells
+      );
+    }
+    return h("tr", { class: "row-" + severity }, cells);
+  }
+
+  /* A panel that carries a table opts out of the prose measure: six columns
+     inside 68ch is not a table, it is a wall. Set on the section, which is
+     the tool's own markup rather than anything h() built, and reset on every
+     render by renderPanels so a filter that empties a table puts the measure
+     back. */
+  function wide(section) {
+    section.setAttribute("data-wide", "true");
+  }
+
+  /* The filter bar. The filter is router state (design spec section 4): it
+     lives in the fragment, so a filtered view is a link someone can send.
+     Changing it replaces rather than pushes -- a filter is a view
+     preference, and ten keystrokes should not cost ten presses of Back. */
+  function filterBar(state, values, labelKey) {
+    var bar = h("div", {
+      class: "filters",
+      role: "group",
+      "aria-label": t(labelKey)
+    });
+    bar.appendChild(h("span", { class: "filter-label" }, t(labelKey)));
+    bar.appendChild(filterButton(state, "", t("filter.all")));
+    values.forEach(function (value) {
+      bar.appendChild(filterButton(state, value, h("code", { lang: "en" }, value)));
+    });
+    return bar;
+  }
+
+  function filterButton(state, value, label) {
+    var node = h(
+      "button",
+      { type: "button", "aria-pressed": String(state.f === value) },
+      label
+    );
+    node.addEventListener("click", function () {
+      goTo({ panel: state.panel, lang: state.lang, f: value }, true);
+    });
+    return node;
   }
 
   /* Language ---------------------------------------------------------- */
@@ -1058,16 +1734,26 @@ footer {
       var section = panelSection(panel);
       if (!section) { return; }
       section.hidden = panel !== state.panel;
+      section.setAttribute("data-wide", "false");
       clear(section);
       section.appendChild(h("h2", null, t("panel." + panel + ".title")));
       if (panel === "overview") {
         renderOverview(section);
+      } else if (panel === "inventory") {
+        renderInventory(section, state);
+      } else if (panel === "backlog") {
+        renderBacklog(section);
+      } else if (panel === "decisions") {
+        renderDecisions(section, state);
+      } else if (panel === "materials") {
+        renderMaterials(section);
       } else if (panel === "help") {
         renderHelp(section);
       } else {
-        /* Tasks 4-5 replace this with the real renderer. Until then a panel
-           states what would fill it and the command that does the filling,
-           which is what design spec section 4 asks empty states to do. */
+        /* Task 5 replaces this with the real renderer for Changes,
+           Provenance, and Rollback. Until then a panel states what would
+           fill it and the command that does the filling, which is what
+           design spec section 4 asks empty states to do. */
         section.appendChild(h("p", { class: "empty" }, t("panel." + panel + ".empty")));
       }
     });
@@ -1107,7 +1793,554 @@ footer {
 
     if (!PAYLOAD.ledger) {
       section.appendChild(h("p", { class: "empty" }, t("panel.overview.empty")));
+      return;
     }
+
+    renderIndicatorCards(section);
+  }
+
+  /* Design spec section 12.1's overview: one card per indicator, each with a
+     glyph, a count, a label, and a link to the panel that details it.
+
+     Two of the five are answerable from the ledger alone -- a RUN record
+     says whether it was rolled back, and a known project records the status
+     something last observed for it -- so those hold a number on a static
+     page too. The other three are guarantees only dashboard.py can make:
+     drift compares digests against disk, rollback-preview verifies a backup,
+     and expiry is compared against the date the build ran. Those three say
+     "unavailable" and name the command that would fill them, because a zero
+     there reads as "nothing is wrong" and would be a lie. */
+  function renderIndicatorCards(section) {
+    var drift = computedFor("drift");
+    var previews = computedFor("previews");
+    var expired = computedFor("expired_evidence");
+    var unreachable = unreachableProjects();
+    var driftCount = drift === null ? null : driftIndicator(drift);
+    var previewCount = previews === null ? null : previewIndicator(previews);
+
+    var cards = h("ul", { class: "cards" });
+    cards.appendChild(indicatorCard(
+      "card.active_changes", "changes",
+      { count: countActiveChanges(), severity: "info" }, null
+    ));
+    cards.appendChild(indicatorCard(
+      "card.drift", "inventory", driftCount,
+      unavailableNoteKey("drift", "card.unavailable.drift")
+    ));
+    cards.appendChild(indicatorCard(
+      "card.rollbacks_at_risk", "rollback", previewCount,
+      unavailableNoteKey("previews", "card.unavailable.previews")
+    ));
+    cards.appendChild(indicatorCard(
+      "card.expired_evidence", "materials",
+      expired === null ? null : listIndicator(expired),
+      unavailableNoteKey("expired_evidence", "card.unavailable.expired_evidence")
+    ));
+    /* The one card whose detail is on this very panel: there is no Projects
+       panel, and the roots are listed directly below the cards. The link
+       still names a panel so every card behaves the same way. */
+    cards.appendChild(indicatorCard(
+      "card.unreachable_projects", "overview", listIndicator(unreachable), null
+    ));
+    section.appendChild(h("h3", null, t("overview.cards")));
+    section.appendChild(cards);
+
+    if (unreachable.length !== 0) {
+      section.appendChild(h("h3", null, t("overview.unreachable")));
+      section.appendChild(h("ul", { class: "keys" }, unreachable.map(function (root) {
+        return h("li", null, h("code", { class: "path" }, root));
+      })));
+    }
+  }
+
+  function indicatorCard(labelKey, panel, indicator, unavailableKey) {
+    var missing = indicator === null;
+    var severity = missing ? "info" : indicator.severity;
+    return h(
+      "li",
+      { class: "card card-" + severity },
+      h(
+        "a",
+        { class: "card-link", href: "#panel=" + panel },
+        h("span", { class: "glyph", "aria-hidden": "true" }, GLYPHS[severity]),
+        " ",
+        missing
+          ? h("span", { class: "unavailable" }, t("card.unavailable"))
+          : h("span", { class: "card-count" }, String(indicator.count)),
+        h("span", { class: "card-label" }, t(labelKey))
+      ),
+      h(
+        "p",
+        { class: "card-note" },
+        missing ? t(unavailableKey) : t(labelKey + ".note")
+      )
+    );
+  }
+
+  /* The drift summary counts every state, IN_PLACE included. What belongs on
+     an indicator card is what is not fine, so the quiet states are skipped
+     rather than added and then subtracted, and the card's own severity is
+     the worst state that actually has a count. */
+  function driftIndicator(report) {
+    var summary = report && typeof report === "object" ? report.summary : null;
+    var total = 0;
+    var worst = "info";
+    if (summary && typeof summary === "object") {
+      Object.keys(summary).forEach(function (state) {
+        var count = summary[state];
+        var severity = DRIFT_SEVERITY[state];
+        if (typeof count !== "number" || count === 0) { return; }
+        if (severity === undefined || severity === "info") { return; }
+        total += count;
+        if (severityRank(severity) < severityRank(worst)) { worst = severity; }
+      });
+    }
+    return { count: total, severity: worst };
+  }
+
+  function previewIndicator(previews) {
+    var total = 0;
+    var worst = "info";
+    Object.keys(previews).forEach(function (runId) {
+      var preview = previews[runId];
+      if (!preview || typeof preview !== "object") { return; }
+      var severity = INDICATOR_SEVERITY[preview.indicator];
+      if (severity === undefined || severity === "info") { return; }
+      total += 1;
+      if (severityRank(severity) < severityRank(worst)) { worst = severity; }
+    });
+    return { count: total, severity: worst };
+  }
+
+  /* Two different absences, and a reader should be able to tell them apart.
+     "This page never computed it" is a static page and one command away;
+     "this computation failed while the page was built" is a broken build,
+     and rerunning the same command may not fix it. Both show no number --
+     that part is not negotiable, since a zero would read as an all-clear. */
+  function unavailableNoteKey(key, commandKey) {
+    var computed = PAYLOAD.computed;
+    if (computed && typeof computed === "object" && isError(computed[key])) {
+      return "card.degraded";
+    }
+    return commandKey;
+  }
+
+  function listIndicator(values) {
+    var count = Array.isArray(values) ? values.length : 0;
+    return { count: count, severity: count === 0 ? "info" : "warning" };
+  }
+
+  function countActiveChanges() {
+    return records("RUN").filter(function (record) {
+      return record.status !== ROLLED_BACK_STATUS
+        && record.result !== ROLLED_BACK_RESULT;
+    }).length;
+  }
+
+  /* A built page asks the filesystem; a static page cannot, but the ledger
+     carries the status something recorded the last time it looked, and
+     reporting that is honest in a way reporting zero would not be. */
+  function unreachableProjects() {
+    var listed = computedFor("unreachable_projects");
+    if (Array.isArray(listed)) {
+      return listed.filter(function (root) { return typeof root === "string"; });
+    }
+    var roots = [];
+    ledgerList("known_projects").forEach(function (entry) {
+      if (!entry || typeof entry !== "object") { return; }
+      if (entry.status === "UNREACHABLE" && typeof entry.project_root === "string") {
+        roots.push(entry.project_root);
+      }
+    });
+    return roots;
+  }
+
+  /* Inventory ---------------------------------------------------------- */
+
+  /* Every item every baseline recorded, one row each, filtered by kind.
+
+     The `state` column carries two different facts and must not blur them.
+     A baseline item's own `state` is scan-verified data -- what was on disk
+     when the baseline was captured -- so it renders plainly. A drift state
+     is a comparison this build performed just now, so it renders as a chip
+     with its gloss and its severity. Neither is self-reported, and neither
+     wears that marker; the SELF-REPORTED badge belongs to run records, which
+     is Task 5's panel. */
+  function renderInventory(section, state) {
+    var drift = computedFor("drift");
+    var kinds = [];
+    var rows = [];
+
+    ledgerList("baselines").forEach(function (entry) {
+      if (!entry || typeof entry !== "object") { return; }
+      var states = driftStatesFor(drift, entry.id);
+      var items = Array.isArray(entry.items) ? entry.items : [];
+      items.forEach(function (item) {
+        if (!item || typeof item !== "object") { return; }
+        if (typeof item.kind === "string" && kinds.indexOf(item.kind) === -1) {
+          kinds.push(item.kind);
+        }
+        var found = states[itemKey(item)];
+        rows.push({
+          item: item,
+          captured_on: typeof entry.captured_on === "string" ? entry.captured_on : null,
+          drift: typeof found === "string" ? found : null
+        });
+      });
+    });
+
+    if (rows.length === 0) {
+      section.appendChild(h("p", { class: "empty" }, t("panel.inventory.empty")));
+      return;
+    }
+
+    kinds.sort();
+    /* One `f` key serves every panel, so a value left over from another
+       panel's filter would empty this table for no reason the reader can
+       see. An `f` that names no kind here simply means "all". */
+    var wanted = kinds.indexOf(state.f) === -1 ? "" : state.f;
+    section.appendChild(filterBar(
+      { panel: state.panel, lang: state.lang, f: wanted },
+      kinds,
+      "filter.kind"
+    ));
+
+    var visible = wanted === "" ? rows : rows.filter(function (entry) {
+      return entry.item.kind === wanted;
+    });
+    var sorted = sortBySeverityThenRecency(visible, inventorySeverity);
+
+    wide(section);
+    section.appendChild(gridTable(
+      "inventory.caption",
+      [
+        "table.kind", "table.name", "table.anchor",
+        "table.state", "table.origin", "table.portable"
+      ],
+      sorted.map(inventoryRow)
+    ));
+  }
+
+  function inventorySeverity(entry) {
+    if (entry.drift === null) { return "info"; }
+    var severity = DRIFT_SEVERITY[entry.drift];
+    /* A state this page does not know is not quietly a note: an unknown
+       classification is exactly the case where the reader should look. */
+    return severity === undefined ? "warning" : severity;
+  }
+
+  function inventoryRow(entry) {
+    var item = entry.item;
+    return tableRow(inventorySeverity(entry), false, [
+      cell("table.kind", h("code", { lang: "en" }, textOrDash(item.kind))),
+      cell("table.name", textOrDash(item.name)),
+      cell("table.anchor", h("code", { class: "path" }, textOrDash(item.anchor))),
+      cell("table.state", inventoryStateCell(entry)),
+      cell("table.origin", h("code", { lang: "en" }, textOrDash(item.origin))),
+      cell("table.portable", flagText(item.portable))
+    ]);
+  }
+
+  function inventoryStateCell(entry) {
+    if (entry.drift === null) {
+      return h("code", { lang: "en" }, textOrDash(entry.item.state));
+    }
+    return vocabChip(
+      entry.drift,
+      inventorySeverity(entry),
+      "state." + entry.drift + ".tip"
+    );
+  }
+
+  /* The join. The drift report keeps one entry per baseline, each holding
+     one row per item, and every row repeats the item's kind, name, and
+     anchor -- which together identify an item inside its baseline. Joining
+     on those three rather than on position means a report computed before
+     the ledger gained an item still lines up, and a row that does not line
+     up has no state at all rather than borrowing its neighbour's. */
+  function driftStatesFor(report, baselineId) {
+    var found = {};
+    if (!report || typeof report !== "object") { return found; }
+    var entries = Array.isArray(report.baselines) ? report.baselines : [];
+    entries.forEach(function (entry) {
+      if (!entry || typeof entry !== "object" || entry.id !== baselineId) { return; }
+      var items = Array.isArray(entry.items) ? entry.items : [];
+      items.forEach(function (item) {
+        if (item && typeof item === "object") { found[itemKey(item)] = item.state; }
+      });
+    });
+    return found;
+  }
+
+  function itemKey(item) {
+    return [item.kind, item.name, item.anchor].join(SEPARATOR);
+  }
+
+  /* Backlog ------------------------------------------------------------ */
+
+  function renderBacklog(section) {
+    var entries = ledgerList("backlog").filter(function (entry) {
+      return Boolean(entry) && typeof entry === "object";
+    });
+    if (entries.length === 0) {
+      section.appendChild(h("p", { class: "empty" }, t("panel.backlog.empty")));
+      return;
+    }
+    var today = todayISO();
+    var sorted = sortBySeverityThenRecency(entries, function (entry) {
+      return backlogSeverity(entry, today);
+    });
+    wide(section);
+    section.appendChild(gridTable(
+      "backlog.caption",
+      ["table.record", "table.classification", "table.reason", "table.revisit"],
+      sorted.map(function (entry) { return backlogRow(entry, today); })
+    ));
+  }
+
+  /* A revisit date that has passed is the backlog's only finding: the entry
+     asked to be looked at again by then and nobody has. Everything else here
+     is a note -- a deferred finding is not a fault. */
+  function backlogSeverity(entry, today) {
+    var when = entry.revisit_after;
+    if (typeof when === "string" && when !== "" && when < today) { return "warning"; }
+    return "info";
+  }
+
+  function backlogRow(entry, today) {
+    var severity = backlogSeverity(entry, today);
+    var revisit = [];
+    if (typeof entry.revisit_trigger === "string" && entry.revisit_trigger !== "") {
+      revisit.push(h("p", { class: "note" }, entry.revisit_trigger));
+    }
+    if (typeof entry.revisit_after === "string" && entry.revisit_after !== "") {
+      revisit.push(h("p", { class: "note" }, entry.revisit_after));
+      if (severity === "warning") { revisit.push(marker("backlog.revisit_due")); }
+    } else {
+      revisit.push(h("p", { class: "note" }, t("backlog.trigger_only")));
+    }
+    return tableRow(severity, false, [
+      cell("table.record", h("code", { lang: "en" }, textOrDash(entry.id))),
+      cell("table.classification", classificationChip(entry.classification, severity)),
+      cell("table.reason", textOrDash(entry.reason)),
+      cell("table.revisit", revisit)
+    ]);
+  }
+
+  /* Decisions ---------------------------------------------------------- */
+
+  /* Design spec section 4: ADR records are never filtered out of this panel,
+     only sorted. The fragment's filter therefore does not hide anything
+     here -- it names one record and lifts it to the top, which is what a
+     "superseded by" link needs to do without making the rest disappear. */
+  function renderDecisions(section, state) {
+    var adrs = records("ADR");
+    if (adrs.length === 0) {
+      section.appendChild(h("p", { class: "empty" }, t("panel.decisions.empty")));
+      return;
+    }
+    var replaced = supersessionIndex(adrs);
+    /* Every ADR is a note, a superseded one included: a decision that was
+       replaced is history, not a fault, and giving it a warning would float
+       it above live decisions in a sort that means severity. Recency is what
+       separates them, and that is this sort's second key. */
+    var sorted = sortBySeverityThenRecency(adrs, function () { return "info"; });
+    var focused = [];
+    var rest = [];
+    sorted.forEach(function (record) {
+      if (state.f !== "" && record.id === state.f) { focused.push(record); return; }
+      rest.push(record);
+    });
+    wide(section);
+    section.appendChild(gridTable(
+      "decisions.caption",
+      [
+        "table.record", "table.title", "table.status",
+        "table.updated", "table.links"
+      ],
+      focused.concat(rest).map(function (record) {
+        return decisionRow(record, replaced, focused.indexOf(record) !== -1);
+      })
+    ));
+  }
+
+  /* Which record replaced which. A record whose own status is SUPERSEDED
+     names its replacement in links.adrs; the reverse direction has to be
+     built here rather than read, because the replacement itself records
+     nothing about what it displaced. */
+  function supersessionIndex(adrs) {
+    var index = {};
+    adrs.forEach(function (record) {
+      if (record.status !== "SUPERSEDED") { return; }
+      linkedAdrs(record).forEach(function (other) {
+        if (!index[other]) { index[other] = []; }
+        index[other].push(record.id);
+      });
+    });
+    return index;
+  }
+
+  function linkedAdrs(record) {
+    var links = record.links;
+    if (!links || typeof links !== "object") { return []; }
+    var listed = links.adrs;
+    if (!Array.isArray(listed)) { return []; }
+    return listed.filter(function (value) {
+      return typeof value === "string" && value !== "";
+    });
+  }
+
+  function decisionRow(record, replaced, focused) {
+    var links = [];
+    if (record.status === "SUPERSEDED") {
+      linkedAdrs(record).forEach(function (other) {
+        links.push(h(
+          "p",
+          { class: "note" },
+          t("decisions.superseded_by") + " ",
+          recordLink(other)
+        ));
+      });
+    }
+    (replaced[record.id] || []).forEach(function (other) {
+      links.push(h(
+        "p",
+        { class: "note" },
+        t("decisions.supersedes") + " ",
+        recordLink(other)
+      ));
+    });
+    return tableRow("info", focused, [
+      cell("table.record", h("code", { lang: "en" }, textOrDash(record.id))),
+      cell("table.title", textOrDash(record.title)),
+      cell("table.status", statusChip(record.status, "info")),
+      cell("table.updated", textOrDash(record.updated)),
+      cell("table.links", links.length === 0 ? t("value.unknown") : links)
+    ]);
+  }
+
+  /* An in-page link and nothing else: it names this panel and one record, so
+     following it lifts that record to the top of this same table. safeHref
+     sees a fragment and passes it through; there is no other shape a record
+     link can take on this page. */
+  function recordLink(other) {
+    return h(
+      "a",
+      { href: "#panel=decisions&f=" + encodeURIComponent(other), lang: "en" },
+      h("code", null, other)
+    );
+  }
+
+  /* Materials ---------------------------------------------------------- */
+
+  function renderMaterials(section) {
+    var materials = records("MATERIAL");
+    if (materials.length === 0) {
+      section.appendChild(h("p", { class: "empty" }, t("panel.materials.empty")));
+      return;
+    }
+    var expired = expiredEvidenceIndex();
+    var sorted = sortBySeverityThenRecency(materials, function (record) {
+      return materialSeverity(record, expired);
+    });
+    section.appendChild(h("p", { class: "note" }, t("materials.source_is_text")));
+    if (expired === null) {
+      section.appendChild(h("p", { class: "note" }, t("materials.expiry_unchecked")));
+    }
+    wide(section);
+    section.appendChild(gridTable(
+      "materials.caption",
+      [
+        "table.record", "table.title", "table.status",
+        "table.classification", "table.evidence"
+      ],
+      sorted.map(function (record) { return materialRow(record, expired); })
+    ));
+  }
+
+  /* Expiry is a comparison the build made against the date it ran, and this
+     page does not redo it: recomputing at view time would answer a different
+     question from the one dashboard.py answered and then quietly disagree
+     with the command. Null means the comparison is not on this page at all,
+     which the panel states in words rather than by showing every entry as
+     current. */
+  function expiredEvidenceIndex() {
+    var listed = computedFor("expired_evidence");
+    if (!Array.isArray(listed)) { return null; }
+    var found = {};
+    listed.forEach(function (entry) {
+      if (entry && typeof entry === "object") {
+        found[evidenceKey(entry.record, entry.source)] = true;
+      }
+    });
+    return found;
+  }
+
+  function evidenceKey(recordId, source) {
+    return [recordId, source].join(SEPARATOR);
+  }
+
+  function evidenceOf(record) {
+    var listed = record.evidence;
+    if (!Array.isArray(listed)) { return []; }
+    return listed.filter(function (item) {
+      return Boolean(item) && typeof item === "object";
+    });
+  }
+
+  function isExpiredEvidence(record, item, expired) {
+    if (expired === null) { return false; }
+    return Boolean(expired[evidenceKey(record.id, item.source)]);
+  }
+
+  function materialSeverity(record, expired) {
+    var severity = "info";
+    evidenceOf(record).forEach(function (item) {
+      if (isExpiredEvidence(record, item, expired)) { severity = "warning"; }
+    });
+    return severity;
+  }
+
+  function materialRow(record, expired) {
+    var list = h("ul", { class: "evidence" });
+    evidenceOf(record).forEach(function (item) {
+      list.appendChild(h(
+        "li",
+        null,
+        /* Design spec section 1.3: an evidence source is text. It is
+           frequently an address, and it is never made clickable -- this page
+           issues no request, and a live source would be one waiting to
+           happen. Rendering it as text also keeps it copyable, which is what
+           a reader chasing the claim actually needs. */
+        h("span", { class: "source" }, textOrDash(item.source)),
+        " ",
+        h("span", { class: "note" }, textOrDash(item.kind)),
+        " ",
+        h(
+          "span",
+          { class: "note" },
+          t("materials.verified_on") + " " + textOrDash(item.verified_on)
+        ),
+        typeof item.expires_on === "string" && item.expires_on !== ""
+          ? h(
+              "span",
+              { class: "note" },
+              " " + t("materials.expires_on") + " " + item.expires_on
+            )
+          : null,
+        isExpiredEvidence(record, item, expired) ? marker("materials.expired") : null
+      ));
+    });
+    return tableRow(materialSeverity(record, expired), false, [
+      cell("table.record", h("code", { lang: "en" }, textOrDash(record.id))),
+      cell("table.title", textOrDash(record.title)),
+      cell("table.status", statusChip(record.status, "info")),
+      cell("table.classification", classificationChip(record.classification, "info")),
+      cell(
+        "table.evidence",
+        evidenceOf(record).length === 0 ? t("value.unknown") : list
+      )
+    ]);
   }
 
   /* Design spec section 14: a sub-computation that failed carries an error
@@ -1143,13 +2376,47 @@ footer {
     section.appendChild(h("p", { class: "empty" }, t("help.self_reported")));
     section.appendChild(h("p", { class: "empty" }, t("help.canonical_labels")));
 
+    section.appendChild(h("h3", null, t("help.states")));
+    section.appendChild(glossary(
+      DRIFT_STATES.concat(ROLLBACK_INDICATORS),
+      function (name) { return "state." + name + ".tip"; }
+    ));
+
+    section.appendChild(h("h3", null, t("help.classifications")));
+    section.appendChild(glossary(
+      CLASSIFICATIONS,
+      function (name) { return "vocab.class." + name + ".tip"; }
+    ));
+
+    section.appendChild(h("h3", null, t("help.statuses")));
+    section.appendChild(glossary(
+      RECORD_STATUSES,
+      function (name) { return "vocab.status." + name + ".tip"; }
+    ));
+
+    /* Commands, not prose: the entries stay English while their one-line
+       descriptions are translated, for the reason help.canonical_labels
+       states -- a translated command is a command that does not run. */
+    section.appendChild(h("h3", null, t("help.commands")));
+    var commands = h("dl", { class: "reference" });
+    COMMANDS.forEach(function (pair) {
+      commands.appendChild(h("dt", null, h("code", { lang: "en" }, pair[0])));
+      commands.appendChild(h("dd", null, t(pair[1])));
+    });
+    section.appendChild(commands);
+  }
+
+  /* The same two-column shape for all three vocabularies: the canonical
+     English term, and its gloss both beside it and as its tooltip -- which
+     is the same string the record panels attach to the same term inline. */
+  function glossary(names, keyFor) {
     var list = h("dl", { class: "reference" });
-    DRIFT_STATES.concat(ROLLBACK_INDICATORS).forEach(function (state) {
-      var tip = t("state." + state + ".tip");
-      list.appendChild(h("dt", null, h("code", { lang: "en", title: tip }, state)));
+    names.forEach(function (name) {
+      var tip = t(keyFor(name));
+      list.appendChild(h("dt", null, h("code", { lang: "en", title: tip }, name)));
       list.appendChild(h("dd", null, tip));
     });
-    section.appendChild(list);
+    return list;
   }
 
   /* Design spec section 4's staleness deviation: a file: page cannot stat

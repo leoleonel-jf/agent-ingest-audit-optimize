@@ -42,6 +42,8 @@ El.prototype.getAttribute = function (name) {
   return name in this.attributes ? this.attributes[name] : null;
 };
 
+El.prototype.removeAttribute = function (name) { delete this.attributes[name]; };
+
 El.prototype.appendChild = function (child) { this.childNodes.push(child); return child; };
 
 El.prototype.removeChild = function (child) {
@@ -71,11 +73,23 @@ Object.defineProperty(El.prototype, "textContent", {
 
 var registry = Object.create(null);
 
+/* Every tag name `createElement` was *asked for*, counted before any
+   coercion. The shell's `safeTag` turns `script` into `span`, so a count
+   under a forbidden name here is the one observation that would show a tag
+   name reaching the DOM from ledger content -- and unlike a look at the
+   finished tree, it survives the element being coerced into something
+   harmless. `dashboard/tests/test_shell.py` asserts on it. */
+var created = Object.create(null);
+
 var document = {
   title: "",
   documentElement: new El("html"),
   body: new El("body"),
-  createElement: function (tag) { return new El(tag); },
+  createElement: function (tag) {
+    var name = String(tag);
+    created[name] = (created[name] || 0) + 1;
+    return new El(tag);
+  },
   createTextNode: function (value) {
     var node = new El("#text");
     node.text = String(value);
@@ -125,3 +139,4 @@ var window = {
 globalThis.document = document;
 globalThis.window = window;
 globalThis.__AIO_REGISTRY__ = registry;
+globalThis.__AIO_CREATED__ = created;
