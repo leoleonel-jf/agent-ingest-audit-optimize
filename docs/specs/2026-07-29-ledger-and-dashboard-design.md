@@ -41,6 +41,47 @@ Token and cost telemetry; real-time session observability; a long-running server
 to the environment from the dashboard; cloud sync; multi-user or team aggregation; competing
 with existing runtime observability plugins.
 
+### 3.1 Amendment, 2026-07-31 (ADR-2026-001)
+
+The list above stands as written except for the two bounded exceptions below. It is amended
+rather than rewritten on purpose: a non-goal that quietly disappears is indistinguishable from
+one nobody noticed, which is the same rule `references/LEDGER.md` applies to gaps.
+
+**Lifted, narrowly — "a long-running server".** `serve` may exist as a **loopback-bound,
+read-only, foreground** process that renders the same dashboard `build` produces. Bound to
+`127.0.0.1` and never to an interface; it serves and never writes; it exits with the terminal
+that started it, so nothing outlives the session that asked for it. What remains a non-goal is
+a daemon, a service installed at boot, any bind beyond loopback, and any authentication story —
+the moment a server needs a login it has become infrastructure, which this is not.
+
+*Why:* the only thing `serve` buys is true staleness detection — comparing the rendered page
+against the ledger on disk, which a `file:` page cannot do without a request. That is a real
+gap §12.3 promised and 0.4.0 had to narrow to "generation age". Nothing else about a server is
+wanted.
+
+**Lifted, narrowly — "multi-user or team aggregation".** A ledger may **import other ledgers
+read-only** to render one view across projects or machines, where those ledgers are reachable on
+this filesystem and `known_projects[]` already names them. What remains a non-goal is writing to
+an imported ledger, any transport (no network, no sync, no server-side merge), and any notion of
+user identity or access control. The **single-writer rule is untouched**: each ledger has exactly
+one writer, and importing is reading.
+
+*Why:* the tool already records `known_projects[]` with digests and reports them unreachable. A
+read-only union is the honest completion of a promise the schema already makes, and it needs
+neither a server nor a second writer.
+
+**Unchanged, and worth restating.** Token and cost telemetry, real-time session observability,
+and cloud sync remain out of scope entirely. **Writing to the environment from the dashboard**
+remains a non-goal, and the CLI's read-only property — every command reads except `build`,
+`chain --seal`, and `compliance --out`, each of which writes only where told — is a separate
+guarantee that this amendment does not touch. Any `rollback --execute` needs its own decision;
+it is not authorised here.
+
+**Clarified, not lifted.** Exporting ledger events to a SIEM or an OTel collector is *export*,
+not observability: it emits records this tool already holds and adds no runtime instrumentation.
+It never required an amendment, and "competing with existing runtime observability plugins"
+still describes something this tool does not do.
+
 ## 4. Constraints discovered in the current repository
 
 | Constraint | Source | Consequence |
