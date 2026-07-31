@@ -211,8 +211,14 @@ def rollback_preview(
         # same code as `drift`, not similar code, observable by one patch.
         state, _reason = drift.classify_target(target, roots)
         states.append(state)
+        anchor = target.get("anchor") if isinstance(target, dict) else None
         row = {
-            "anchor": target.get("anchor") if isinstance(target, dict) else None,
+            "anchor": anchor,
+            # `drift.resolved_path`, through the module attribute for the
+            # reason `classify_target` is: the row's `path` must be the very
+            # answer drift's rows carry, or the two reports could name
+            # different files for one anchor.
+            "path": drift.resolved_path(anchor, roots),
             "kind": target.get("kind") if isinstance(target, dict) else None,
             "state": state,
         }
@@ -256,10 +262,25 @@ def rollback_preview(
         # HEALTHY.
         indicator = AT_RISK
 
+    # The backup's own resolved path, beside its verdict: design spec 12.2's
+    # Open offer names "the record, the backup, or the changed file", and the
+    # backup is a real file this preview verified (or failed to). Resolved
+    # through the same binding the rows use, and None -- never a raise --
+    # when the backup is absent, malformed, or refuses to resolve.
+    recorded_backup = record.get("backup")
+    backup_path = drift.resolved_path(
+        recorded_backup.get("path") if isinstance(recorded_backup, dict) else None,
+        roots,
+    )
+
     report = {
         "run": run_id,
         "indicator": indicator,
-        "backup": {"verified": verified, "reason": backup_reason},
+        "backup": {
+            "verified": verified,
+            "reason": backup_reason,
+            "path": backup_path,
+        },
         "will_be_restored": will_be_restored,
         "will_not_change": will_not_change,
         "cannot_be_restored": cannot_be_restored,

@@ -101,6 +101,7 @@ from ledgerlib.drift import (  # noqa: E402
     classify_target,
     drift_command,
     drift_report,
+    resolved_path,
 )
 from ledgerlib.rollback import (  # noqa: E402
     BACKUP_REASONS,

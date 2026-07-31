@@ -342,6 +342,7 @@ class SetMembershipTests(RollbackTestCase):
             [
                 {
                     "anchor": "$USER_CONFIG/settings.json",
+                    "path": str(self.user_config / "settings.json"),
                     "kind": "mcp-server",
                     "state": "IN_PLACE",
                 }
@@ -357,6 +358,7 @@ class SetMembershipTests(RollbackTestCase):
             [
                 {
                     "anchor": "$USER_CONFIG/reverted.json",
+                    "path": str(self.user_config / "reverted.json"),
                     "kind": "mcp-server",
                     "state": "REVERTED",
                 }
@@ -946,6 +948,76 @@ class RollbackWritesNothingTests(RollbackCliTestCase):
             )
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out.getvalue())["indicator"], "HEALTHY")
+
+
+class ResolvedPathTests(RollbackTestCase):
+    """0.5.0: every set row -- and the backup -- records its resolved path.
+
+    Same key, same meaning, same producer as `drift_report`'s rows: the
+    string `resolve_anchored` gives, or None where nothing resolves. The
+    backup gets one too, because design spec section 12.2's Open offer names
+    "the record, the backup, or the changed file", and the backup is a real
+    file this preview just verified (or failed to).
+    """
+
+    def test_every_set_row_carries_the_resolved_path(self) -> None:
+        record = self.run_record(
+            [
+                self.in_place_target(),
+                self.reverted_target(),
+                self.drifted_target(),
+            ],
+            self.verified_backup(),
+        )
+        report, _, _ = self.preview([record])
+        self.assertEqual(
+            report["will_be_restored"][0]["path"],
+            str(self.user_config / "settings.json"),
+        )
+        self.assertEqual(
+            report["will_not_change"][0]["path"],
+            str(self.user_config / "reverted.json"),
+        )
+        self.assertEqual(
+            report["cannot_be_restored"][0]["path"],
+            str(self.user_config / "drifted.json"),
+        )
+
+    def test_a_missing_targets_row_still_carries_its_path(self) -> None:
+        record = self.run_record([self.missing_target()], self.verified_backup())
+        report, _, _ = self.preview([record])
+        row = report["cannot_be_restored"][0]
+        self.assertEqual(row["reason"], "MISSING")
+        self.assertEqual(row["path"], str(self.user_config / "gone.json"))
+
+    def test_an_unresolvable_targets_row_has_a_null_path(self) -> None:
+        record = self.run_record(
+            [self.target(anchor="$UNKNOWN/settings.json")], self.verified_backup()
+        )
+        report, _, _ = self.preview([record])
+        self.assertIsNone(report["cannot_be_restored"][0]["path"])
+
+    def test_the_backup_carries_its_resolved_path(self) -> None:
+        record = self.run_record([self.in_place_target()], self.verified_backup())
+        report, _, _ = self.preview([record])
+        self.assertEqual(
+            report["backup"]["path"],
+            str(self.user_config / "backups" / f"{RUN_ID}.bak"),
+        )
+
+    def test_a_missing_backup_has_a_null_path(self) -> None:
+        record = self.run_record([self.in_place_target()], None)
+        report, _, _ = self.preview([record])
+        self.assertIsNone(report["backup"]["path"])
+
+    def test_an_unresolvable_backup_has_a_null_path(self) -> None:
+        record = self.run_record(
+            [self.in_place_target()],
+            {"path": "$USER_CONFIG/../escape.bak", "digest": "sha256:" + "0" * 64},
+        )
+        report, _, _ = self.preview([record])
+        self.assertEqual(report["indicator"], "BROKEN")
+        self.assertIsNone(report["backup"]["path"])
 
 
 if __name__ == "__main__":

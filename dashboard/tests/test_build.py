@@ -980,5 +980,33 @@ class BuildCliTests(BuildCliTestCase):
         self.assertEqual(spy.call_args.kwargs["user_config"], self.user_config)
 
 
+class BuildPayloadResolvedPathTests(BuildTestCase):
+    """0.5.0: the payload's computed rows carry the paths the shell opens.
+
+    No new plumbing is under test -- `build_payload` embeds `drift_report`'s
+    and `rollback_preview`'s reports verbatim, and those reports now carry
+    `path` -- but the promise the shell relies on is a property of the
+    payload, so it is pinned here where the payload is built.
+    """
+
+    def test_drift_and_preview_rows_reach_the_payload_with_paths(self) -> None:
+        settings = self.write(self.user_config / "settings.json", "after\n")
+        run = self.full_run(
+            [self.target(after_digest=self.digest_of(settings))],
+            self.verified_backup(),
+        )
+        payload, _ = self.build(self.valid_ledger(records=[run]))
+        drift_row = payload["computed"]["drift"]["runs"][0]["targets"][0]
+        self.assertEqual(drift_row["path"], str(settings.resolve()))
+        preview = payload["computed"]["previews"]["RUN-2026-000"]
+        self.assertEqual(
+            preview["will_be_restored"][0]["path"], str(settings.resolve())
+        )
+        self.assertEqual(
+            preview["backup"]["path"],
+            str(self.user_config / "backups" / "RUN-2026-000.bak"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -200,15 +200,16 @@ an export.
   design spec's promise there is deliberately narrowed to per-record export, which covers the
   audit-evidence use (pull one record out to paste or attach) without a second copy of the whole
   ledger to keep in sync.
-- **Open's current scope.** "Open" links render only for the two real filesystem paths the payload
-  actually carries: a known project's `project_root` and `ledger_path`
-  (`known_projects[]` in the global ledger). Every other panel deals in anchors
-  (`$USER_CONFIG/...`), not resolved paths — `resolve_anchored` never stores an absolute path for
-  a portable one, and neither the drift report nor a rollback preview carries the filesystem path
-  it actually opened, only the anchor it classified. Making "open the record, the backup, or the
-  changed file" true everywhere the design spec originally asked for is a 0.5.0 change to the
-  Python side, not shipped here. A project marked unreachable, or a root that is not an absolute
-  local path, gets no Open link and says so, rather than a link that goes nowhere.
+- **Open's current scope.** "Open" links render wherever the payload carries a resolved absolute
+  path. That is: a known project's `project_root` and `ledger_path` (`known_projects[]` in the
+  global ledger), and — since 0.5.0 — the `path` every drift row, rollback-preview row, and
+  preview backup records beside its anchor, which is the very answer `resolve_anchored` gave when
+  the Python side classified that row. A row whose anchor names no single local file — a glob
+  pattern, an anchor the path-safety layer refused — carries a null `path` and renders linkless;
+  so does every anchor on a static or degraded page, where nothing resolved anything. A record's
+  `file` is still not linkable: it is relative to a ledger whose location the page does not know.
+  A project marked unreachable, or a root that is not an absolute local path, gets no Open link
+  and says so, rather than a link that goes nowhere.
 - **Rollback is two-step.** "Prepare" reveals the §11 preview summary and a confirmation prompt;
   only after "Yes, undo this run" is clicked does the instruction's copy and queue buttons enable.
   Nothing re-arms or disarms silently — there is no timeout, and leaving the Rollback panel and

@@ -991,6 +991,7 @@ FIXTURE_COMPUTED = {
                         "kind": "instruction-file",
                         "name": "CLAUDE.md",
                         "anchor": "$USER_CONFIG/CLAUDE.md",
+                        "path": "/resolved/user_config/CLAUDE.md",
                         "scope": "user",
                         "recorded_state": "present",
                         "state": "IN_PLACE",
@@ -1000,15 +1001,20 @@ FIXTURE_COMPUTED = {
                         "kind": "skill",
                         "name": "drifted-skill",
                         "anchor": "$USER_CONFIG/skills/drifted-skill",
+                        "path": "/resolved/user_config/skills/drifted-skill",
                         "scope": None,
                         "recorded_state": "present",
                         "state": "DRIFTED",
                         "reason": None,
                     },
+                    # A null path, as `drift_report` records for a glob
+                    # pattern or a refused anchor: this row is what pins
+                    # "no path, no Open link" at render time.
                     {
                         "kind": "hook",
                         "name": "guard",
                         "anchor": "$USER_CONFIG/hooks/guard.js",
+                        "path": None,
                         "scope": None,
                         "recorded_state": "not_present",
                         "state": "IN_PLACE",
@@ -1024,6 +1030,7 @@ FIXTURE_COMPUTED = {
                     {
                         "kind": "instruction-file",
                         "anchor": "$USER_CONFIG/settings.json",
+                        "path": "/resolved/user_config/settings.json",
                         "state": "DRIFTED",
                         "reason": None,
                     }
@@ -1047,12 +1054,15 @@ FIXTURE_COMPUTED = {
         "RUN-2026-000": {
             "run": "RUN-2026-000",
             "indicator": "BROKEN",
-            "backup": {"verified": False, "reason": "backup_missing"},
+            # A backup that never resolved has no path, exactly as
+            # `rollback_preview` records it.
+            "backup": {"verified": False, "reason": "backup_missing", "path": None},
             "will_be_restored": [],
             "will_not_change": [],
             "cannot_be_restored": [
                 {
                     "anchor": "$USER_CONFIG/settings.json",
+                    "path": "/resolved/user_config/settings.json",
                     "kind": "instruction-file",
                     "state": "DRIFTED",
                     "reason": "backup_missing",
@@ -1063,10 +1073,15 @@ FIXTURE_COMPUTED = {
         "RUN-2026-001": {
             "run": "RUN-2026-001",
             "indicator": "AT_RISK",
-            "backup": {"verified": True, "reason": None},
+            "backup": {
+                "verified": True,
+                "reason": None,
+                "path": "/resolved/backups/RUN-2026-001.bak",
+            },
             "will_be_restored": [
                 {
                     "anchor": "$USER_CONFIG/settings.json",
+                    "path": "/resolved/user_config/settings.json",
                     "kind": "instruction-file",
                     "state": "IN_PLACE",
                 }
@@ -1074,13 +1089,17 @@ FIXTURE_COMPUTED = {
             "will_not_change": [
                 {
                     "anchor": "$USER_CONFIG/hooks/guard.js",
+                    "path": "/resolved/user_config/hooks/guard.js",
                     "kind": "json field",
                     "state": "REVERTED",
                 }
             ],
             "cannot_be_restored": [
+                # The hostile anchor resolves to nothing, so its path is
+                # null and its row must render linkless.
                 {
                     "anchor": XSS_TITLE,
+                    "path": None,
                     "kind": "markdown document",
                     "state": "MISSING",
                     "reason": "MISSING",
@@ -1447,6 +1466,19 @@ PANEL_PROBE = r"""
     return byTag(bodies[0], "TR");
   }
 
+  /* Every link in a panel, with the three facts the Open-link cases
+     compare: where it goes, what it says, and the title that carries the
+     full path. */
+  function links(root) {
+    return byTag(root, "A").map(function (a) {
+      return {
+        href: a.attributes.href,
+        text: a.textContent,
+        title: a.attributes.title || null
+      };
+    });
+  }
+
   function panel(name) {
     var node = document.getElementById("aio-panel-" + name);
     if (!node) { bad.push("panel " + name + " is absent"); }
@@ -1534,6 +1566,7 @@ PANEL_PROBE = r"""
     labels: byTag(inventory, "TD").map(function (node) {
       return node.attributes["data-label"];
     }),
+    links: links(inventory),
     text: inventory.textContent
   };
 
@@ -1549,6 +1582,7 @@ PANEL_PROBE = r"""
     vocab: byClass(changes, "vocab").map(function (n) { return n.textContent; }),
     texts: textValues(changes),
     anchors: byTag(changes, "A").length,
+    links: links(changes),
     captions: byTag(changes, "CAPTION").map(function (n) { return n.textContent; }),
     text: changes.textContent
   };
@@ -1569,6 +1603,7 @@ PANEL_PROBE = r"""
     vocab: byClass(rollback, "vocab").map(function (n) { return n.textContent; }),
     texts: textValues(rollback),
     anchors: byTag(rollback, "A").length,
+    links: links(rollback),
     text: rollback.textContent
   };
 
@@ -3180,6 +3215,27 @@ class RuntimePanelTests(ShellTemplateTestCase):
     def test_inventory_renders_the_proposal_origin_as_text(self) -> None:
         self.assertIn("PROP-2026-000", self._panel("inventory")["text"])
 
+    def test_inventory_links_each_pathed_anchor_to_its_file(self) -> None:
+        """0.5.0: a drift row's recorded `path` becomes an Open link.
+
+        Exactly two rows carry a path -- the hook row's is null, as
+        `drift_report` records for a pattern or a refusal, and it must
+        render linkless. The link says where it goes twice over: the href
+        through `fileUrl`'s encoding, and the raw path in the title.
+        """
+        links = self._panel("inventory")["links"]
+        self.assertCountEqual(
+            [link["href"] for link in links],
+            [
+                "file:///resolved/user_config/CLAUDE.md",
+                "file:///resolved/user_config/skills/drifted-skill",
+            ],
+        )
+        for link in links:
+            with self.subTest(link=link["title"]):
+                self.assertEqual(link["text"], "Open")
+                self.assertTrue(link["title"].startswith("/resolved/"), link)
+
     # --- Changes -------------------------------------------------------
 
     def _run_block(self, panel: str, run_id: str) -> dict:
@@ -3348,9 +3404,21 @@ class RuntimePanelTests(ShellTemplateTestCase):
         self.assertIn("DRIFTED", self._run_block("changes", "RUN-2026-000")["text"])
         self.assertNotIn("DRIFTED", self._run_block("changes", "RUN-2026-002")["text"])
 
-    def test_changes_builds_no_link_elements(self) -> None:
-        """Target anchors are text at 0.4.0; Task 6 owns the `file:` links."""
-        self.assertEqual(self._panel("changes")["anchors"], 0)
+    def test_changes_links_only_the_drift_reported_target(self) -> None:
+        """0.5.0: the 0.4.0 narrowing undone, and only where it is honest.
+
+        Only `RUN-2026-000` is in the drift report's `runs`, so only its
+        target row carries a recorded path -- and only it gets an Open
+        link. Every other block's anchors stay text: no path in the
+        payload, no link on the page.
+        """
+        links = self._panel("changes")["links"]
+        self.assertEqual(
+            [link["href"] for link in links],
+            ["file:///resolved/user_config/settings.json"],
+        )
+        self.assertEqual(links[0]["text"], "Open")
+        self.assertEqual(links[0]["title"], "/resolved/user_config/settings.json")
 
     def test_a_script_payload_in_a_target_anchor_lands_as_one_text_node(self) -> None:
         """The stored-XSS regression, through a second renderer.
@@ -3495,8 +3563,27 @@ class RuntimePanelTests(ShellTemplateTestCase):
         self.assertIn("RUN-2026-003", text)
         self.assertIn("recorded no backup", text)
 
-    def test_rollback_builds_no_link_elements(self) -> None:
-        self.assertEqual(self._panel("rollback")["anchors"], 0)
+    def test_rollback_links_pathed_rows_and_the_verified_backup(self) -> None:
+        """0.5.0: every preview row with a path links, and so does the one
+        backup the preview resolved.
+
+        Four links, no more: the XSS/missing row's path is null and the
+        BROKEN preview's backup never resolved, so both render linkless --
+        the exact honesty the null path encodes.
+        """
+        links = self._panel("rollback")["links"]
+        self.assertCountEqual(
+            [link["href"] for link in links],
+            [
+                "file:///resolved/user_config/settings.json",
+                "file:///resolved/user_config/settings.json",
+                "file:///resolved/user_config/hooks/guard.js",
+                "file:///resolved/backups/RUN-2026-001.bak",
+            ],
+        )
+        for link in links:
+            with self.subTest(link=link["title"]):
+                self.assertEqual(link["text"], "Open")
 
     def test_a_script_payload_in_a_preview_set_is_inert(self) -> None:
         self.assertIn(XSS_TITLE, self._panel("rollback")["texts"])
@@ -3718,6 +3805,17 @@ class RuntimeStaticModePanelTests(RuntimePanelTests):
         """The payload reaches this panel only through a preview, and there
         is none -- so the assertion is that it is absent, not inert."""
         self.assertNotIn(XSS_TITLE, self._panel("rollback")["texts"])
+
+    def test_inventory_links_each_pathed_anchor_to_its_file(self) -> None:
+        """No drift report, no recorded paths, no links: a static page has
+        nothing it could honestly offer to open."""
+        self.assertEqual(self._panel("inventory")["links"], [])
+
+    def test_changes_links_only_the_drift_reported_target(self) -> None:
+        self.assertEqual(self._panel("changes")["links"], [])
+
+    def test_rollback_links_pathed_rows_and_the_verified_backup(self) -> None:
+        self.assertEqual(self._panel("rollback")["links"], [])
 
 
 @unittest.skipUnless(NODE, "node is not on PATH -- this suite needs it")
