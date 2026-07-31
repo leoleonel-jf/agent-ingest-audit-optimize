@@ -44,7 +44,9 @@ it writes exactly one file, atomically (temp file, then rename), and never creat
 single-document `validate_collection` pass, same code, not similar code — fails the build with
 `verify`'s own exit semantics, and writes nothing.
 
-**Exit codes.** `0` built; `1` I/O error or overwrite refusal; `2` invalid ledger.
+**Exit codes.** `0` built; `1` I/O error or overwrite refusal; `2` invalid ledger. The gate is
+the same code `dashboard.py verify` runs, so checking a ledger first with `dashboard.py verify
+LEDGER` predicts exactly whether it will build.
 
 **No `--template` flag.** The template is read from the bundle
 (`assets/templates/dashboard.html`) only. Injection replaces the payload island's content and
@@ -167,7 +169,7 @@ Use it when there is no browser to open an HTML file in at all:
 1. Copy `assets/templates/DASHBOARD.md` next to the ledger (or wherever the text view should
    live).
 2. For each token, read the corresponding data straight from `ledger.json` (and, if available,
-   from `dashboard.py drift` / `rollback-preview` output) and replace the token with the
+   from `dashboard.py drift` / `dashboard.py rollback-preview` output) and replace the token with the
    plain-text or table rendering of that data. Each panel section in the template names which
    ledger fields feed its tokens.
 3. Do not invent a value for a token the ledger has nothing for — write the panel's own empty
@@ -217,7 +219,10 @@ an export.
 `Ctrl`/`Cmd`+`K` opens a command palette built once from the payload (never from anything the
 reader types): every record's id and title, and, for `RUN` records, every target's anchor and
 key. Each entry remembers which panel shows it (`MATERIAL`→materials, `PROPOSAL`→provenance,
-`RUN`→changes, `ADR`→decisions, `BASELINE`→inventory; a run's own targets index to provenance,
-where a search for a touched file or key has to land to see every run that touched it). Selecting
+`RUN`→changes, `ADR`→decisions; a run's own targets index to provenance, where a search for a
+touched file or key has to land to see every run that touched it). Baseline item ids are not
+indexed at all: a `BASE-` id renders on no panel, so a palette entry for one could only
+dead-end — baseline items are found through the Inventory panel's own filter (populated by
+`dashboard.py scan`), by name or anchor. Selecting
 a match is exactly a jump to that panel and filter — the palette can reach no view the
 hash-fragment router could not already address on its own.
