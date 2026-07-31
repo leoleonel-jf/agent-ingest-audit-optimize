@@ -3840,6 +3840,21 @@ class DriftDocumentationTests(unittest.TestCase):
         self.assertIn("the baseline recorded that it looked and found nothing", text)
         self.assertIn("configuration arriving from outside", text)
 
+    def test_reference_documents_the_in_file_absence_recheck(self) -> None:
+        # The dogfood's first real finding: an absence recorded inside a file
+        # cannot be re-verified from the file's existence. The recheck, its
+        # redaction mirror, and both degradations are documentation the
+        # reader of a drift report needs to trust an `appeared`.
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "the recheck's entire output is a state and a reason", text
+        )
+        self.assertIn("redact with the same adapter patterns", text)
+        self.assertIn("`pointer_unrecorded`", text)
+        self.assertIn(
+            "the file appearing is exactly the drift it looks like", text
+        )
+
     def test_reference_documents_reverted_cannot_occur_for_a_baseline_item(
         self,
     ) -> None:
@@ -3902,6 +3917,15 @@ class RollbackPreviewDocumentationTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, text)
         self.assertIn("each carrying its state as the reason", text)
+
+    def test_reference_documents_the_target_set_partition(self) -> None:
+        # The dogfood's completeness finding: intact targets under a failed
+        # backup are unrestorable, not unreportable.
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "the backup is what there is to restore *from*", text
+        )
+        self.assertIn("every target appears in exactly one", text)
 
     def test_reference_documents_the_indicator_table(self) -> None:
         # Anchored on the enumeration phrase and cross-checked against the

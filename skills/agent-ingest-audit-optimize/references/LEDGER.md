@@ -671,6 +671,19 @@ of the strongest drift signals there is — configuration arriving from outside.
 occur for a baseline item: there is no before/after pair to revert between, and the report does
 not manufacture one.
 
+An absence recorded *inside* a file is re-verified differently: for an item whose attributes
+carry a recorded `pointer` and `parse` format — what `scan` writes on `pointer_unresolved` and
+pointer-derived `no_match` items — the file's existence answers nothing, because the file existed
+at scan time too, or there would have been no document to walk. `drift` re-resolves the recorded
+location the way `scan` resolved it: parse, redact with the same adapter patterns, walk the same
+pointer. The location still absent or still an empty mapping is `IN_PLACE`; the location
+resolving now is `DRIFTED`, `appeared`; a file that no longer parses is `UNVERIFIABLE`. Nothing
+the parse produces reaches the report — the recheck's entire output is a state and a reason. An
+in-file absence recorded by a baseline that predates the recorded pointer is `UNVERIFIABLE`,
+`pointer_unrecorded`: nothing to re-resolve, no verified answer in either direction. A
+`no_match` item *without* a recorded pointer is a literal, wildcard-free glob that matched
+nothing, and for that item the file appearing is exactly the drift it looks like.
+
 **A run target** compares the current digest against the pair its RUN record carries:
 
 | Current | State |
@@ -722,7 +735,11 @@ All four sets are always present in the report, an empty one as `[]`:
 1. **`will_be_restored`** — targets `IN_PLACE` under a verified backup.
 2. **`will_not_change`** — targets already `REVERTED`.
 3. **`cannot_be_restored`** — targets `DRIFTED` (restoring would destroy a later, unrelated
-   edit), `MISSING`, or `UNVERIFIABLE`, each carrying its state as the reason.
+   edit), `MISSING`, or `UNVERIFIABLE`, each carrying its state as the reason; and, under a
+   backup that failed verification, the `IN_PLACE` targets too, carrying the backup's failure
+   reason — intact and unrestorable, because the backup is what there is to restore *from*.
+   The three target sets partition the run's targets: every target appears in exactly one,
+   whatever the backup did.
 4. **`residual_effects`** — every non-null `residual_effect` on the run's targets, verbatim: the
    tool cannot undo an installed dependency or a published artifact, and the preview's job is to
    make sure nobody believes otherwise.
