@@ -65,8 +65,10 @@ The document carries, verbatim:
 Per the design spec, hash-based `script-src` is not used (unreliable under `file:` across
 browsers). The meta tag is defense in depth; the primary controls are 1.1, 1.2, and the
 zero-network evaluation. No `http://` or `https://` literal may appear anywhere in the
-template or the generated file; the static test enforces this too (the Help panel cites
-record IDs and commands, never URLs).
+*template*; the static test enforces this (the Help panel cites record IDs and commands,
+never URLs). The *generated* file necessarily carries ledger evidence URLs inside the
+payload island as inert JSON string data; they render as text, never as links, and the
+zero-network property rests on the rendering discipline plus the CSP, not on their absence.
 
 ### 1.4 Clipboard actions
 
@@ -177,8 +179,9 @@ keyboard navigation with visible focus, print stylesheet, CSS logical properties
 ## 5. Language
 
 Two dictionaries embedded in the shell: `en`, `pt-BR` — flat JSON objects with identical key
-sets (tested). Resolution: fragment `lang` → payload `lang` → `navigator.language` prefix
-match → `en`. Canonical vocabulary — operating states, drift states, classifications,
+sets (tested). Resolution: fragment `lang` → payload `lang` → stored preference (the
+persistence §4 mandates; effectively static-mode-only, since built payloads always carry a
+`lang`) → `navigator.language` prefix match → `en`. Canonical vocabulary — operating states, drift states, classifications,
 statuses, record IDs, clipboard templates — stays English on screen with translated
 tooltips. Adding a language is data-only.
 
