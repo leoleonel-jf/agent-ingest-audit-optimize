@@ -424,6 +424,7 @@ footer {
   <dl class="meta" id="aio-footer"></dl>
 </footer>
 
+<!-- The aio-payload id below must stay this tag's LAST attribute before the closing ">": ledgerlib.build.inject_payload locates that ">" by scanning forward from the marker, so a later attribute containing ">" would end the tag early and corrupt the splice. -->
 <script type="application/json" id="aio-payload">{"payload_schema":1,"mode":"static","generated_at":null,"tool_version":null,"lang":null,"ledger":null,"computed":null}</script>
 
 <script type="application/json" id="aio-i18n">

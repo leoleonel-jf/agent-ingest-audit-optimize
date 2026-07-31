@@ -584,6 +584,21 @@ class InjectPayloadTests(unittest.TestCase):
         with self.assertRaises(LedgerError):
             inject_payload(template, "{}")
 
+    def test_a_serialized_literal_less_than_is_refused(self) -> None:
+        """M8: belt and braces, independent of `serialize_payload`.
+
+        `serialize_payload` is the control that is supposed to keep a
+        literal `<` out of `serialized` before it ever reaches this
+        function (module docstring, design spec section 1.1), but
+        `inject_payload` does not trust that guarantee blindly -- a
+        malicious or malformed `serialized` string containing a raw `<` is
+        refused here too, rather than spliced verbatim into the document.
+        """
+        malicious = '{"title":"</script><script>alert(1)</script>"}'
+        with self.assertRaises(LedgerError) as ctx:
+            inject_payload(self.real_template(), malicious)
+        self.assertIn("literal '<'", str(ctx.exception))
+
 
 class WriteDashboardTests(BuildTestCase):
     """The overwrite guard and the atomic write, in isolation from `build_command`."""
@@ -632,6 +647,21 @@ class WriteDashboardTests(BuildTestCase):
             write_dashboard("<html>new</html>", out, force=False)
         self.assertFalse(out.parent.exists())
 
+    def test_a_binary_existing_file_refuses_without_crashing(self) -> None:
+        """I2: the overwrite guard reads bytes, not text.
+
+        An existing `out` that happens to hold raw, non-UTF-8 bytes -- a
+        stray binary file at that path, which is exactly the kind of file
+        this guard exists to protect -- must be refused with `LedgerError`,
+        not crash the guard itself with a `UnicodeDecodeError`.
+        """
+        out = self.tmp / "dashboard.html"
+        raw = b"\xff\xfe\x00photo"
+        out.write_bytes(raw)
+        with self.assertRaises(LedgerError):
+            write_dashboard("<html>new</html>", out, force=False)
+        self.assertEqual(out.read_bytes(), raw)
+
 
 class BuildCommandTestCase(BuildTestCase):
     """`build_command` driven directly, the way `dashboard.py build` calls it."""
@@ -640,14 +670,20 @@ class BuildCommandTestCase(BuildTestCase):
         self, ledger_path: Path, out: Path | None, *, lang: str | None = None,
         force: bool = False,
     ) -> int:
-        return build_command(
-            ledger_path,
-            out,
-            lang,
-            force,
-            adapter=self.adapter_path,
-            project=self.tmp,
-        )
+        # `build_command` prints `wrote <path>` on success (dashboard.py's
+        # module docstring lists `build` as the one command that writes a
+        # file); `run_cli` below redirects that to a buffer for the same
+        # reason -- a passing test suite should not spray "wrote ..." lines
+        # into the runner's own stdout.
+        with contextlib.redirect_stdout(io.StringIO()):
+            return build_command(
+                ledger_path,
+                out,
+                lang,
+                force,
+                adapter=self.adapter_path,
+                project=self.tmp,
+            )
 
 
 class BuildCommandOutPathTests(BuildCommandTestCase):
@@ -729,6 +765,48 @@ class BuildCommandExitCodeTests(BuildCommandTestCase):
         self.assertEqual(code, 2)
         self.assertFalse(out.exists())
         self.assertIn("Duplicate record id", buf.getvalue())
+
+
+class BuildCommandTemplateGuardTests(BuildCommandTestCase):
+    """I1: `build_command` guards the template read and the injection step.
+
+    Before this fix, `TEMPLATE_PATH.read_text` and `inject_payload` in
+    `build_command` ran outside any `try`/`except`: an unreadable template
+    (moved, deleted, permissions) raised an uncaught `OSError`, and a
+    template that lost its island raised an uncaught `LedgerError` -- both
+    would have crashed the CLI with a traceback instead of a clean exit
+    code and a stderr message.
+    """
+
+    def test_a_missing_template_path_exits_1_with_a_message_and_writes_nothing(
+        self,
+    ) -> None:
+        ledger_path = self.write_ledger(self.valid_ledger())
+        out = self.tmp / "dashboard.html"
+        missing_template = self.tmp / "no-such-template.html"
+        buf = io.StringIO()
+        with mock.patch("ledgerlib.build.TEMPLATE_PATH", missing_template):
+            with contextlib.redirect_stderr(buf):
+                code = self.run_build(ledger_path, out)
+        self.assertEqual(code, 1)
+        self.assertIn(repr(str(missing_template)), buf.getvalue())
+        self.assertFalse(out.exists())
+
+    def test_a_template_with_no_island_exits_1_with_the_count_guard_message(
+        self,
+    ) -> None:
+        ledger_path = self.write_ledger(self.valid_ledger())
+        out = self.tmp / "dashboard.html"
+        bad_template = self.write(
+            self.tmp / "bad-template.html", "<html><body>no island</body></html>"
+        )
+        buf = io.StringIO()
+        with mock.patch("ledgerlib.build.TEMPLATE_PATH", bad_template):
+            with contextlib.redirect_stderr(buf):
+                code = self.run_build(ledger_path, out)
+        self.assertEqual(code, 1)
+        self.assertIn("found 0", buf.getvalue())
+        self.assertFalse(out.exists())
 
 
 class BuildCommandLanguageTests(BuildCommandTestCase):
@@ -870,6 +948,36 @@ class BuildCliTests(BuildCliTestCase):
             code, _, _ = self.run_cli(*self.build_arguments(ledger_path, out))
         self.assertEqual(code, 0)
         spy.assert_called_once()
+
+    def test_user_config_flag_reaches_build_payload(self) -> None:
+        """M10: `--user-config` is wired all the way from argv to the call.
+
+        `build_arguments` never passes `--user-config`, so a spy that only
+        `wraps` `build_payload` (as the test above does) would not notice
+        this flag being dropped anywhere along the way. This test adds the
+        flag explicitly and inspects the actual keyword arguments
+        `build_payload` was called with.
+        """
+        ledger_path = self.write_ledger(self.valid_ledger())
+        out = self.tmp / "dashboard.html"
+        with mock.patch(
+            "ledgerlib.build.build_payload", wraps=build_payload
+        ) as spy:
+            code, _, _ = self.run_cli(
+                "build",
+                str(ledger_path),
+                "--out",
+                str(out),
+                "--adapter",
+                str(self.adapter_path),
+                "--project",
+                str(self.tmp),
+                "--user-config",
+                str(self.user_config),
+            )
+        self.assertEqual(code, 0)
+        spy.assert_called_once()
+        self.assertEqual(spy.call_args.kwargs["user_config"], self.user_config)
 
 
 if __name__ == "__main__":

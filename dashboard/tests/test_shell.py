@@ -421,6 +421,28 @@ class PayloadIslandTests(ShellTemplateTestCase):
         self.assertIsNone(payload["ledger"])
         self.assertIsNone(payload["computed"])
 
+    def test_payload_island_id_attribute_is_the_tags_last_attribute(self) -> None:
+        """M9: `id="aio-payload"` must stay the tag's LAST attribute before `>`.
+
+        `inject_payload` locates the splice point by scanning forward from
+        the marker for the first `>` (a comment beside that scan, and a
+        mirror comment on this very tag, both say so). If a later attribute
+        were added after the marker, that scan would still stop at the
+        first `>` it finds -- which would then belong to the wrong
+        attribute -- and corrupt the splice. This regexes the actual
+        shipped opening tag rather than merely asserting the marker string
+        appears somewhere in the document, so a later attribute added after
+        `id="aio-payload"` fails this test rather than silently reaching a
+        build.
+        """
+        match = re.search(r'<script\b[^>]*id="aio-payload"[^>]*>', self.text)
+        self.assertIsNotNone(match, "the aio-payload island tag was not found")
+        tag = match.group(0)
+        self.assertTrue(
+            tag.endswith('id="aio-payload">'),
+            f"id=\"aio-payload\" is not the tag's last attribute: {tag!r}",
+        )
+
 
 class ProhibitedTokenTests(ShellTemplateTestCase):
     """Design spec section 1.2: the sinks that are simply not in the file."""

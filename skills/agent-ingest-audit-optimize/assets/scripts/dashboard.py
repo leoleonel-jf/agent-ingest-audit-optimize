@@ -87,6 +87,14 @@ from ledgerlib.paths import (  # noqa: E402
     load_json,
     resolve_anchored,
 )
+from ledgerlib.build import (  # noqa: E402
+    TEMPLATE_PATH,
+    build_command,
+    build_payload,
+    inject_payload,
+    serialize_payload,
+    write_dashboard,
+)
 from ledgerlib.drift import (  # noqa: E402
     DRIFT_REASONS,
     classify_item,
@@ -98,14 +106,6 @@ from ledgerlib.rollback import (  # noqa: E402
     BACKUP_REASONS,
     rollback_preview,
     rollback_preview_command,
-)
-from ledgerlib.build import (  # noqa: E402
-    build_command,
-    build_payload,
-    inject_payload,
-    serialize_payload,
-    write_dashboard,
-    TEMPLATE_PATH,
 )
 from ledgerlib.scan import (  # noqa: E402
     PARSE_ERRORS,

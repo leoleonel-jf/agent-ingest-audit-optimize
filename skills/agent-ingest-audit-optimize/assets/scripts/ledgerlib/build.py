@@ -335,6 +335,13 @@ def inject_payload(template_text: str, serialized: str) -> str:
         )
     marker_at = template_text.index(_ISLAND_MARKER)
     try:
+        # `id="aio-payload"` must remain the tag's LAST attribute before this
+        # `>`: this scan takes the first `>` after the marker as the tag's
+        # close, so a later attribute containing a literal `>` (in a quoted
+        # value, say) would end the tag early and corrupt the splice. The
+        # mirror of this comment lives on the island tag itself in
+        # `assets/templates/dashboard.html`, and `test_shell.py` pins the
+        # ordering statically.
         tag_end = template_text.index(">", marker_at) + 1
         content_end = template_text.index("</script", tag_end)
     except ValueError as exc:
@@ -342,6 +349,15 @@ def inject_payload(template_text: str, serialized: str) -> str:
             "the dashboard template's aio-payload island is malformed: no "
             "closing </script found after the marker"
         ) from exc
+    if "<" in serialized:
+        # Belt and braces: `serialize_payload` is the sole control that keeps
+        # a literal `<` out of `serialized` (module docstring, design spec
+        # section 1.1), but this function does the actual splicing, so it
+        # refuses to trust that upstream guarantee blindly and checks again
+        # immediately before it matters.
+        raise LedgerError(
+            "payload serialization produced a literal '<'; refusing to inject"
+        )
     return template_text[:tag_end] + serialized + template_text[content_end:]
 
 
@@ -356,23 +372,30 @@ def write_dashboard(html: str, out: Path, *, force: bool) -> None:
     nothing to do with this tool.
 
     The write itself goes through a temporary file created in `out`'s own
-    directory, then `os.replace`, so a reader never observes a partially
-    written dashboard and a crash mid-write never corrupts a file that
-    already existed. `out`'s directory is never created -- a missing parent
-    is a caller error, not something this function silently repairs -- and
-    on any failure the temporary file is removed on a best-effort basis
-    before the exception propagates, so a failed build leaves no stray
-    `.tmp` file behind.
+    directory, then `os.replace`. `os.replace` is what this guarantees: a
+    reader never observes a partially written dashboard, because the rename
+    is the one step that makes the new content visible and it either
+    happens wholly or not at all. Whether that rename itself survives a
+    concurrent crash or power loss is the filesystem's affair, not a promise
+    this function makes. `out`'s directory is never created -- a missing
+    parent is a caller error, not something this function silently repairs
+    -- and on any failure the temporary file is removed on a best-effort
+    basis before the exception propagates, so a failed build leaves no
+    stray `.tmp` file behind.
     """
     if out.exists() and not force:
         try:
-            existing = out.read_text(encoding="utf-8")
+            # Bytes, not text: an existing `out` that happens to hold
+            # non-UTF-8 content (a stray binary file at that path, say) must
+            # not crash the overwrite guard with a `UnicodeDecodeError` --
+            # it is exactly the kind of file this guard exists to protect.
+            existing = out.read_bytes()
         except OSError as exc:
             raise LedgerError(
                 f"cannot read existing file {str(out)!r} to check the "
                 f"overwrite guard: {exc}"
             ) from exc
-        if _ISLAND_MARKER not in existing:
+        if _ISLAND_MARKER.encode("utf-8") not in existing:
             raise LedgerError(
                 f"refusing to overwrite {str(out)!r}: it does not look like a "
                 "generated dashboard (no aio-payload marker); pass --force to "
@@ -475,8 +498,18 @@ def build_command(
         print(message, file=sys.stderr)
 
     serialized = serialize_payload(payload)
-    template_text = TEMPLATE_PATH.read_text(encoding="utf-8")
-    html = inject_payload(template_text, serialized)
+    try:
+        template_text = TEMPLATE_PATH.read_text(encoding="utf-8")
+        html = inject_payload(template_text, serialized)
+    except LedgerError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(
+            f"cannot read the dashboard template {str(TEMPLATE_PATH)!r}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
 
     try:
         write_dashboard(html, out_path, force=force)
@@ -484,7 +517,7 @@ def build_command(
         print(exc, file=sys.stderr)
         return 1
     except OSError as exc:
-        print(f"cannot write {out_path}: {exc}", file=sys.stderr)
+        print(f"cannot write {str(out_path)!r}: {exc}", file=sys.stderr)
         return 1
 
     print(f"wrote {out_path}")
