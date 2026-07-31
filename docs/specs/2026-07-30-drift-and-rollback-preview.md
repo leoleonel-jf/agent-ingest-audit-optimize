@@ -210,6 +210,16 @@ checked first and short-circuits nothing else (the sets are still reported). `AT
 backup verifies but any target is `DRIFTED` or any residual effect exists. `HEALTHY` when the
 backup verifies, every target is `IN_PLACE`, and no residual effects exist.
 
+Design spec §11's table, read literally, leaves one run unclassified: backup verified, a target
+`MISSING` or `UNVERIFIABLE`, nothing `DRIFTED`, no residuals — not `HEALTHY` (a target is not
+`IN_PLACE`), not `AT_RISK` (nothing drifted, no residuals), not `BROKEN` (the backup verifies).
+This spec closes the gap as `AT_RISK`: a rollback that cannot restore everything is at risk by
+the same rationale that puts those targets in `cannot_be_restored`. The condition column for
+`AT_RISK` is therefore "backup verified but at least one target not `IN_PLACE`, or residual
+effects exist", and `REVERTED` targets alone do not disturb `HEALTHY`'s spirit but do disturb its
+letter — a run whose targets all reverted has nothing left to restore, and reporting it `HEALTHY`
+would claim a rollback story it no longer has, so `REVERTED` counts as not-`IN_PLACE` here too.
+
 Exit codes: `0` for `HEALTHY`, `1` for `AT_RISK` or `BROKEN`, `2` for tool error. A CI gate can
 therefore refuse to proceed past a run whose rollback story has decayed.
 
