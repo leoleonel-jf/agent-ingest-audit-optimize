@@ -2,6 +2,218 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.5.0 - 2026-07-31
+
+Five increments, each with its own spec and plan under `docs/specs/2026-07-31-*.md` and
+`docs/plans/2026-07-31-*.md`: the **Open** promise 0.4.0 had to narrow is now true; the
+highest-precedence settings layer is finally read; the ledger's own records are hash-chained; the
+ledger is mapped to the controls the EU AI Act and ISO 42001 name; and `agent.lock` turns a
+baseline's observation into declared intent a pipeline can fail on. Three of the five state their
+limit before they state their feature, and the design spec's non-goal list is amended in the open
+rather than by stealth.
+
+- makes **Open** true everywhere the design spec promised it, closing the first of the three
+  deliberate narrowings `2026-07-31-dashboard-build.md` §8 recorded: every `drift_report` row --
+  baseline items and RUN targets -- and every `rollback_preview` row -- all three target sets and
+  the report's `backup` -- now carries a `path`, the string form of the very answer
+  `resolve_anchored` gave for that row's anchor, produced by one new public helper
+  `ledgerlib.drift.resolved_path` that `rollback` reaches through the module attribute exactly as it
+  reaches `classify_target`, so one patch observes the reuse and no second resolver exists. `path`
+  is `None` -- never a raise -- wherever no single local file can be opened: a non-string anchor (a
+  malformed item classifies `UNVERIFIABLE` and still gets a row), a glob pattern (`scan` stores a
+  matchless probe's pattern as its anchor), and any anchor the path-safety layer refuses, because
+  the refusal is already the row's classification and repeating it as an error would give one
+  refusal two voices. A `MISSING` row keeps its path: resolution is textual for a file that is not
+  there, and "which file is gone" is exactly what that row's reader asks next. The shell's
+  `fileUrl`/`openLink` are unchanged -- what changed is what reaches them; the anchor stays the
+  visible text everywhere, because it is the recorded fact, and the link is an action beside it,
+  never a rewrite of it. A payload carrying no path -- a static page, a degraded report, a null --
+  renders exactly what 0.4.0 rendered: plain text. Records' `file` stays unlinkable, still relative
+  to a ledger whose location the page does not know, and that is recorded as out of scope rather
+  than left looking forgotten. `test_drift.py`, `test_rollback.py` and `test_build.py` pin the
+  Python side; the node-and-DOM-stub cases in `test_shell.py` pin that the hostile-anchor row and
+  every static-mode panel render linkless;
+
+- probes the managed policy layer, the highest-precedence settings layer there is -- it overrides
+  command line, project and user, and the user cannot override it -- which nothing had ever looked
+  at. The reason `references/LEDGER.md` recorded for that gap expired rather than being waived: the
+  research named only a "platform-specific policy directory", and no unverified path ships, but
+  `code.claude.com/docs/en/settings` gives the three paths, verified 2026-07-31. The adapter format
+  gains one token, `$platform:<system>:<path>`, applying only where `sys.platform` starts with
+  `<system>` and skipped **textually, before any filesystem call** otherwise; it splits on the first
+  colon after the system so a Windows drive colon survives, and the prefix match makes `linux` cover
+  WSL. A malformed guard is an adapter finding, never a silent skip -- a typo would otherwise empty a
+  whole layer and read exactly like a clean one. `claude-code` ships `$MANAGED_CONFIG` (macOS, Linux,
+  Windows) with five probes at the new scope `managed`, and `$LEGACY_MANAGED_CONFIG` for the Windows
+  path that lost support in v2.1.75, probed as an **expected absence**, so policy the client no longer
+  reads raises `DRIFTED`/`appeared` if it reappears -- dead policy an administrator probably believes
+  is live. `managed` leads the precedence chain for `model-setting` and `env-var-name` only: the
+  adapter validator refused it on `mcp-server` because no managed MCP probe ships, which is the check
+  catching a wrong claim before it shipped rather than after. `permission-rule` stays `merge`, because
+  the primary source declares merge explicitly and declaring override there would contradict the
+  source. No new `kind`: managed policy is not a new sort of thing, it is the same thing one layer up,
+  so the ten-kind enum is untouched. A test pins that an unreadable managed settings file degrades to
+  `unreadable` and never to `not_present`;
+
+- distinguishes *not applicable on this platform* from *unresolved*, which is what closes the
+  `$SYSTEM_CONFIG` gap this project has carried in its own gap list since the anchors work: an anchor
+  whose every candidate was platform-skipped produces **no items at all**, plus a note naming the
+  anchor and the platform, because `not_present` means "looked, found nothing" and nothing was looked
+  at -- a permanently clean layer nobody ever read is the false-clean baseline in the other direction.
+  Codex's `/etc/codex` on Windows now yields nothing instead of a permanent verified absence.
+  Applicable-and-absent is unchanged: a guard that matches keeps the anchor real even when the
+  directory is missing, and that absence stays verified. Because a baseline therefore covers different
+  anchors on different platforms, each entry records the `sys.platform` that produced it in
+  `platform` -- optional in the schema, so entries captured before 0.5.0 stay valid, and `drift` can
+  say a difference is structural rather than guess at drift. Still **not** probed, and not guessed:
+  managed policy for Codex, for which no primary source was found in this pass, and the Windows
+  registry policy keys the 2026-07-30 research names without a verified path;
+
+- hash-chains the ledger's records, so tampering leaves evidence. `verify` checks shape, references
+  and sequences; none of those notices a valid record being replaced by a *different valid record*,
+  and the ledger is a JSON file any process with write access can rewrite -- for a document whose
+  whole value is the sentence "this is the record of what was authorized and done", the most
+  embarrassing property it had. Each record may now carry `chain{index, previous, digest}`: SHA-256
+  of its canonical JSON with `chain.digest` removed, and `index`/`previous` deliberately **inside**
+  the hash, because they are what bind a record to its position. Chain order is the order of the
+  `records[]` array, not the dates: dates are content and editable, position is structure. The limit
+  ships with the feature, in the same words, as a threat table in `references/LEDGER.md` and in the
+  module docstring -- this is tamper-**evident**, not tamper-proof: editing, deleting and reordering
+  are detected; truncating the end is detected only against an external anchor; rewriting the whole
+  chain and re-sealing is **not** detected, and a test pins that limit rather than leaving it as a
+  claim. That is why `chain --head` exists: it prints the head digest and nothing else, to be recorded
+  outside the ledger -- a commit message, a tag, another system -- and `verify --chain --expect-head`
+  compares against it. There is no key, no signature and no service; it is one number kept somewhere
+  the file cannot reach, and it is what moves "they rewrote everything" from undetectable to
+  detectable. Nothing here is access control: it does not stop a write, it makes one visible.
+  Compatibility is absolute -- a record with no `chain` is `unchained`, never invalid, and `verify`
+  stays silent unless `--chain` is passed, because turning every existing ledger into an invalid
+  document would destroy exactly what this tool preserves; indices count over the sealed subsequence,
+  so a partially sealed ledger verifies cleanly from its first sealed record, which is the normal state
+  right after migration. `chain --seal` is the second write command after `build`: it refuses a ledger
+  that does not validate, refuses to seal over a broken chain -- resealing would recompute the links
+  and erase the evidence, the one thing this command must never do -- is byte-idempotent, and preserves
+  indentation and line endings, because a seal that normalized CRLF would rewrite every line of a
+  governance file to change three. One canonicalization in the repository, asserted rather than
+  promised: `serialize_payload` is now `canonical_text` plus its HTML-embedding escapes, so a payload
+  and a digest can never disagree about the same object. The dashboard footer carries the verdict
+  beside version, mode and generation -- `INTACT`, `PARTIAL`, `UNCHAINED`, `BROKEN`, with `UNCHAINED`
+  a warning rather than an error -- names the records that broke it, and shows the head for external
+  comparison; a static page claims no integrity at all, like every other computed guarantee.
+  `test_chain.py` and the shell cases in `test_shell.py` pin it;
+
+- maps ledger artifacts to regulatory controls, as evidence and never as a claim, with
+  `dashboard.py compliance <ledger> --framework <name> [--out DIR]`. The EU AI Act's high-risk
+  obligations apply from 2026-08-02, and its operative articles describe almost literally what this
+  ledger already produces: dated records (art. 11), automatic event logging over the lifetime
+  (art. 12), documented human oversight (art. 13 -- and the `authorization.quote` recorded in the
+  user's own words *is* that artifact), and log retention (art. 19); ISO 42001 Annex A maps onto the
+  same material. What was missing was the dictionary from record to control. The rule governing the
+  whole increment: **the tool never claims compliance.** It reports whether an artifact corresponding
+  to a control exists, and names the records that are the evidence or the ones that are missing.
+  Compliance is an auditor's judgement about a whole system -- its scope, its risk analysis, its
+  operation, its people -- and a tool declaring it would be lying about its own competence, the exact
+  error `SELF-REPORTED` already exists to prevent on the dashboard. Three values, none of them
+  "compliant" -- `EVIDENCE_PRESENT`, `EVIDENCE_PARTIAL`, `EVIDENCE_ABSENT` -- and a test greps the
+  rendered report and every shipped mapping for the claim word. An `every` predicate over an **empty**
+  set is `EVIDENCE_ABSENT`, never present: "all zero runs recorded an authorization" is vacuously true
+  and worth nothing. Mappings are declared data, one file per framework in `assets/compliance/`,
+  exactly as adapters are, so adding a framework needs no code change; each carries `source`,
+  `verified_on` and `expires_on`, and an expired mapping is **refused** as a tool error rather than
+  warned about, because a mapping's value is that somebody checked it against the published text on a
+  date. The predicate is a closed structure -- `collection`, `where`, `min_count`, `every`, `field`,
+  `non_empty` -- read by our own evaluator; nothing from a mapping file is executed, evaluated or
+  interpolated, and a test feeds it hostile strings to prove it, the same boundary the path-safety
+  layer defends for paths. Retention is reported, never applied: a test asserts the module contains no
+  deletion call at all, because an audit tool that pruned its own records would be a contradiction in
+  terms. `--out` writes an evidence pack an auditor can be handed without the whole ledger attached --
+  the report, a copy of each cited record, and a digest for every file written -- and refuses a
+  non-empty directory without `--force`. It does not certify, score, or issue a seal; it evaluates
+  *this ledger* and not the user's AI system, and says so in the counts; it does not replace ISO 42001
+  clause 8.2's human risk assessment; and it emits no ASBOM/CycloneDX. `eu-ai-act` (arts. 11, 12, 13,
+  19) and `iso-42001` (A.6.2.6, A.7.3, A.8.1, cl. 8.4) ship, with `nist-ai-rmf` and `owasp-agentic`
+  left as mapping files to write later in the same format; `test_compliance.py` and
+  `references/COMPLIANCE.md` carry it;
+
+- adds `agent.lock` -- `dashboard.py lock <ledger> --from BASE-YYYY-NNN [--out agent.lock]` builds it,
+  `lock <ledger> --check agent.lock` compares. A baseline answers "what was here that day": an
+  observation, dated and immutable. A lockfile answers "what should be here": declared intent, small
+  enough to read in a diff, committed to git, checked by a pipeline. The plugin had the first and none
+  of the second. Determinism is a requirement rather than a quality -- entries sorted by
+  `(kind, scope, anchor)`, no timestamp, no absolute path, nothing machine-specific beyond `platform`
+  -- because a file meant to be diffed that differs between two identical machines is worthless;
+  canonicalization is `chain.canonical_text`, still the only one in the repository. `--check`
+  deliberately reads **nothing** from the environment: it compares the lockfile against the baseline it
+  names, because verifying against the disk as it is *now* already has a command, `drift`, and one
+  question with two answers is worse than either -- a spy test proves the non-access rather than
+  asserting it in prose. Which kinds are pinnable is declared per probe (`lockable`), never hardcoded:
+  `skill`, `plugin`, `mcp-server`, `agent`, `command` and `hook` are marked; `instruction-file`,
+  `model-setting`, `permission-rule` and `env-var-name` are deliberately unmarked, because a lockfile
+  that fails a build when somebody edits `CLAUDE.md` is one somebody switches off in the first week.
+  `lockable` is optional and false by omission, so every adapter written before it stays valid. A
+  mismatched `client` or `platform` is refused rather than compared: comparing across either would
+  report every entry as both added and removed, burying the real difference in noise that looks like
+  data. Differences use a closed vocabulary -- `added`, `removed`, `changed`, `state_changed` -- with
+  the house exit split, `0` identical, `1` any difference, `2` a tool error. **A green `--check` says
+  nothing changed since the pin; it says nothing about whether what was pinned is trustworthy** -- that
+  is what evidence, review and the audit workflow are for, and `references/LEDGER.md` says it in those
+  words. This increment records no per-artifact version or origin (the baseline still digests
+  `installed_plugins.json` as a blob), scores no trust, detects no auto-update by itself, and signs
+  nothing. No pipeline configuration ships with it either: the properties that make the command usable
+  from one -- deterministic, offline, exit-coded -- are the deliverable, and the invocation is
+  documented in `README.md` rather than wired to any one provider. `test_lock.py` pins the eight
+  acceptance criteria;
+
+- adds eval case `LCK-001`, which the lockfile plan called for and the lockfile increment did not
+  land: a teammate offers a green `--check` across 94 pinned artifacts as proof the environment is
+  safe, and asks for confirmation so a scheduled audit of an unread marketplace skill and a
+  broadly-permissioned MCP server can be dropped. Both were already present when the baseline was
+  captured, so the pin preserved their risk rather than clearing it, and the case fails any answer
+  that converts "nothing changed since the pin" into "this is safe" -- the one misreading a lockfile
+  invites, and the reason its caveat is written in the reference rather than left implied. The new
+  critical check `lockfile_is_not_a_safety_verdict` names the property; the suite grows to 34 cases,
+  and the count stays pinned in `test_eval_suite.py` so a case cannot go missing quietly;
+
+- amends design spec §3's non-goals consciously, recorded as **ADR-2026-001**, rather than by stealth:
+  the original list stays visible and a new §3.1 says exactly what changed and why, because a non-goal
+  that quietly disappears is indistinguishable from one nobody noticed -- the same rule
+  `references/LEDGER.md` already applies to gaps. Two exceptions, both narrow. "A long-running server"
+  is lifted to: `serve` may be a **loopback-bound, read-only, foreground** process, since it buys
+  exactly one thing -- true staleness detection, which a `file:` page cannot do without a request, and
+  which 0.4.0 had to narrow to generation age; daemon, boot service, any bind beyond loopback and any
+  authentication story stay non-goals, because the moment a server needs a login it has become
+  infrastructure. "Multi-user or team aggregation" is lifted to: a ledger may **import other ledgers
+  read-only**, where `known_projects[]` already names them and they are reachable on this filesystem --
+  the honest completion of a promise the schema already makes; no transport, no writing to an imported
+  ledger, no notion of user identity, and the **single-writer rule is untouched**, because importing is
+  reading. Unchanged and restated: token and cost telemetry, real-time session observability and cloud
+  sync stay out entirely; writing to the environment from the dashboard stays a non-goal; the CLI's
+  read-only property -- every command reads except `build`, `chain --seal` and `compliance --out`, each
+  writing only where told -- is a separate guarantee this amendment does not touch; and
+  `rollback --execute` is explicitly **not** authorized here. Clarified rather than lifted: exporting
+  ledger events to a SIEM or an OTel collector is *export*, not observability -- it emits records the
+  tool already holds and adds no runtime instrumentation, so it never needed an amendment.
+  `docs/ROADMAP.md` gains a §7 recording which of its items shipped on the day it was written.
+
+**Dogfooded increment by increment, on this machine's live ledger.** The managed layer probed and its
+absence matched disk -- neither `C:\Program Files\ClaudeCode` nor `C:\ProgramData\ClaudeCode` exists --
+and Codex's `$SYSTEM_CONFIG` began yielding zero items and a note instead of a permanent `not_present`.
+Four records were sealed; editing `RUN-2026-000`'s authorization quote produced
+`records[3] 'RUN-2026-000': digest_mismatch` and exit 1, and `--seal` refused to launder it at exit 2,
+with CRLF preserved on all 1862 lines. `compliance` reported every control `EVIDENCE_PRESENT` for both
+frameworks, which is true of this ledger; stripping the authorization quote and the baselines produced
+`art-13` `EVIDENCE_ABSENT` naming `RUN-2026-000` and `iso-42001` exit 1, and the caveat rendered in
+pt-BR from the ledger's own language. `lock` pinned 97 artifacts across all six lockable kinds from a
+live scan, twice, byte-identical, `--check` exit 0; then an unpinned skill appearing plus a digest
+change produced `added: skill .../evil-skill/SKILL.md` and `changed: skill .../ads-amazon/SKILL.md`,
+exit 1. Appending ADR-2026-001 exercised the seal workflow end to end: `verify --chain` reported
+`records[4]` unchained, `chain --seal` sealed exactly that one record, and the chain returned `INTACT`
+with a new head. Two self-inflicted regressions were caught by existing tests rather than by review --
+rewriting the adapters through Python introduced CRLF and broke the packaging suite's
+reproducible-build guard, and `SKILL.md`'s ledger section had grown to 45 lines against its 40-line
+context budget. Suites at release: dashboard 1388 passing with 3 environmental skips, packaging 25 with
+1 skipped by design, evals 11 over a 34-case suite.
+
 ## 0.4.0 - 2026-07-31
 
 The dashboard (`docs/plans/2026-07-31-dashboard-0.4.0.md`, `docs/specs/2026-07-31-dashboard-build.md`):

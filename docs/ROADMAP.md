@@ -174,6 +174,15 @@ recomendada no §6. Cada um tem spec e plano próprios em `docs/specs/` e `docs/
 | Política gerenciada + `$platform:` | Pilar I, 0.5.0 | **em `main`** (PR #15) |
 | Ledger encadeado por hash + `chain --head` | Pilar II, 0.6.0 | **em `main`** (PR #16) |
 | Mapeamento de conformidade (EU AI Act, ISO 42001) | Pilar III, antecipado | **em `main`** (PR #17) |
+| `agent.lock` + emenda ao §3 (ADR-2026-001) | Pilar III, 0.7.0 | **em `main`** (PR #19) |
+
+**Os rótulos de versão foram absorvidos, não cumpridos um a um.** Os cinco itens acima saíram
+juntos como **0.5.0**: são todos aditivos e nenhum quebra compatibilidade, então semver diz 0.5.0,
+e o §4 já avisava que as versões eram sequência lógica e não promessa. O que sobra de 0.6.0 a 0.8.0
+não é o que está escrito lá — é o resto de cada pilar: assinatura opcional e `at <data>` (Pilar II),
+proveniência por artefato, detecção de auto-update e varredura de injeção (0.7.0), ASBOM/CycloneDX,
+export para SIEM e `due` (0.8.0). Renumerar o §4 sem ter executado seria inventar histórico; a
+tabela acima é o registro, e o §4 fica como estava escrito no dia.
 
 Duas coisas que o próprio trabalho ensinou, e que mudam o resto do roadmap:
 
