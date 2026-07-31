@@ -5758,12 +5758,15 @@ class DashboardReferenceLockstepTests(unittest.TestCase):
             )
 
     def test_reference_names_every_command(self) -> None:
+        # A bare substring check has no teeth for "build": incidental prose
+        # ("rebuild", "building") keeps it alive after every real command
+        # mention is renamed. Require the invocation form instead.
         text = DASHBOARD_REFERENCE.read_text(encoding="utf-8")
         for command in DASHBOARD_COMMANDS:
             self.assertIn(
-                command,
+                f"dashboard.py {command}",
                 text,
-                f"references/DASHBOARD.md never mentions command {command!r}",
+                f"references/DASHBOARD.md never shows `dashboard.py {command}`",
             )
 
 
