@@ -112,9 +112,9 @@ PANEL_IDS = (
 TASK_4_RENDERERS = (
     "function renderOverview(section)",
     "function renderInventory(section, state)",
-    "function renderBacklog(section)",
+    "function renderBacklog(section, state)",
     "function renderDecisions(section, state)",
-    "function renderMaterials(section)",
+    "function renderMaterials(section, state)",
     "function renderHelp(section)",
 )
 
@@ -122,9 +122,9 @@ TASK_4_RENDERERS = (
 # instructional fall-through in `renderPanels` is unreachable -- it stays as
 # the guard for a tenth panel added without one.
 TASK_5_RENDERERS = (
-    "function renderChanges(section)",
-    "function renderProvenance(section)",
-    "function renderRollback(section)",
+    "function renderChanges(section, state)",
+    "function renderProvenance(section, state)",
+    "function renderRollback(section, state)",
 )
 
 # The severity vocabulary, worst first. The rank is the index, so this tuple
@@ -441,6 +441,11 @@ ISLAND = re.compile(
 HREF = re.compile(
     r"""href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.IGNORECASE
 )
+
+# Every `id="..."` in the shipped markup. Feeds the DOM stub's fail-closed
+# `getElementById`, so the runtime harness renders against the elements the
+# template really carries and nothing else.
+ELEMENT_ID = re.compile(r'\sid="([A-Za-z0-9_-]+)"')
 
 # Every attribute a browser will dereference on its own, not just `src`.
 # Case-insensitive because HTML attribute names are: `SRC=` fetches exactly
@@ -2107,8 +2112,16 @@ def boot_shell(
     seeded = dict(islands)
     seeded["aio-payload"] = serialize_payload(payload)
 
+    # Every id the template really ships, so the stub can answer null for
+    # anything else instead of conjuring an element. Without this an
+    # ablation that deletes an element from the body is invisible to every
+    # runtime case: the shell asks for it, the stub invents it, and the page
+    # under test is not the page that shipped.
+    ids = sorted(set(ELEMENT_ID.findall(text)))
+
     preamble_lines = [
         "globalThis.__AIO_ISLANDS__ = " + json.dumps(seeded) + ";",
+        "globalThis.__AIO_ELEMENT_IDS__ = " + json.dumps(ids) + ";",
         'globalThis.__AIO_HASH__ = "";',
         'globalThis.__AIO_LANG__ = "en";',
     ]
@@ -2116,8 +2129,14 @@ def boot_shell(
         preamble_lines.append("globalThis." + name + " = " + json.dumps(value) + ";")
     preamble_lines.append("")
     preamble = "\n".join(preamble_lines)
+    # The preamble goes *before* the stub. It used to go after, which meant
+    # every global the stub reads at definition time -- `__AIO_HASH__` and
+    # `__AIO_LANG__` -- was still undefined when it read them, so the shell
+    # always booted on an empty fragment however a caller seeded it. Task 7
+    # boots on `#panel=...&f=...` to test a bookmarked filter, which is the
+    # case that made the ordering matter.
     script = "\n".join(
-        (DOM_STUB.read_text(encoding="utf-8"), preamble, wired, probe)
+        (preamble, DOM_STUB.read_text(encoding="utf-8"), wired, probe)
     )
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "shell_panels.js"
@@ -2725,13 +2744,13 @@ class PanelRendererSourceTests(ShellTemplateTestCase):
         the shell.
         """
         for signature in (
-            "function renderChanges(section)",
+            "function renderChanges(section, state)",
             "function runBlock(record, states)",
             "function targetRow(target, states)",
-            "function renderProvenance(section)",
+            "function renderProvenance(section, state)",
             "function chainBlock(entry, byId, expired)",
             "function chainList(record, byId, expired)",
-            "function renderRollback(section)",
+            "function renderRollback(section, state)",
             "function rollbackBlock(record, preview)",
             "function setRow(row, withReason)",
         ):
@@ -2825,11 +2844,11 @@ class PanelRendererSourceTests(ShellTemplateTestCase):
         """
         for renderer in (
             "function renderInventory(section, state)",
-            "function renderBacklog(section)",
+            "function renderBacklog(section, state)",
             "function renderDecisions(section, state)",
-            "function renderMaterials(section)",
-            "function renderChanges(section)",
-            "function renderRollback(section)",
+            "function renderMaterials(section, state)",
+            "function renderChanges(section, state)",
+            "function renderRollback(section, state)",
             # Provenance sorts two lists -- the anchors, and the runs under
             # each -- and both happen inside the index it builds, so that is
             # the function the rule has to hold in.
@@ -2856,7 +2875,7 @@ class PanelRendererSourceTests(ShellTemplateTestCase):
         below checks the rendered tree itself rather than only the source.
         """
         for signature in (
-            "function renderMaterials(section)",
+            "function renderMaterials(section, state)",
             "function materialRow(record, expired)",
             # Where the source actually lands since Task 5 shared this list
             # with the Provenance chain.
@@ -4466,6 +4485,945 @@ class RuntimeClipboardApiTests(ShellTemplateTestCase):
     def test_the_reader_was_told_the_copy_succeeded(self) -> None:
         dicts = json.loads(self.islands["aio-i18n"])["en"]
         self.assertEqual(self.facts.get("live"), dicts["action.copied"])
+
+
+# --- Task 7: palette, filters, density, accessibility, print ------------
+
+# The keys Task 7 adds. Named here rather than derived from the template so
+# a key deleted from both dictionaries fails rather than passes quietly.
+TASK_7_KEYS = (
+    "action.palette",
+    "palette.title",
+    "palette.label",
+    "palette.results",
+    "palette.truncated",
+    "palette.empty",
+    "palette.close",
+    "filter.bar",
+    "filter.active",
+    "filter.clear",
+    "filter.count",
+    "filter.matches",
+    "filter.empty",
+    "filter.never_hidden",
+)
+
+
+class ShellChromeSourceTests(ShellTemplateTestCase):
+    """Brief step 1: the accessibility and print guarantees, read off the file.
+
+    Greps, and brittle in the same way `GateSourceTests` is brittle. Their
+    job is the same: a guarantee that was quietly deleted -- the live
+    region, the focus ring, the print rules that unfold `details` -- should
+    take a named test with it rather than degrade in silence on somebody
+    else's machine.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.shell = extract_shell(cls.text)  # type: ignore[attr-defined]
+        block = STYLE_BLOCK.search(cls.text)
+        assert block is not None
+        cls.style = block.group(1)  # type: ignore[attr-defined]
+
+    # --- the palette ----------------------------------------------------
+
+    def test_the_palette_is_a_modal_dialog(self) -> None:
+        """Design spec section 4's palette, announced as what it is."""
+        self.assertIn('id="aio-palette"', self.text)
+        self.assertIn('role="dialog"', self.text)
+        self.assertIn('aria-modal="true"', self.text)
+
+    def test_the_palette_names_itself_and_labels_its_input(self) -> None:
+        self.assertIn('aria-labelledby="aio-palette-title"', self.text)
+        self.assertIn('for="aio-palette-input"', self.text)
+        self.assertIn('id="aio-palette-input"', self.text)
+
+    def test_the_palette_ships_closed(self) -> None:
+        """A dialog that ships open is a dialog over the whole ledger."""
+        found = re.search(r'<div class="palette" id="aio-palette"[^>]*>', self.text)
+        self.assertIsNotNone(found)
+        self.assertIn(" hidden", found.group(0))  # type: ignore[union-attr]
+
+    def test_the_palette_traps_tab_and_restores_the_invoker(self) -> None:
+        """The two halves of "modal" a browser will not do for you."""
+        trap = slice_function(self.shell, "function trapTab(event)")
+        self.assertIn("PALETTE_STOPS", trap)
+        self.assertIn("preventDefault", trap)
+        close = slice_function(self.shell, "function closePalette()")
+        self.assertIn("PALETTE_INVOKER", close)
+        self.assertIn("invoker.focus()", close)
+
+    def test_the_palette_answers_both_spellings_of_the_shortcut(self) -> None:
+        """The header promises Ctrl+K *or* Cmd+K, so both must reach it."""
+        body = slice_function(self.shell, "function onGlobalKey(event)")
+        self.assertIn("event.ctrlKey", body)
+        self.assertIn("event.metaKey", body)
+        self.assertIn("openPalette", body)
+
+    def test_the_palette_routes_every_label_through_a_text_node(self) -> None:
+        """No second escaping story. `h()` is the only way a label lands.
+
+        `paletteResult` is the one function that puts ledger text in the
+        dialog, and it hands the string to `h()`, whose only path for a
+        string is `document.createTextNode` (see `appendAll`).
+        """
+        body = slice_function(self.shell, "function paletteResult(entry)")
+        self.assertIn("entry.label", body)
+        for sink in ("textContent =", "createElement", "setAttribute"):
+            with self.subTest(sink=sink):
+                self.assertNotIn(sink, body)
+
+    # --- the fragment ---------------------------------------------------
+
+    def test_parse_hash_reads_all_three_fragment_keys(self) -> None:
+        body = slice_function(self.shell, "function parseHash()")
+        for key in ('"panel"', '"lang"', '"f"'):
+            with self.subTest(key=key):
+                self.assertIn(key, body)
+
+    def test_a_filter_change_replaces_rather_than_pushes(self) -> None:
+        """Ten keystrokes must not cost ten presses of Back (section 4)."""
+        body = slice_function(self.shell, "function clearFilterButton(state)")
+        self.assertIn("goTo({ panel: state.panel, lang: state.lang, f: \"\" }, true)", body)
+        button = slice_function(self.shell, "function filterButton(state, value, label)")
+        self.assertIn("}, true)", button)
+
+    def test_every_listing_panel_reads_the_shared_filter(self) -> None:
+        """One `f` key, one reading of it, seven panels."""
+        for signature in (
+            "function renderInventory(section, state)",
+            "function renderChanges(section, state)",
+            "function renderProvenance(section, state)",
+            "function renderRollback(section, state)",
+            "function renderBacklog(section, state)",
+            "function renderMaterials(section, state)",
+        ):
+            with self.subTest(renderer=signature):
+                body = slice_function(self.shell, signature)
+                self.assertIn("filterRows(", body)
+                self.assertIn("appendFilters(", body)
+
+    def test_decisions_filters_by_sorting_rather_than_by_hiding(self) -> None:
+        """Design spec section 4: ADR records are never filtered out.
+
+        The exception is deliberate, so it is pinned: this panel may call
+        `filterRows`, but it may not drop the rows that did not match.
+        """
+        body = slice_function(self.shell, "function renderDecisions(section, state)")
+        self.assertIn("filterRows(", body)
+        self.assertNotIn("appendFilters(", body)
+        self.assertIn("filter.never_hidden", body)
+
+    def test_the_filter_match_is_case_insensitive_on_both_sides(self) -> None:
+        body = slice_function(self.shell, "function matchesFilter(text, needle)")
+        self.assertEqual(body.count("toLowerCase()"), 2)
+
+    # --- density and storage --------------------------------------------
+
+    def test_the_density_attribute_is_written_and_styled(self) -> None:
+        """Both ends of the toggle: the writer and the rule it feeds."""
+        body = slice_function(self.shell, "function applyDensity(value)")
+        self.assertIn('setAttribute("data-density", value)', body)
+        self.assertIn('body[data-density="compact"]', self.style)
+
+    def test_the_density_control_persists_its_choice(self) -> None:
+        body = slice_function(self.shell, "function densityButton(value, key)")
+        self.assertIn("store(STORE_DENSITY, value)", body)
+        self.assertIn("applyDensity(value)", body)
+
+    def test_both_storage_helpers_are_wrapped(self) -> None:
+        """A `file:` origin throws rather than returning null (section 4)."""
+        for signature in ("function stored(key)", "function store(key, value)"):
+            with self.subTest(helper=signature):
+                body = slice_function(self.shell, signature)
+                self.assertIn("try {", body)
+                self.assertIn("catch (err)", body)
+
+    # --- accessibility ---------------------------------------------------
+
+    def test_the_page_carries_one_polite_live_region(self) -> None:
+        """The ablation's target: delete this and the named cases go red."""
+        self.assertIn('id="aio-live"', self.text)
+        self.assertIn('aria-live="polite"', self.text)
+        self.assertEqual(self.text.count('aria-live="'), 1)
+
+    def test_the_live_region_is_what_announce_writes_to(self) -> None:
+        body = slice_function(self.shell, "function announce(message)")
+        self.assertIn('getElementById("aio-live")', body)
+
+    def test_the_filter_and_the_palette_both_announce_a_count(self) -> None:
+        for signature, key in (
+            ("function announceFilter(state)", "filter.matches"),
+            ("function renderPaletteResults(query)", "palette.results"),
+        ):
+            with self.subTest(function=signature):
+                body = slice_function(self.shell, signature)
+                self.assertIn("announce(", body)
+                self.assertIn(key, body)
+
+    def test_focus_visible_is_styled(self) -> None:
+        """Full keyboard navigation with visible focus (design spec 12.3)."""
+        self.assertIn(":focus-visible {", self.style)
+        self.assertIn("outline:", self.style)
+
+    def test_the_tab_strip_uses_a_roving_tabindex(self) -> None:
+        body = slice_function(self.shell, "function renderNav(state)")
+        self.assertIn('setAttribute("tabindex", selected ? "0" : "-1")', body)
+        keys = slice_function(self.shell, "function onNavKey(event)")
+        for key in ("ArrowRight", "ArrowLeft", "Home", "End"):
+            with self.subTest(key=key):
+                self.assertIn(key, keys)
+
+    def test_the_skip_link_targets_the_main_region(self) -> None:
+        self.assertIn('href="#aio-main"', self.text)
+        self.assertIn('<main id="aio-main" tabindex="-1">', self.text)
+
+    def test_no_glyph_stands_alone(self) -> None:
+        """Every decorative glyph is hidden from the accessibility tree.
+
+        The severity is carried by a word beside it in every case (see
+        `statusBlock`, `vocabChip`, `marker`); the glyph is the shape half of
+        design spec section 7's acceptance item 3, and a screen reader
+        reading "black up-pointing triangle" out loud is noise.
+        """
+        found = 0
+        for line in self.shell.splitlines():
+            if "GLYPHS[" not in line and "GLYPHS." not in line:
+                continue
+            if "var GLYPHS" in line:
+                continue
+            found += 1
+            with self.subTest(line=line.strip()):
+                self.assertIn('"aria-hidden": "true"', line)
+        self.assertGreater(found, 3, "no glyph call sites were inspected")
+
+    # --- print -----------------------------------------------------------
+
+    def _print_block(self) -> str:
+        start = self.style.index("@media print")
+        return self.style[start:]
+
+    def test_print_hides_every_control(self) -> None:
+        block = self._print_block()
+        for name in (
+            ".skip-link", ".panels", ".filters", ".actions", ".actions-row",
+            ".queue", ".copybox", ".palette", ".live",
+        ):
+            with self.subTest(rule=name):
+                self.assertIn(name, block)
+
+    def test_print_still_unfolds_the_provenance_chains(self) -> None:
+        """Task 5's rule, kept: a collapsed chain prints as its summary."""
+        block = self._print_block()
+        self.assertIn("details > *:not(summary) { display: block !important; }", block)
+        self.assertIn("details::details-content", block)
+
+    def test_print_avoids_breaking_a_run_block_or_a_row_in_half(self) -> None:
+        block = self._print_block()
+        self.assertIn("break-inside: avoid", block)
+        self.assertIn("page-break-inside: avoid", block)
+        self.assertIn(".grid-table tr", block)
+
+    def test_print_is_black_on_white(self) -> None:
+        block = self._print_block()
+        self.assertIn("--ink: #000000", block)
+        self.assertIn("--bg: #ffffff", block)
+        self.assertIn("body { background: #ffffff; color: #000000;", block)
+
+
+class PaletteDictionaryTests(ShellTemplateTestCase):
+    """Task 7's strings: in both dictionaries, and not left in English."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.dicts = json.loads(cls.islands["aio-i18n"])  # type: ignore[attr-defined]
+
+    def test_every_task_7_key_is_in_both_dictionaries(self) -> None:
+        for key in TASK_7_KEYS:
+            for lang in ("en", "pt-BR"):
+                with self.subTest(key=key, lang=lang):
+                    self.assertIn(key, self.dicts[lang])
+
+    def test_no_task_7_string_was_filled_by_paste(self) -> None:
+        """A pt-BR value identical to its English one is an untranslated key.
+
+        `palette.title` is exempt for one word: "ledger" is the tool's own
+        term for the file and stays English in both dictionaries, which is
+        why the two values still differ everywhere else in the sentence.
+        """
+        for key in TASK_7_KEYS:
+            with self.subTest(key=key):
+                self.assertNotEqual(self.dicts["en"][key], self.dicts["pt-BR"][key])
+
+
+PALETTE_PROBE = r"""
+(function () {
+  var bad = [];
+  var facts = { failures: bad };
+  var fire = globalThis.__AIO_FIRE__;
+  var labels = globalThis.__AIO_LABELS__ || {};
+
+  function walk(node, fn) {
+    fn(node);
+    (node.childNodes || []).forEach(function (child) { walk(child, fn); });
+  }
+
+  function classNames(node) {
+    var value = node.attributes ? node.attributes["class"] : null;
+    return typeof value === "string" ? value.split(" ") : [];
+  }
+
+  function byClass(root, name) {
+    var out = [];
+    walk(root, function (node) {
+      if (classNames(node).indexOf(name) !== -1) { out.push(node); }
+    });
+    return out;
+  }
+
+  function report(code) {
+    process.stdout.write(JSON.stringify(facts, null, 2) + "\n");
+    process.exit(code);
+  }
+
+  if (!globalThis.__AIO_EXPORTS__) {
+    bad.push("the shell never reached its export: boot took a fatal path");
+    report(2);
+  }
+  if (typeof fire !== "function") {
+    bad.push("the DOM stub exposes no event dispatch");
+    report(2);
+  }
+
+  var dialog = document.getElementById("aio-palette");
+  var input = document.getElementById("aio-palette-input");
+  var closer = document.getElementById("aio-palette-close");
+  var live = document.getElementById("aio-live");
+  var results = document.getElementById("aio-palette-results");
+
+  /* The dialog's ARIA is in the shipped markup, which this stub does not
+     parse -- `ShellChromeSourceTests` reads it off the file instead. What
+     is checkable here is the state the shell itself sets. */
+  facts.closedAtBoot = dialog.hidden === true;
+
+  function headerButton(text) {
+    var found = null;
+    walk(document.getElementById("aio-actions"), function (node) {
+      if (node.tagName === "BUTTON" && node.textContent === text) { found = node; }
+    });
+    return found;
+  }
+
+  function press(node) {
+    (node.listeners.click || []).forEach(function (fn) {
+      fn({ preventDefault: function () {} });
+    });
+  }
+
+  function resultLabels() {
+    return byClass(results, "palette-result").map(function (node) {
+      return node.textContent;
+    });
+  }
+
+  function countText() {
+    return document.getElementById("aio-palette-count").textContent;
+  }
+
+  var opener = headerButton(labels.palette);
+  if (opener === null) {
+    bad.push("the header built no palette button");
+    report(2);
+  }
+  facts.openerShortcut = opener.attributes["aria-keyshortcuts"] || null;
+  facts.openerTitle = opener.attributes.title || null;
+
+  /* --- Ctrl+K, from a known element, so the focus restore has a target. */
+  var invoker = document.createElement("div");
+  invoker.focus();
+  facts.ctrlHandlers = fire(document, "keydown", { key: "k", ctrlKey: true });
+  facts.openedByCtrlK = dialog.hidden === false;
+  facts.focusOnInput = document.activeElement === input;
+  facts.countAtOpen = countText();
+  facts.noteAtOpen = document.getElementById("aio-palette-note").textContent;
+  facts.shownAtOpen = resultLabels().length;
+  facts.liveAtOpen = live.textContent;
+
+  /* --- typing. Each query is one keystroke's worth of state: the input's
+     value is set and the `input` listener the shell registered is fired,
+     which is what a browser does between one character and the next. */
+  facts.queries = (globalThis.__AIO_QUERIES__ || []).map(function (query) {
+    input.value = query;
+    var handlers = fire(input, "input", {});
+    return {
+      query: query,
+      handlers: handlers,
+      count: countText(),
+      labels: resultLabels(),
+      live: live.textContent,
+      note: document.getElementById("aio-palette-note").textContent
+    };
+  });
+
+  /* --- the Tab trap. Named stops rather than node identities, so a failure
+     says where the focus went instead of only that it went. */
+  input.value = globalThis.__AIO_TAB_QUERY__;
+  fire(input, "input", {});
+  facts.tabStops = resultLabels().length + 2;
+
+  function stopName() {
+    var node = document.activeElement;
+    if (node === input) { return "input"; }
+    if (node === closer) { return "close"; }
+    var at = -1;
+    byClass(results, "palette-result").forEach(function (button, index) {
+      if (button === node) { at = index; }
+    });
+    return at === -1 ? "outside" : "result" + at;
+  }
+
+  input.focus();
+  facts.tabCycle = [];
+  var step = 0;
+  for (step = 0; step < facts.tabStops + 1; step += 1) {
+    fire(dialog, "keydown", { key: "Tab", shiftKey: false });
+    facts.tabCycle.push(stopName());
+  }
+  fire(dialog, "keydown", { key: "Tab", shiftKey: true });
+  facts.afterShiftTab = stopName();
+
+  /* --- Enter takes the first match and navigates. */
+  input.value = globalThis.__AIO_ENTER_QUERY__;
+  fire(input, "input", {});
+  facts.enterLabels = resultLabels();
+  input.focus();
+  facts.hashBeforeEnter = window.location.hash;
+  fire(dialog, "keydown", { key: "Enter" });
+  facts.hashAfterEnter = window.location.hash;
+  facts.closedAfterEnter = dialog.hidden === true;
+  facts.focusRestoredAfterEnter = document.activeElement === invoker;
+
+  /* The browser's half of a fragment navigation. */
+  facts.hashchangeHandlers = fire(window, "hashchange", {});
+  facts.visiblePanel = null;
+  (globalThis.__AIO_PANEL_IDS__ || []).forEach(function (name) {
+    var node = document.getElementById("aio-panel-" + name);
+    if (node && node.hidden === false) { facts.visiblePanel = name; }
+  });
+  var landed = document.getElementById("aio-panel-" + facts.visiblePanel);
+  facts.landedChip = byClass(landed, "filter-chip").map(function (node) {
+    return node.textContent;
+  });
+  facts.landedChains = byClass(landed, "chain").length;
+
+  /* --- Escape closes and gives the focus back to the button that opened
+     it. Re-found after the render above, which rebuilt the header. */
+  var reopener = headerButton(labels.palette);
+  if (reopener === null) {
+    bad.push("the header lost its palette button across a render");
+    report(2);
+  }
+  press(reopener);
+  facts.openedByButton = dialog.hidden === false;
+  facts.focusOnInputAfterButton = document.activeElement === input;
+  fire(dialog, "keydown", { key: "Escape" });
+  facts.closedByEscape = dialog.hidden === true;
+  facts.focusRestoredAfterEscape = document.activeElement === reopener;
+
+  /* --- Cmd+K, and an uppercase key name, which is what a browser reports
+     when Shift is down. */
+  var metaInvoker = document.createElement("div");
+  metaInvoker.focus();
+  fire(document, "keydown", { key: "K", metaKey: true });
+  facts.openedByMetaK = dialog.hidden === false;
+  fire(document, "keydown", { key: "Escape" });
+  facts.closedByGlobalEscape = dialog.hidden === true;
+  facts.focusRestoredAfterGlobalEscape = document.activeElement === metaInvoker;
+
+  /* --- an ordinary key opens nothing. */
+  fire(document, "keydown", { key: "k" });
+  facts.openedByBareK = dialog.hidden === false;
+
+  /* --- density. */
+  facts.densityAtBoot = document.body.attributes["data-density"] || null;
+  var compact = headerButton(labels.density_compact);
+  if (compact === null) {
+    bad.push("the header built no compact density control");
+    report(2);
+  }
+  press(compact);
+  facts.densityAfterCompact = document.body.attributes["data-density"] || null;
+  facts.densityStored = globalThis.__AIO_STORAGE__.entries["aio.density"] || null;
+  var comfortable = headerButton(labels.density_comfortable);
+  if (comfortable === null) {
+    bad.push("the header lost its comfortable density control");
+    report(2);
+  }
+  press(comfortable);
+  facts.densityAfterComfortable = document.body.attributes["data-density"] || null;
+
+  report(bad.length === 0 ? 0 : 1);
+}());
+"""
+
+
+class RuntimePaletteTests(ShellTemplateTestCase):
+    """The palette, driven: opened by key, typed into, chosen from, closed.
+
+    Every fact here comes from firing an event the shell itself registered.
+    The DOM stub does not bubble, so a keystroke is delivered to the element
+    a browser's bubbling would have reached the handler on -- the dialog for
+    the palette's own keys, `document` for the global shortcut.
+    """
+
+    proc: subprocess.CompletedProcess[str]
+    facts: dict
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        if NODE is None:
+            raise unittest.SkipTest("node is not installed")
+        labels = json.loads(cls.islands["aio-i18n"])["en"]
+        cls.labels = labels  # type: ignore[attr-defined]
+        cls.proc = boot_shell(
+            cls.text,
+            cls.islands,
+            FIXTURE_PAYLOAD,
+            probe=PALETTE_PROBE,
+            extra_globals={
+                "__AIO_PANEL_IDS__": list(PANEL_IDS),
+                "__AIO_QUERIES__": [
+                    "MAT-2026-000",
+                    "/hooks/0/command",
+                    "drifted-skill",
+                    "PIN THE MARKETPLACE TAG",
+                    "no such thing",
+                ],
+                "__AIO_TAB_QUERY__": "hooks",
+                "__AIO_ENTER_QUERY__": "/hooks/0/command",
+                "__AIO_LABELS__": {
+                    "palette": labels["action.palette"],
+                    "density_compact": labels["action.density_compact"],
+                    "density_comfortable": labels["action.density_comfortable"],
+                },
+            },
+        )
+        try:
+            cls.facts = json.loads(cls.proc.stdout)
+        except ValueError:
+            cls.facts = {}
+
+    def _fact(self, name: str):
+        self.assertIn(
+            name,
+            self.facts,
+            "\n".join((self.proc.stdout.strip(), self.proc.stderr.strip())),
+        )
+        return self.facts[name]
+
+    def _query(self, text: str) -> dict:
+        for row in self._fact("queries"):
+            if row["query"] == text:
+                return row
+        raise AssertionError("the probe ran no query " + text)
+
+    def test_the_probe_ran_and_the_shell_booted(self) -> None:
+        self.assertEqual(
+            self.proc.returncode,
+            0,
+            "\n".join(
+                ("node reported:", self.proc.stdout.strip(), self.proc.stderr.strip())
+            ),
+        )
+        self.assertEqual(self.facts.get("failures"), [])
+
+    # --- the dialog ------------------------------------------------------
+
+    def test_the_palette_starts_closed(self) -> None:
+        self.assertIs(self._fact("closedAtBoot"), True)
+
+    def test_the_header_offers_a_button_for_a_reader_with_a_mouse(self) -> None:
+        """A shortcut is not an affordance if it is the only one."""
+        self.assertEqual(self._fact("openerShortcut"), "Control+K Meta+K")
+        self.assertEqual(
+            self._fact("openerTitle"), self.labels["action.palette_hint"]
+        )
+
+    # --- opening ---------------------------------------------------------
+
+    def test_control_k_opens_the_palette_and_takes_the_focus(self) -> None:
+        self.assertEqual(self._fact("ctrlHandlers"), 1)
+        self.assertIs(self._fact("openedByCtrlK"), True)
+        self.assertIs(self._fact("focusOnInput"), True)
+
+    def test_command_k_opens_it_too(self) -> None:
+        """macOS presses Cmd, and the header promises both spellings."""
+        self.assertIs(self._fact("openedByMetaK"), True)
+
+    def test_a_bare_k_opens_nothing(self) -> None:
+        """A page that opened a dialog on every `k` would be unusable."""
+        self.assertIs(self._fact("openedByBareK"), False)
+
+    def test_an_empty_query_lists_the_whole_index_but_draws_a_page_of_it(self) -> None:
+        shown = self._fact("shownAtOpen")
+        self.assertEqual(shown, 20)
+        total = int(self._fact("countAtOpen").rsplit(" ", 1)[1])
+        self.assertGreater(total, shown)
+        self.assertIn(self.labels["palette.truncated"], self._fact("noteAtOpen"))
+
+    # --- searching -------------------------------------------------------
+
+    def test_typing_filters_the_index_by_record_id(self) -> None:
+        """`MAT-2026-000` is a material and a backlog entry, and no more."""
+        row = self._query("MAT-2026-000")
+        self.assertEqual(row["handlers"], 1)
+        self.assertEqual(len(row["labels"]), 2)
+        for label in row["labels"]:
+            with self.subTest(label=label):
+                self.assertIn("MAT-2026-000", label)
+        self.assertIn("Materials", " ".join(row["labels"]))
+        self.assertIn("Backlog", " ".join(row["labels"]))
+
+    def test_a_configuration_key_is_in_the_index(self) -> None:
+        """Design spec section 4: records, files, *and keys*."""
+        row = self._query("/hooks/0/command")
+        self.assertEqual(len(row["labels"]), 1)
+        self.assertIn("/hooks/0/command", row["labels"][0])
+        self.assertIn("Provenance", row["labels"][0])
+
+    def test_baseline_item_names_and_anchors_are_in_the_index(self) -> None:
+        row = self._query("drifted-skill")
+        joined = " ".join(row["labels"])
+        self.assertIn("Inventory", joined)
+        self.assertGreaterEqual(len(row["labels"]), 2)
+
+    def test_the_search_ignores_case(self) -> None:
+        """The reader types what they remember, not what the ledger stored."""
+        row = self._query("PIN THE MARKETPLACE TAG")
+        self.assertGreaterEqual(len(row["labels"]), 1)
+        for label in row["labels"]:
+            with self.subTest(label=label):
+                self.assertIn("Pin the marketplace tag", label)
+
+    def test_a_search_that_matches_nothing_says_so(self) -> None:
+        row = self._query("no such thing")
+        self.assertEqual(row["labels"], [])
+        self.assertIn(self.labels["palette.empty"], row["note"])
+
+    def test_every_search_announces_its_count(self) -> None:
+        """Reuses the page's one live region rather than adding a second.
+
+        The queries chosen here all match fewer than a page of results, so
+        the number announced and the number of buttons drawn are the same
+        and the assertion needs no arithmetic about truncation.
+        """
+        for text in ("MAT-2026-000", "/hooks/0/command", "no such thing"):
+            with self.subTest(query=text):
+                row = self._query(text)
+                self.assertEqual(
+                    row["live"],
+                    self.labels["palette.results"] + " " + str(len(row["labels"])),
+                )
+                self.assertEqual(row["live"], row["count"])
+
+    # --- the trap --------------------------------------------------------
+
+    def test_tab_cycles_inside_the_dialog(self) -> None:
+        """Input, each result, the close button, and back to the input.
+
+        `hooks` matches three entries in the fixture, so the ring is five
+        stops long and the sixth Tab must land where the first one started.
+        """
+        self.assertEqual(self._fact("tabStops"), 5)
+        self.assertEqual(
+            self._fact("tabCycle"),
+            ["result0", "result1", "result2", "close", "input", "result0"],
+        )
+
+    def test_shift_tab_cycles_the_other_way(self) -> None:
+        self.assertEqual(self._fact("afterShiftTab"), "input")
+
+    # --- choosing --------------------------------------------------------
+
+    def test_enter_navigates_to_the_first_match(self) -> None:
+        self.assertEqual(len(self._fact("enterLabels")), 1)
+        self.assertEqual(self._fact("hashBeforeEnter"), "")
+        self.assertEqual(
+            self._fact("hashAfterEnter"),
+            "#panel=provenance&f=%2Fhooks%2F0%2Fcommand",
+        )
+
+    def test_enter_closes_the_palette_and_gives_the_focus_back(self) -> None:
+        self.assertIs(self._fact("closedAfterEnter"), True)
+        self.assertIs(self._fact("focusRestoredAfterEnter"), True)
+
+    def test_the_fragment_the_palette_wrote_renders_that_panel_filtered(self) -> None:
+        """The whole promise: the link lands somewhere the match is visible.
+
+        One chain out of the fixture's five carries `/hooks/0/command`, and
+        the panel says in its chip which filter left it with one.
+        """
+        self.assertEqual(self._fact("hashchangeHandlers"), 1)
+        self.assertEqual(self._fact("visiblePanel"), "provenance")
+        self.assertEqual(self._fact("landedChains"), 1)
+        self.assertEqual(len(self._fact("landedChip")), 1)
+        self.assertIn("/hooks/0/command", self._fact("landedChip")[0])
+        self.assertIn(self.labels["filter.active"], self._fact("landedChip")[0])
+
+    # --- closing ---------------------------------------------------------
+
+    def test_the_header_button_opens_it_and_escape_returns_the_focus(self) -> None:
+        self.assertIs(self._fact("openedByButton"), True)
+        self.assertIs(self._fact("focusOnInputAfterButton"), True)
+        self.assertIs(self._fact("closedByEscape"), True)
+        self.assertIs(self._fact("focusRestoredAfterEscape"), True)
+
+    def test_escape_outside_the_dialog_still_closes_it(self) -> None:
+        self.assertIs(self._fact("closedByGlobalEscape"), True)
+        self.assertIs(self._fact("focusRestoredAfterGlobalEscape"), True)
+
+    # --- density ---------------------------------------------------------
+
+    def test_the_density_toggle_flips_the_attribute_and_persists(self) -> None:
+        self.assertEqual(self._fact("densityAtBoot"), "comfortable")
+        self.assertEqual(self._fact("densityAfterCompact"), "compact")
+        self.assertEqual(self._fact("densityStored"), "compact")
+        self.assertEqual(self._fact("densityAfterComfortable"), "comfortable")
+
+
+FILTER_PROBE = r"""
+(function () {
+  var bad = [];
+  var facts = { failures: bad };
+  var fire = globalThis.__AIO_FIRE__;
+
+  function walk(node, fn) {
+    fn(node);
+    (node.childNodes || []).forEach(function (child) { walk(child, fn); });
+  }
+
+  function classNames(node) {
+    var value = node.attributes ? node.attributes["class"] : null;
+    return typeof value === "string" ? value.split(" ") : [];
+  }
+
+  function byClass(root, name) {
+    var out = [];
+    walk(root, function (node) {
+      if (classNames(node).indexOf(name) !== -1) { out.push(node); }
+    });
+    return out;
+  }
+
+  function byTag(root, tag) {
+    var out = [];
+    walk(root, function (node) { if (node.tagName === tag) { out.push(node); } });
+    return out;
+  }
+
+  function rowsIn(root) {
+    var bodies = byTag(root, "TBODY");
+    if (bodies.length === 0) { return 0; }
+    return byTag(bodies[0], "TR").length;
+  }
+
+  function texts(root, name) {
+    return byClass(root, name).map(function (node) { return node.textContent; });
+  }
+
+  function report(code) {
+    process.stdout.write(JSON.stringify(facts, null, 2) + "\n");
+    process.exit(code);
+  }
+
+  if (!globalThis.__AIO_EXPORTS__) {
+    bad.push("the shell never reached its export: boot took a fatal path");
+    report(2);
+  }
+
+  function survey() {
+    var out = {};
+    (globalThis.__AIO_PANEL_IDS__ || []).forEach(function (name) {
+      var node = document.getElementById("aio-panel-" + name);
+      if (!node) { return; }
+      out[name] = {
+        hidden: node.hidden === true,
+        chip: texts(node, "filter-chip"),
+        count: texts(node, "filter-count"),
+        clears: byClass(node, "filter-clear").length,
+        bars: byClass(node, "filters").length,
+        empties: texts(node, "empty"),
+        notes: texts(node, "note"),
+        rows: rowsIn(node),
+        runs: byClass(node, "run").length,
+        chains: byClass(node, "chain").length
+      };
+    });
+    return out;
+  }
+
+  facts.hash = window.location.hash;
+  facts.filtered = survey();
+  facts.live = document.getElementById("aio-live").textContent;
+
+  /* The clear control, pressed on the panel the fragment opened. */
+  var open = document.getElementById("aio-panel-changes");
+  var clears = byClass(open, "filter-clear");
+  if (clears.length !== 1) {
+    bad.push("the open panel offered " + clears.length + " clear controls, want 1");
+    report(2);
+  }
+  (clears[0].listeners.click || []).forEach(function (fn) {
+    fn({ preventDefault: function () {} });
+  });
+  facts.hashAfterClear = window.location.hash;
+  fire(window, "hashchange", {});
+  facts.cleared = survey();
+  facts.liveAfterClear = document.getElementById("aio-live").textContent;
+
+  /* Inventory's kind buttons are a shortcut into the same one filter. */
+  var inventory = document.getElementById("aio-panel-inventory");
+  var kinds = byClass(inventory, "filters");
+  facts.inventoryBars = kinds.length;
+  var pressed = null;
+  byTag(kinds[0], "BUTTON").forEach(function (node) {
+    if (node.textContent === "skill") { pressed = node; }
+  });
+  if (pressed === null) {
+    bad.push("the inventory bar offered no skill button");
+    report(2);
+  }
+  (pressed.listeners.click || []).forEach(function (fn) {
+    fn({ preventDefault: function () {} });
+  });
+  facts.hashAfterKind = window.location.hash;
+  fire(window, "hashchange", {});
+  facts.byKind = survey();
+
+  report(bad.length === 0 ? 0 : 1);
+}());
+"""
+
+
+class RuntimeBookmarkedFilterTests(ShellTemplateTestCase):
+    """A `#panel=...&f=...` link, opened cold.
+
+    This is the property the palette exists to deliver and the reason `f`
+    had to stop meaning something different in each panel: the page boots on
+    somebody else's fragment, every listing panel narrows to it, and the one
+    that is on screen says which filter did the narrowing.
+    """
+
+    proc: subprocess.CompletedProcess[str]
+    facts: dict
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        if NODE is None:
+            raise unittest.SkipTest("node is not installed")
+        cls.labels = json.loads(cls.islands["aio-i18n"])["en"]  # type: ignore
+        cls.proc = boot_shell(
+            cls.text,
+            cls.islands,
+            FIXTURE_PAYLOAD,
+            probe=FILTER_PROBE,
+            extra_globals={
+                "__AIO_PANEL_IDS__": list(PANEL_IDS),
+                "__AIO_HASH__": "#panel=changes&f=hooks",
+            },
+        )
+        try:
+            cls.facts = json.loads(cls.proc.stdout)
+        except ValueError:
+            cls.facts = {}
+
+    def _fact(self, name: str):
+        self.assertIn(
+            name,
+            self.facts,
+            "\n".join((self.proc.stdout.strip(), self.proc.stderr.strip())),
+        )
+        return self.facts[name]
+
+    def test_the_probe_ran_and_the_shell_booted_on_the_fragment(self) -> None:
+        self.assertEqual(
+            self.proc.returncode,
+            0,
+            "\n".join(
+                ("node reported:", self.proc.stdout.strip(), self.proc.stderr.strip())
+            ),
+        )
+        self.assertEqual(self.facts.get("failures"), [])
+        self.assertEqual(self._fact("hash"), "#panel=changes&f=hooks")
+
+    def test_the_open_panel_shows_the_chip_the_count_and_a_way_out(self) -> None:
+        panel = self._fact("filtered")["changes"]
+        self.assertIs(panel["hidden"], False)
+        self.assertEqual(len(panel["chip"]), 1)
+        self.assertIn(self.labels["filter.active"], panel["chip"][0])
+        self.assertIn("hooks", panel["chip"][0])
+        self.assertEqual(
+            panel["count"], [self.labels["filter.count"] + " 1/4"]
+        )
+        self.assertEqual(panel["clears"], 1)
+        self.assertEqual(panel["runs"], 1)
+
+    def test_every_listing_panel_applied_the_same_filter(self) -> None:
+        """One `f`, seven readings of it, and none of them ignored it.
+
+        The fixture's only `hooks` anchor is `guard.js`, written by one run
+        and recorded by one baseline item, so the arithmetic is checkable by
+        hand: one run in Changes, one chain in Provenance, one row in
+        Inventory, one backed-up run in Rollback, and nothing at all in
+        Backlog or Materials.
+        """
+        found = self._fact("filtered")
+        self.assertEqual(found["inventory"]["rows"], 1)
+        self.assertEqual(found["provenance"]["chains"], 1)
+        self.assertEqual(found["rollback"]["runs"], 1)
+        for name in ("backlog", "materials"):
+            with self.subTest(panel=name):
+                self.assertEqual(found[name]["rows"], 0)
+                self.assertIn(self.labels["filter.empty"], found[name]["empties"])
+
+    def test_decisions_kept_every_record_and_said_why(self) -> None:
+        """Design spec section 4's exception, visible on the page."""
+        panel = self._fact("filtered")["decisions"]
+        self.assertEqual(panel["rows"], 2)
+        self.assertEqual(len(panel["chip"]), 1)
+        self.assertIn(self.labels["filter.never_hidden"], panel["notes"])
+
+    def test_the_open_panels_count_was_announced(self) -> None:
+        """The ablation's named case: no live region, no announcement."""
+        self.assertEqual(
+            self._fact("live"), self.labels["filter.matches"] + " 1"
+        )
+
+    def test_clearing_the_filter_replaces_the_fragment_and_restores_the_rows(
+        self,
+    ) -> None:
+        self.assertEqual(self._fact("hashAfterClear"), "#panel=changes")
+        cleared = self._fact("cleared")["changes"]
+        self.assertEqual(cleared["runs"], 4)
+        self.assertEqual(cleared["chip"], [])
+        self.assertEqual(cleared["bars"], 0)
+        self.assertEqual(self._fact("liveAfterClear"), "")
+
+    def test_a_kind_button_writes_the_same_one_filter(self) -> None:
+        """Inventory's buttons are a shortcut into `f`, not a filter of
+        their own -- which is what lets a kind chosen here survive a
+        bookmark and a palette link alike.
+        """
+        self.assertEqual(self._fact("inventoryBars"), 1)
+        self.assertEqual(self._fact("hashAfterKind"), "#panel=changes&f=skill")
+        found = self._fact("byKind")
+        self.assertEqual(found["inventory"]["rows"], 1)
+        self.assertEqual(found["changes"]["runs"], 1)
 
 
 if __name__ == "__main__":

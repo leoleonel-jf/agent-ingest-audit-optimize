@@ -371,6 +371,28 @@ main:focus { outline: none; }
   font-size: 0.8rem;
 }
 
+/* The active filter, said in words. One `f` key serves every listing panel
+   (design spec section 4), so a panel showing four rows out of nine owes the
+   reader the reason and a way out of it -- otherwise a bookmarked filter
+   reads as a short ledger rather than as a filtered one. */
+
+.filter-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  max-inline-size: 100%;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+.filter-count {
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.filter-clear { font-size: 0.78rem; padding: 0.15rem 0.45rem; }
+
 /* Tables ---------------------------------------------------------------
    The record panels are wide by nature, so a panel that carries one opts
    out of the prose measure rather than squeezing six columns into 68ch.
@@ -566,6 +588,82 @@ button.action[aria-disabled="true"] {
   min-block-size: 1.2rem;
 }
 
+/* Command palette (design spec section 4) -------------------------------
+   Ctrl/Cmd+K over every record id, title, anchor, baseline item, and
+   configuration key in the payload. It is a dialog rather than a panel
+   because it interrupts: it takes the focus, it gives the focus back, and
+   while it is open Tab does not leave it.
+
+   The backdrop is opaque rather than translucent on purpose. A dimmed
+   ledger behind a search box invites a click on a row that is not
+   reachable; an opaque one says the page is busy, which is what
+   aria-modal already tells a screen reader. */
+
+.palette {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 1.5rem 0.6rem;
+  background: var(--bg);
+  overflow-y: auto;
+}
+
+.palette-box {
+  inline-size: min(38rem, 100%);
+  padding: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+}
+
+.palette-title { margin: 0 0 var(--step); font-size: 1.05rem; font-weight: 600; }
+
+.palette-label {
+  display: block;
+  margin-block-end: var(--step);
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+
+.palette-input {
+  inline-size: 100%;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 0.35rem 0.5rem;
+}
+
+.palette-count {
+  margin: var(--step) 0;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+.palette-results {
+  margin: 0 0 var(--step);
+  padding: 0;
+  list-style: none;
+}
+
+.palette-result {
+  display: block;
+  inline-size: 100%;
+  margin-block-end: 0.15rem;
+  text-align: start;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.palette-panel { color: var(--ink-muted); font-size: 0.75rem; }
+
+.palette-empty { margin: 0 0 var(--step); color: var(--ink-muted); font-size: 0.85rem; }
+
 /* An evidence source is frequently a URL, and it is rendered as text on
    purpose (design spec section 1.3): it wraps anywhere so a long one does
    not push the table wider than the viewport. An anchor and a digest get the
@@ -694,6 +792,19 @@ footer {
     color: var(--ink-muted);
     font-weight: 600;
   }
+
+  /* 360px. The filter bar and the palette are the two pieces of chrome a
+     narrow viewport can push wider than itself: the bar because its chip
+     carries an anchor, which is long and unbreakable at a space, and the
+     palette because its results carry the same. Both wrap, both break
+     inside a word, and the palette's box gives up its side padding so the
+     text is not squeezed into a column. Nothing else here is allowed to
+     scroll sideways -- the digest tooltip further up is the one exception
+     the design spec grants. */
+  .filters { row-gap: 0.2rem; }
+  .filter-chip code { overflow-wrap: anywhere; }
+  .palette { padding: 0.75rem 0.35rem; }
+  .palette-box { padding: 0.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -741,10 +852,27 @@ footer {
   .actions-row,
   .queue,
   .copybox,
+  .palette,
   .live { display: none !important; }
 
   body { background: #ffffff; color: #000000; font-size: 11pt; }
   main { padding: 0; }
+
+  /* Black on white, enforced rather than inherited. The variables above
+     already resolve to black and white, but a surface or a chip that ever
+     acquires a literal colour would print it; these two rules mean the
+     printed ledger stays legible on a monochrome printer whatever the
+     screen palette does. */
+  .card,
+  .chain,
+  .chip,
+  .copybox-text,
+  .queue-drawer,
+  .run,
+  .status {
+    background: #ffffff;
+    color: #000000;
+  }
 
   .panel[hidden] { display: block !important; }
 
@@ -753,6 +881,21 @@ footer {
     margin-block-end: 1.5rem;
     break-inside: avoid;
   }
+
+  /* A run block or a table row split across a page break is a record that
+     reads as two half-records. `page-break-inside` beside `break-inside`
+     because print engines are behind the rest of the platform here and the
+     older property is the one several of them still honour. */
+  .run,
+  .card,
+  .status,
+  .grid-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .grid-table { break-inside: auto; page-break-inside: auto; }
+  .grid-table thead { display: table-header-group; }
 
   /* The same failure mode as the hidden panels above, one level down: the
      Provenance panel is nothing but collapsed `details`, so a printed ledger
@@ -820,6 +963,26 @@ footer {
   <dl class="meta" id="aio-footer"></dl>
 </footer>
 
+<!-- The command palette (design spec section 4). Like the copy box above it
+     ships in the markup rather than being built on demand, for a different
+     reason: a dialog assembled at the moment a key is pressed is a dialog
+     whose ids, labels, and ARIA wiring exist only on the paths that build
+     it, and the one path nobody exercises is the one that matters. It is
+     hidden until Ctrl/Cmd+K or the header's search button opens it, it
+     labels itself through aria-labelledby, and it is the last thing in the
+     body so the reading order of the ledger is untouched while it sleeps. -->
+<div class="palette" id="aio-palette" role="dialog" aria-modal="true" aria-labelledby="aio-palette-title" hidden>
+  <div class="palette-box">
+    <h2 class="palette-title" id="aio-palette-title"></h2>
+    <label class="palette-label" for="aio-palette-input" id="aio-palette-label"></label>
+    <input class="palette-input" id="aio-palette-input" type="text" autocomplete="off" spellcheck="false">
+    <p class="palette-count" id="aio-palette-count"></p>
+    <div id="aio-palette-note"></div>
+    <ul class="palette-results" id="aio-palette-results"></ul>
+    <button class="palette-close" type="button" id="aio-palette-close"></button>
+  </div>
+</div>
+
 <!-- The aio-payload id below must stay this tag's LAST attribute before the closing ">": ledgerlib.build.inject_payload locates that ">" by scanning forward from the marker, so a later attribute containing ">" would end the tag early and corrupt the splice. -->
 <script type="application/json" id="aio-payload">{"payload_schema":1,"mode":"static","generated_at":null,"tool_version":null,"lang":null,"ledger":null,"computed":null}</script>
 
@@ -837,7 +1000,15 @@ footer {
     "action.density_comfortable": "Comfortable",
     "action.density_compact": "Compact",
     "action.palette_hint": "Ctrl+K or Cmd+K — search records, files, and keys",
+    "action.palette": "Search",
     "action.panels": "Panels",
+
+    "palette.title": "Search the ledger",
+    "palette.label": "Record ID, title, anchor, or configuration key",
+    "palette.results": "Matches:",
+    "palette.truncated": "Showing the first matches only. Narrow the search to see the rest.",
+    "palette.empty": "Nothing in this ledger matches that.",
+    "palette.close": "Close",
 
     "chip.generated": "generated",
     "chip.static": "static data",
@@ -924,6 +1095,13 @@ footer {
 
     "filter.kind": "Kind",
     "filter.all": "All",
+    "filter.bar": "Filter",
+    "filter.active": "Filtering by",
+    "filter.clear": "Clear filter",
+    "filter.count": "Rows shown:",
+    "filter.matches": "Rows matching the filter:",
+    "filter.empty": "No entry in this panel matches the current filter. Clear it to see the whole panel.",
+    "filter.never_hidden": "A filter never hides a decision here: a match is lifted to the top and the rest stay where they are.",
 
     "inventory.caption": "Everything the recorded baselines say this client has, one row per item.",
 
@@ -1078,7 +1256,15 @@ footer {
     "action.density_comfortable": "Confortável",
     "action.density_compact": "Compacta",
     "action.palette_hint": "Ctrl+K ou Cmd+K — buscar registros, arquivos e chaves",
+    "action.palette": "Buscar",
     "action.panels": "Painéis",
+
+    "palette.title": "Buscar no ledger",
+    "palette.label": "ID de registro, título, âncora ou chave de configuração",
+    "palette.results": "Correspondências:",
+    "palette.truncated": "Mostrando só as primeiras correspondências. Refine a busca para ver o resto.",
+    "palette.empty": "Nada neste ledger corresponde a isso.",
+    "palette.close": "Fechar",
 
     "chip.generated": "gerada em",
     "chip.static": "dados estáticos",
@@ -1165,6 +1351,13 @@ footer {
 
     "filter.kind": "Tipo",
     "filter.all": "Todos",
+    "filter.bar": "Filtro",
+    "filter.active": "Filtrando por",
+    "filter.clear": "Limpar filtro",
+    "filter.count": "Linhas exibidas:",
+    "filter.matches": "Linhas que correspondem ao filtro:",
+    "filter.empty": "Nenhum item deste painel corresponde ao filtro atual. Limpe o filtro para ver o painel inteiro.",
+    "filter.never_hidden": "Um filtro nunca esconde uma decisão aqui: a correspondência sobe para o topo e as demais ficam onde estão.",
 
     "inventory.caption": "Tudo o que as baselines registradas dizem que este cliente tem, uma linha por item.",
 
@@ -1359,6 +1552,23 @@ footer {
   var DENSITIES = ["comfortable", "compact"];
   var STORE_LANG = "aio.lang";
   var STORE_DENSITY = "aio.density";
+
+  /* How many palette matches are drawn at once. The count the reader is
+     told is the true one; this only bounds the list, so a search for "a"
+     against a large ledger stays a list rather than a second document --
+     and stays usable at 360px, where twenty rows is already a scroll. */
+  var PALETTE_RESULTS = 20;
+
+  /* Which panel shows a record of each type. The palette's whole promise is
+     that pressing Enter lands somewhere the match is actually visible, and
+     that is a different panel for each of the five record types. */
+  var PALETTE_PANELS = {
+    MATERIAL: "materials",
+    PROPOSAL: "provenance",
+    RUN: "changes",
+    ADR: "decisions",
+    BASELINE: "inventory"
+  };
 
   /* The canonical vocabulary, English on screen in every language (design
      spec section 5). Held here as data so the Help panel and the Task 4-5
@@ -1556,6 +1766,21 @@ footer {
   var LANG = FALLBACK_LANG;
   var PAYLOAD = null;
   var NAV_BUTTONS = [];
+
+  /* How many rows each listing panel showed under the active filter, keyed
+     by panel id. Rebuilt from nothing on every render (see renderPanels) so
+     a stale tally can never be announced; null-prototype for the habit
+     rather than the need, since the keys are PANELS entries. */
+  var FILTER_COUNTS = Object.create(null);
+
+  /* The command palette's state. The index is built once from the payload,
+     the matches are whatever the last keystroke left, and the stops are the
+     focusable elements the Tab trap cycles through. `PALETTE_INVOKER` is
+     the element that opened it, so closing can give the focus back. */
+  var PALETTE_INDEX = [];
+  var PALETTE_MATCHES = [];
+  var PALETTE_STOPS = [];
+  var PALETTE_INVOKER = null;
 
   /* Building the DOM ------------------------------------------------- */
 
@@ -1962,22 +2187,99 @@ footer {
     section.setAttribute("data-wide", "true");
   }
 
-  /* The filter bar. The filter is router state (design spec section 4): it
-     lives in the fragment, so a filtered view is a link someone can send.
-     Changing it replaces rather than pushes -- a filter is a view
-     preference, and ten keystrokes should not cost ten presses of Back. */
-  function filterBar(state, values, labelKey) {
+  /* Filtering ------------------------------------------------------------
+     The filter is router state (design spec section 4): it lives in the
+     fragment, so a filtered view is a link someone can send. Changing it
+     replaces rather than pushes -- a filter is a view preference, and ten
+     keystrokes should not cost ten presses of Back.
+
+     One `f` key serves every listing panel, and every one of them reads it
+     the same way: a case-insensitive substring of the row's own searchable
+     text. That sameness is the whole point. The command palette hands out
+     `#panel=<id>&f=<text>` links, and a panel that meant something narrower
+     by `f` -- an exact match, or only its own column -- would answer a
+     palette link with an empty table. Decisions is the one documented
+     exception (design spec section 4: ADR records are never filtered out);
+     it sorts on `f` instead of hiding on it, and says so in the panel.
+
+     `toLowerCase` on both sides rather than a case-insensitive regexp: `f`
+     is reader-supplied text and a regexp built from it would be a pattern
+     someone typed, not a search someone typed. */
+  function matchesFilter(text, needle) {
+    if (needle === "") { return true; }
+    return String(text).toLowerCase().indexOf(needle.toLowerCase()) !== -1;
+  }
+
+  /* The searchable text of one row, from whichever of its fields are
+     strings. Non-strings are dropped rather than coerced: a `null` anchor
+     stringified to "null" would make every row match a search for "null". */
+  function searchText(values) {
+    return values.filter(function (value) {
+      return typeof value === "string" && value !== "";
+    }).join(" ");
+  }
+
+  function filterRows(rows, needle, textOf) {
+    if (needle === "") { return rows; }
+    return rows.filter(function (row) {
+      return matchesFilter(textOf(row), needle);
+    });
+  }
+
+  /* One bar per listing panel, carrying whichever of two things apply: the
+     fixed value buttons a panel offers (Inventory's kinds, today), and the
+     active filter itself -- named, counted, and undoable in one click.
+     Returns null when neither applies, so a panel with no buttons and no
+     filter grows no empty chrome.
+
+     The count is recorded here rather than returned because `render` needs
+     it after every panel has drawn: the live region announces the active
+     panel's tally once, not each panel's tally in turn. */
+  function panelFilters(state, panel, shown, total, values, labelKey) {
+    FILTER_COUNTS[panel] = shown;
+    var listed = Array.isArray(values) ? values : [];
+    if (listed.length === 0 && state.f === "") { return null; }
     var bar = h("div", {
       class: "filters",
       role: "group",
-      "aria-label": t(labelKey)
+      "aria-label": t("filter.bar")
     });
-    bar.appendChild(h("span", { class: "filter-label" }, t(labelKey)));
-    bar.appendChild(filterButton(state, "", t("filter.all")));
-    values.forEach(function (value) {
-      bar.appendChild(filterButton(state, value, h("code", { lang: "en" }, value)));
-    });
+    if (listed.length !== 0) {
+      bar.appendChild(h("span", { class: "filter-label" }, t(labelKey)));
+      bar.appendChild(filterButton(state, "", t("filter.all")));
+      listed.forEach(function (value) {
+        bar.appendChild(filterButton(state, value, h("code", { lang: "en" }, value)));
+      });
+    }
+    if (state.f !== "") {
+      bar.appendChild(h(
+        "span",
+        { class: "filter-chip" },
+        t("filter.active"),
+        " ",
+        h("code", { class: "path" }, state.f)
+      ));
+      bar.appendChild(h(
+        "span",
+        { class: "filter-count" },
+        t("filter.count") + " " + String(shown) + "/" + String(total)
+      ));
+      bar.appendChild(clearFilterButton(state));
+    }
     return bar;
+  }
+
+  /* Appends the bar when there is one, and -- when the filter emptied the
+     panel -- the instructional line that says so. A blank panel under an
+     active filter reads as "there is nothing here", which is the one thing
+     it does not mean. */
+  function appendFilters(section, state, panel, shown, total, values, labelKey) {
+    appendAll(section, [panelFilters(state, panel, shown, total, values, labelKey)]);
+    if (state.f !== "" && shown === 0) {
+      section.appendChild(h("p", { class: "empty" }, t("filter.empty")));
+      return false;
+    }
+    return true;
   }
 
   function filterButton(state, value, label) {
@@ -1988,6 +2290,18 @@ footer {
     );
     node.addEventListener("click", function () {
       goTo({ panel: state.panel, lang: state.lang, f: value }, true);
+    });
+    return node;
+  }
+
+  function clearFilterButton(state) {
+    var node = h(
+      "button",
+      { type: "button", class: "filter-clear" },
+      t("filter.clear")
+    );
+    node.addEventListener("click", function () {
+      goTo({ panel: state.panel, lang: state.lang, f: "" }, true);
     });
     return node;
   }
@@ -2435,6 +2749,262 @@ footer {
     window.location.hash = next;
   }
 
+  /* Command palette ------------------------------------------------------
+     Design spec section 4: Ctrl/Cmd+K over records, files, and keys.
+
+     The index is built once, from the payload, and never from anything the
+     reader types. Each entry is three strings -- the label the reader sees,
+     the panel that shows it, and the filter text that finds it there -- and
+     choosing one is nothing but `goTo({panel, f})`. The palette therefore
+     adds no way to reach a view the fragment could not already address,
+     which is what keeps it a search box rather than a second router.
+
+     Every label reaches the document through `h()`, whose only path for a
+     string is `document.createTextNode` (see `appendAll`). A record titled
+     like markup is a record titled like markup here exactly as it is in the
+     panels -- there is no second escaping story to get wrong. */
+
+  function buildPaletteIndex() {
+    var entries = [];
+    /* Null-prototype: every key below is ledger content joined together,
+       and "constructor" is a legal record title. */
+    var seen = Object.create(null);
+
+    function add(text, panel) {
+      if (typeof text !== "string" || text === "") { return; }
+      if (PANELS.indexOf(panel) === -1) { return; }
+      var id = [panel, text].join(SEPARATOR);
+      if (own(seen, id) !== undefined) { return; }
+      seen[id] = true;
+      entries.push({ label: text, panel: panel, f: text });
+    }
+
+    ledgerList("records").forEach(function (record) {
+      if (!record || typeof record !== "object") { return; }
+      var panel = own(PALETTE_PANELS, record.type);
+      if (typeof panel !== "string") { return; }
+      add(record.id, panel);
+      add(record.title, panel);
+      var targets = Array.isArray(record.targets) ? record.targets : [];
+      targets.forEach(function (target) {
+        if (!target || typeof target !== "object") { return; }
+        /* An anchor and a key are what the Provenance panel indexes on, so
+           that is where a search for either has to land -- not on Changes,
+           which lists them per run and would answer "which run touched
+           this file?" with one of the runs rather than with all of them. */
+        add(target.anchor, "provenance");
+        add(target.key, "provenance");
+      });
+    });
+
+    ledgerList("baselines").forEach(function (entry) {
+      if (!entry || typeof entry !== "object") { return; }
+      add(entry.id, "inventory");
+      var items = Array.isArray(entry.items) ? entry.items : [];
+      items.forEach(function (item) {
+        if (!item || typeof item !== "object") { return; }
+        add(item.name, "inventory");
+        add(item.anchor, "inventory");
+      });
+    });
+
+    ledgerList("backlog").forEach(function (entry) {
+      if (!entry || typeof entry !== "object") { return; }
+      add(entry.id, "backlog");
+    });
+
+    return entries;
+  }
+
+  function paletteNode() {
+    return document.getElementById("aio-palette");
+  }
+
+  function paletteIsOpen() {
+    return paletteNode().hidden === false;
+  }
+
+  /* The dialog's own words, re-set on every render so a language switch
+     while it is open does not leave half of it in the old language. */
+  function renderPaletteChrome() {
+    document.getElementById("aio-palette-title").textContent = t("palette.title");
+    document.getElementById("aio-palette-label").textContent = t("palette.label");
+    document.getElementById("aio-palette-close").textContent = t("palette.close");
+    if (paletteIsOpen()) {
+      renderPaletteResults(document.getElementById("aio-palette-input").value);
+    }
+  }
+
+  function paletteMatches(query) {
+    var wanted = String(query === null || query === undefined ? "" : query);
+    if (wanted === "") { return PALETTE_INDEX.slice(0); }
+    return PALETTE_INDEX.filter(function (entry) {
+      return matchesFilter(entry.label, wanted);
+    });
+  }
+
+  function renderPaletteResults(query) {
+    var list = document.getElementById("aio-palette-results");
+    var count = document.getElementById("aio-palette-count");
+    clear(list);
+    PALETTE_MATCHES = paletteMatches(query);
+    var stops = [document.getElementById("aio-palette-input")];
+    PALETTE_MATCHES.slice(0, PALETTE_RESULTS).forEach(function (entry) {
+      var button = paletteResult(entry);
+      stops.push(button);
+      list.appendChild(h("li", null, button));
+    });
+    stops.push(document.getElementById("aio-palette-close"));
+    PALETTE_STOPS = stops;
+    var total = String(PALETTE_MATCHES.length);
+    count.textContent = t("palette.results") + " " + total;
+    clear(document.getElementById("aio-palette-note"));
+    if (PALETTE_MATCHES.length === 0) {
+      document.getElementById("aio-palette-note")
+        .appendChild(h("p", { class: "palette-empty" }, t("palette.empty")));
+    } else if (PALETTE_MATCHES.length > PALETTE_RESULTS) {
+      document.getElementById("aio-palette-note")
+        .appendChild(h("p", { class: "palette-empty" }, t("palette.truncated")));
+    }
+    /* The visible count is inside the dialog; the announcement goes through
+       the page's one live region, so a screen reader hears the tally change
+       as it is typed without a second polite region competing with it. */
+    announce(t("palette.results") + " " + total);
+  }
+
+  function paletteResult(entry) {
+    var node = h(
+      "button",
+      { type: "button", class: "palette-result" },
+      entry.label,
+      " ",
+      h("span", { class: "palette-panel" }, t("panel." + entry.panel + ".title"))
+    );
+    node.addEventListener("click", function () { paletteGo(entry); });
+    return node;
+  }
+
+  /* Choosing a match is a panel switch, so it pushes a history entry the
+     way every other panel switch does -- the reader who searched their way
+     into a panel can press Back out of it. */
+  function paletteGo(entry) {
+    closePalette();
+    goTo({ panel: entry.panel, lang: parseHash().lang, f: entry.f }, false);
+  }
+
+  function openPalette(invoker) {
+    if (paletteIsOpen()) { return; }
+    PALETTE_INVOKER = invoker && typeof invoker.focus === "function" ? invoker : null;
+    var input = document.getElementById("aio-palette-input");
+    input.value = "";
+    paletteNode().hidden = false;
+    renderPaletteResults("");
+    input.focus();
+  }
+
+  /* Focus goes back where it came from. A dialog that drops the focus on
+     `body` costs a keyboard reader their whole place in the document, and
+     the reader who pressed Ctrl+K to look something up is exactly the
+     reader who wants to carry on where they were. */
+  function closePalette() {
+    if (!paletteIsOpen()) { return; }
+    paletteNode().hidden = true;
+    PALETTE_STOPS = [];
+    PALETTE_MATCHES = [];
+    var invoker = PALETTE_INVOKER;
+    PALETTE_INVOKER = null;
+    if (invoker) { invoker.focus(); }
+  }
+
+  /* The trap. `aria-modal` tells assistive technology the rest of the page
+     is out of play; nothing tells the Tab key that, so this does. */
+  function trapTab(event) {
+    if (PALETTE_STOPS.length === 0) { return; }
+    event.preventDefault();
+    var at = PALETTE_STOPS.indexOf(document.activeElement);
+    var step = event.shiftKey ? -1 : 1;
+    var next = step === 1 ? 0 : PALETTE_STOPS.length - 1;
+    if (at !== -1) {
+      next = (at + step + PALETTE_STOPS.length) % PALETTE_STOPS.length;
+    }
+    PALETTE_STOPS[next].focus();
+  }
+
+  /* One handler on the dialog, reached by bubbling from whichever of its
+     controls has the focus. Enter takes the first match because the list is
+     already in payload order and the reader is looking at the top of it. */
+  function onPaletteKey(event) {
+    var key = typeof event.key === "string" ? event.key : "";
+    if (key === "Escape") {
+      event.preventDefault();
+      closePalette();
+      return;
+    }
+    if (key === "Tab") {
+      trapTab(event);
+      return;
+    }
+    if (key === "Enter") {
+      event.preventDefault();
+      if (PALETTE_MATCHES.length !== 0) { paletteGo(PALETTE_MATCHES[0]); }
+    }
+  }
+
+  /* Both spellings of the shortcut, because both are what the header
+     promises: Ctrl+K is the shortcut everywhere but macOS and Cmd+K is the
+     shortcut there, and a page that honoured only one would be advertising
+     a key that does nothing on half the machines that open it. Escape is
+     handled here as well as on the dialog, so a stray focus outside the
+     dialog still leaves the reader a way out. */
+  function onGlobalKey(event) {
+    var key = typeof event.key === "string" ? event.key : "";
+    if ((event.ctrlKey === true || event.metaKey === true) && key.toLowerCase() === "k") {
+      if (typeof event.preventDefault === "function") { event.preventDefault(); }
+      if (paletteIsOpen()) { closePalette(); return; }
+      openPalette(document.activeElement);
+      return;
+    }
+    if (key === "Escape" && paletteIsOpen()) { closePalette(); }
+  }
+
+  /* Wired once, at boot. Wiring it from `render` would add one listener per
+     render and a palette that opened, closed, and reopened itself on a
+     single keystroke by the tenth one. */
+  function wirePalette() {
+    PALETTE_INDEX = buildPaletteIndex();
+    /* Closed, stated rather than assumed. The markup ships the `hidden`
+       attribute, but "is the palette open?" is answered everywhere else by
+       the property, and a dialog whose closed state depends on a reader of
+       the markup agreeing with a reader of the DOM is a dialog that opens
+       on some engine nobody tested. */
+    paletteNode().hidden = true;
+    paletteNode().addEventListener("keydown", onPaletteKey);
+    var input = document.getElementById("aio-palette-input");
+    input.addEventListener("input", function () {
+      renderPaletteResults(input.value);
+    });
+    document.getElementById("aio-palette-close").addEventListener(
+      "click",
+      function () { closePalette(); }
+    );
+    document.addEventListener("keydown", onGlobalKey);
+  }
+
+  function paletteButton() {
+    var node = h(
+      "button",
+      {
+        type: "button",
+        class: "hint",
+        title: t("action.palette_hint"),
+        "aria-keyshortcuts": "Control+K Meta+K"
+      },
+      t("action.palette")
+    );
+    node.addEventListener("click", function () { openPalette(node); });
+    return node;
+  }
+
   /* Rendering --------------------------------------------------------- */
 
   function render() {
@@ -2444,10 +3014,24 @@ footer {
     document.title = t("app.title");
     renderCopyChrome();
     renderChrome(state);
+    renderPaletteChrome();
     renderNav(state);
     renderQueue();
     renderPanels(state);
     renderFooter();
+    announceFilter(state);
+  }
+
+  /* One announcement per render, after every panel has counted its rows:
+     the tally the reader wants is the one for the panel they are looking
+     at, and it is only interesting while a filter is on. Announced last so
+     it survives `renderCopyChrome`, which clears the region at the top of
+     the same render. */
+  function announceFilter(state) {
+    if (state.f === "") { return; }
+    var shown = own(FILTER_COUNTS, state.panel);
+    if (shown === undefined) { return; }
+    announce(t("filter.matches") + " " + String(shown));
   }
 
   /* The two pieces of chrome that live outside any panel and outside
@@ -2492,7 +3076,11 @@ footer {
       densityButton("compact", "action.density_compact")
     ));
 
-    actions.appendChild(h("p", { class: "hint" }, t("action.palette_hint")));
+    /* The shortcut hint was a paragraph until Task 7 gave it something to
+       do. A page that advertises Ctrl+K and offers no other way in is a
+       page a mouse cannot search, so the hint is now the button and the
+       sentence it used to be is its tooltip. */
+    actions.appendChild(paletteButton());
 
     document.getElementById("aio-mode").textContent = modeChipText();
   }
@@ -2611,6 +3199,10 @@ footer {
      active panel only -- the screen would look identical and the printed
      ledger would quietly lose eight of its nine sections. */
   function renderPanels(state) {
+    /* Rebuilt rather than cleared in place: a panel that took its empty
+       branch this render records no count, and a leftover count from the
+       last one would be announced as this one's. */
+    FILTER_COUNTS = Object.create(null);
     PANELS.forEach(function (panel) {
       var section = panelSection(panel);
       if (!section) { return; }
@@ -2623,17 +3215,17 @@ footer {
       } else if (panel === "inventory") {
         renderInventory(section, state);
       } else if (panel === "changes") {
-        renderChanges(section);
+        renderChanges(section, state);
       } else if (panel === "provenance") {
-        renderProvenance(section);
+        renderProvenance(section, state);
       } else if (panel === "rollback") {
-        renderRollback(section);
+        renderRollback(section, state);
       } else if (panel === "backlog") {
-        renderBacklog(section);
+        renderBacklog(section, state);
       } else if (panel === "decisions") {
         renderDecisions(section, state);
       } else if (panel === "materials") {
-        renderMaterials(section);
+        renderMaterials(section, state);
       } else if (panel === "help") {
         renderHelp(section);
       } else {
@@ -2946,19 +3538,19 @@ footer {
     }
 
     kinds.sort();
-    /* One `f` key serves every panel, so a value left over from another
-       panel's filter would empty this table for no reason the reader can
-       see. An `f` that names no kind here simply means "all". */
-    var wanted = kinds.indexOf(state.f) === -1 ? "" : state.f;
-    section.appendChild(filterBar(
-      { panel: state.panel, lang: state.lang, f: wanted },
-      kinds,
-      "filter.kind"
-    ));
+    /* The kind buttons are a shortcut into the same one filter every other
+       panel reads, not a filter of their own: pressing "skill" sets `f` to
+       "skill", and the substring match below then does what an exact kind
+       match used to. That is why an `f` this panel did not put there -- an
+       anchor from the palette, say -- narrows this table too instead of
+       being ignored: `f` means one thing across the whole page. */
+    var visible = filterRows(rows, state.f, inventoryText);
+    if (!appendFilters(
+      section, state, "inventory", visible.length, rows.length, kinds, "filter.kind"
+    )) {
+      return;
+    }
 
-    var visible = wanted === "" ? rows : rows.filter(function (entry) {
-      return entry.item.kind === wanted;
-    });
     var sorted = sortBySeverityThenRecency(visible, inventorySeverity);
 
     wide(section);
@@ -2970,6 +3562,13 @@ footer {
       ],
       sorted.map(inventoryRow)
     ));
+  }
+
+  function inventoryText(entry) {
+    var item = entry.item;
+    return searchText([
+      item.kind, item.name, item.anchor, item.origin, item.state, entry.drift
+    ]);
   }
 
   /* No drift report for this item means no claim about it, which is a note.
@@ -3039,18 +3638,40 @@ footer {
      there is nothing here to diff and claiming otherwise would be inventing
      a guarantee. */
 
-  function renderChanges(section) {
+  function renderChanges(section, state) {
     var runs = records("RUN");
     if (runs.length === 0) {
       section.appendChild(h("p", { class: "empty" }, t("panel.changes.empty")));
       return;
     }
+    var visible = filterRows(runs, state.f, runText);
+    if (!appendFilters(
+      section, state, "changes", visible.length, runs.length, null, null
+    )) {
+      return;
+    }
     var drift = computedFor("drift");
     section.appendChild(h("p", { class: "note" }, t("changes.intro")));
     wide(section);
-    sortBySeverityThenRecency(runs, runSeverity).forEach(function (record) {
+    sortBySeverityThenRecency(visible, runSeverity).forEach(function (record) {
       section.appendChild(runBlock(record, driftTargetStates(drift, record.id)));
     });
+  }
+
+  /* A run is searchable by everything the block shows about it in one line
+     -- its id, its title, its result -- plus the anchors and keys it wrote,
+     because "which change touched this file?" is the question this panel
+     exists to answer and the file name is what the reader has. */
+  function runText(record) {
+    var values = [record.id, record.title, record.result, record.status];
+    var targets = Array.isArray(record.targets) ? record.targets : [];
+    targets.forEach(function (target) {
+      if (!target || typeof target !== "object") { return; }
+      values.push(target.anchor);
+      values.push(target.key);
+      values.push(target.kind);
+    });
+    return searchText(values);
   }
 
   /* A run's severity, in three branches and in this order.
@@ -3237,19 +3858,37 @@ footer {
      One native `details` per target, which is keyboard-reachable, needs no
      ARIA, and costs no script. The print block unfolds them. */
 
-  function renderProvenance(section) {
+  function renderProvenance(section, state) {
     var index = anchorIndex(records("RUN"));
     if (index.length === 0) {
       section.appendChild(h("p", { class: "empty" }, t("panel.provenance.empty")));
+      return;
+    }
+    var visible = filterRows(index, state.f, chainText);
+    if (!appendFilters(
+      section, state, "provenance", visible.length, index.length, null, null
+    )) {
       return;
     }
     var byId = recordIndex();
     var expired = expiredEvidenceIndex();
     section.appendChild(h("p", { class: "note" }, t("provenance.intro")));
     section.appendChild(h("p", { class: "note" }, t("materials.source_is_text")));
-    index.forEach(function (entry) {
+    visible.forEach(function (entry) {
       section.appendChild(chainBlock(entry, byId, expired));
     });
+  }
+
+  /* The anchor and the key are the entry's identity, and the ids of the
+     runs under it are what a reader arriving from the Changes panel has in
+     hand. Both are what the palette indexes, so both find the chain. */
+  function chainText(entry) {
+    var values = [entry.anchor, entry.key];
+    entry.runs.forEach(function (record) {
+      values.push(record.id);
+      values.push(record.title);
+    });
+    return searchText(values);
   }
 
   /* Anchor *and* key together are the identity: two runs writing two
@@ -3427,10 +4066,20 @@ footer {
      preview and nothing to restore from, and saying so is the only honest
      thing this panel can do about them. */
 
-  function renderRollback(section) {
-    var runs = records("RUN");
-    if (runs.length === 0) {
+  function renderRollback(section, state) {
+    var all = records("RUN");
+    if (all.length === 0) {
       section.appendChild(h("p", { class: "empty" }, t("panel.rollback.empty")));
+      return;
+    }
+    /* Filtered before the backup split, not after: the two lists below are
+       two readings of the same set of runs, and a filter that reached only
+       the first would leave the second naming runs the reader asked to
+       hide. */
+    var runs = filterRows(all, state.f, runText);
+    if (!appendFilters(
+      section, state, "rollback", runs.length, all.length, null, null
+    )) {
       return;
     }
     var previews = computedFor("previews");
@@ -3699,12 +4348,18 @@ footer {
 
   /* Backlog ------------------------------------------------------------ */
 
-  function renderBacklog(section) {
-    var entries = ledgerList("backlog").filter(function (entry) {
+  function renderBacklog(section, state) {
+    var all = ledgerList("backlog").filter(function (entry) {
       return Boolean(entry) && typeof entry === "object";
     });
-    if (entries.length === 0) {
+    if (all.length === 0) {
       section.appendChild(h("p", { class: "empty" }, t("panel.backlog.empty")));
+      return;
+    }
+    var entries = filterRows(all, state.f, backlogText);
+    if (!appendFilters(
+      section, state, "backlog", entries.length, all.length, null, null
+    )) {
       return;
     }
     var today = todayISO();
@@ -3720,6 +4375,12 @@ footer {
       ],
       sorted.map(function (entry) { return backlogRow(entry, today); })
     ));
+  }
+
+  function backlogText(entry) {
+    return searchText([
+      entry.id, entry.classification, entry.reason, entry.revisit_trigger
+    ]);
   }
 
   /* A revisit date that has passed is the backlog's only finding: the entry
@@ -3759,13 +4420,31 @@ footer {
 
   /* Design spec section 4: ADR records are never filtered out of this panel,
      only sorted. The fragment's filter therefore does not hide anything
-     here -- it names one record and lifts it to the top, which is what a
-     "superseded by" link needs to do without making the rest disappear. */
+     here -- it lifts what it matches to the top, which is what a
+     "superseded by" link needs to do without making the rest disappear.
+
+     This is the one panel that reads `f` differently from the other six, so
+     it is also the one panel that has to say so: the chip would otherwise
+     promise a filter, the table would show every row, and the reader would
+     reasonably conclude the filter was broken. The count reported is the
+     number of matches lifted, and `filter.never_hidden` is the sentence
+     that explains why the rest are still there. */
   function renderDecisions(section, state) {
     var adrs = records("ADR");
     if (adrs.length === 0) {
       section.appendChild(h("p", { class: "empty" }, t("panel.decisions.empty")));
       return;
+    }
+    /* Empty rather than "everything" when no filter is on: `filterRows`
+       hands back the whole list for an empty needle, and every row counting
+       as a match would put every decision in the focused half of the sort
+       -- which is the same order with a heavier border on all of it. */
+    var matched = state.f === "" ? [] : filterRows(adrs, state.f, decisionText);
+    appendAll(section, [panelFilters(
+      state, "decisions", matched.length, adrs.length, null, null
+    )]);
+    if (state.f !== "") {
+      section.appendChild(h("p", { class: "note" }, t("filter.never_hidden")));
     }
     var replaced = supersessionIndex(adrs);
     /* Every ADR is a note, a superseded one included: a decision that was
@@ -3776,7 +4455,11 @@ footer {
     var focused = [];
     var rest = [];
     sorted.forEach(function (record) {
-      if (state.f !== "" && record.id === state.f) { focused.push(record); return; }
+      /* Substring rather than an id equality, so the same `f` a palette
+         link or another panel's chip carries lifts the decision it names
+         here too -- an exact-id focus would have answered a search for a
+         title with no focus at all. */
+      if (matched.indexOf(record) !== -1) { focused.push(record); return; }
       rest.push(record);
     });
     wide(section);
@@ -3790,6 +4473,10 @@ footer {
         return decisionRow(record, replaced, focused.indexOf(record) !== -1);
       })
     ));
+  }
+
+  function decisionText(record) {
+    return searchText([record.id, record.title, record.status]);
   }
 
   /* Which record replaced which. A record whose own status is SUPERSEDED
@@ -3878,10 +4565,16 @@ footer {
 
   /* Materials ---------------------------------------------------------- */
 
-  function renderMaterials(section) {
-    var materials = records("MATERIAL");
-    if (materials.length === 0) {
+  function renderMaterials(section, state) {
+    var all = records("MATERIAL");
+    if (all.length === 0) {
       section.appendChild(h("p", { class: "empty" }, t("panel.materials.empty")));
+      return;
+    }
+    var materials = filterRows(all, state.f, materialText);
+    if (!appendFilters(
+      section, state, "materials", materials.length, all.length, null, null
+    )) {
       return;
     }
     var expired = expiredEvidenceIndex();
@@ -3901,6 +4594,14 @@ footer {
       ],
       sorted.map(function (record) { return materialRow(record, expired); })
     ));
+  }
+
+  function materialText(record) {
+    var values = [record.id, record.title, record.status, record.classification];
+    evidenceOf(record).forEach(function (item) {
+      if (item && typeof item === "object") { values.push(item.source); }
+    });
+    return searchText(values);
   }
 
   /* Expiry is a comparison the build made against the date it ran, and this
@@ -4197,6 +4898,7 @@ footer {
   }
 
   buildNav();
+  wirePalette();
   window.addEventListener("hashchange", render);
   render();
 }());

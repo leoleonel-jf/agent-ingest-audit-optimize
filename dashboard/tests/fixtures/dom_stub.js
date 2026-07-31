@@ -10,9 +10,18 @@
    only running it proves the guard refuses anything.
 
    Deliberately not a browser: nodes remember a tag name, a flat attribute
-   map, their children, and nothing else. No layout, no CSS, no event
-   dispatch -- listeners are recorded and never fired, because the gates
-   under test run during construction, not during interaction.
+   map, their children, and nothing else. No layout, no CSS, and no event
+   dispatch of its own -- listeners are recorded, and a probe that wants one
+   fired calls it. There is no bubbling here either, so a probe standing in
+   for a browser fires a handler on the element the real event would have
+   reached it on: Task 7's palette registers `keydown` on the dialog, which
+   is where a keystroke in its input would arrive after bubbling.
+
+   `document` and `window` record their listeners the same way (Task 7's
+   `Ctrl`/`Cmd`+`K` is a document-level handler, and `hashchange` is a
+   window-level one), and `globalThis.__AIO_FIRE__` is how a probe delivers
+   an event to either. They used to be no-ops, which silently swallowed
+   every global handler the shell installed.
 
    The harness concatenates this file, a preamble of globals, the shell
    source, and a probe into one temporary script, so `document` and `window`
@@ -129,8 +138,21 @@ var document = {
     node.text = String(value);
     return node;
   },
+  /* Fails closed when the harness says which ids the template actually
+     ships (`__AIO_ELEMENT_IDS__`): an id that is not in the markup answers
+     null, the way a browser answers.
+
+     It used to conjure an element for any id at all, which made a whole
+     class of ablation invisible -- delete the live region from the body and
+     `announce` would still find something to write to, so every runtime
+     case about the announcement kept passing against a page that no longer
+     had one. Absent the global (the gate harness does not seed it) the old
+     permissive behaviour stands, because those cases assert about the
+     gates rather than about the markup. */
   getElementById: function (id) {
     if (!(id in registry)) {
+      var known = globalThis.__AIO_ELEMENT_IDS__;
+      if (Array.isArray(known) && known.indexOf(id) === -1) { return null; }
       var node = new El("div");
       node.setAttribute("id", id);
       var islands = globalThis.__AIO_ISLANDS__ || {};
@@ -154,7 +176,11 @@ var document = {
     delete globalThis.__AIO_SELECTED__;
     return true;
   },
-  addEventListener: function () {}
+  listeners: Object.create(null),
+  addEventListener: function (type, fn) {
+    if (!this.listeners[type]) { this.listeners[type] = []; }
+    this.listeners[type].push(fn);
+  }
 };
 document.activeElement = document.body;
 
@@ -199,11 +225,34 @@ var window = {
       addListener: function () {}
     };
   },
-  addEventListener: function () {}
+  listeners: Object.create(null),
+  addEventListener: function (type, fn) {
+    if (!this.listeners[type]) { this.listeners[type] = []; }
+    this.listeners[type].push(fn);
+  }
 };
+
+/* Deliver one event to one target's recorded handlers, in registration
+   order, and answer how many ran. Fails closed: a probe that expects a
+   handler and gets 0 back has proved the shell never registered it, which
+   is the failure worth catching. `preventDefault` is supplied here rather
+   than by every call site, because a handler that calls it on an event
+   object without one throws and the throw would read as a shell bug. */
+function fire(target, type, event) {
+  var detail = event || {};
+  if (typeof detail.preventDefault !== "function") {
+    detail.preventDefault = function () { detail.defaultPrevented = true; };
+  }
+  var found = target && target.listeners ? target.listeners[type] : null;
+  if (!found) { return 0; }
+  found.slice(0).forEach(function (fn) { fn(detail); });
+  return found.length;
+}
 
 globalThis.document = document;
 globalThis.window = window;
+globalThis.__AIO_FIRE__ = fire;
+globalThis.__AIO_STORAGE__ = storage;
 globalThis.__AIO_REGISTRY__ = registry;
 globalThis.__AIO_CREATED__ = created;
 globalThis.__AIO_CLIPBOARD__ = clipboard;
