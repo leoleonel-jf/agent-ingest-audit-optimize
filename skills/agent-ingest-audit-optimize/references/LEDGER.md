@@ -803,14 +803,29 @@ resolving a path read out of a configuration file would cross the boundary drawn
 A probe naming a hooks directory outright would be a different thing and is allowed by the format;
 none is shipped.
 
-**Managed and enterprise policy is not probed.** The research gives no path for it, only
-"platform-specific policy directory", and no path ships that was not verified. Managed policy is the
-highest-precedence settings layer there is, so a baseline missing it is incomplete in the one layer
-that overrides all the others.
+**Managed policy is probed as of 0.5.0, except on Codex and except the Windows registry.** The
+three `managed-settings.json` paths were verified against first-party documentation on 2026-07-31
+and ship as `$MANAGED_CONFIG`; the Windows path that lost support in v2.1.75 ships as
+`$LEGACY_MANAGED_CONFIG` and is probed as an expected absence, so policy the client no longer reads
+raises `DRIFTED`/`appeared` if it reappears. What remains unprobed, and is not guessed: the Windows
+registry policy keys the 2026-07-30 research names without a path, and any managed-policy location
+for Codex, for which no primary source was found. `mcp-server` also carries no `managed` entry in
+its precedence chain, because no managed MCP location is documented — the adapter validator refuses
+an order naming a scope no probe declares, which is how that mistake was caught rather than shipped.
 
-**`$SYSTEM_CONFIG` is POSIX-only and cannot be declared optional.** Its only candidate is
-`/etc/codex`, and the format has no way to mark an anchor as absent by design on a platform, so on
-Windows it is permanently unresolved and its probes are permanently `not_present`.
+**A layer a platform does not have is skipped, not recorded absent.** A `$platform:<system>:<path>`
+candidate applies only where `sys.platform` starts with `<system>`, and is skipped textually before
+any filesystem call otherwise. An anchor whose every candidate is skipped that way is *not
+applicable on this platform*: its probes produce **no items at all**, plus a note naming the anchor
+and the platform. This closes what this list used to record about `$SYSTEM_CONFIG` having no way to
+be marked absent by design — `/etc/codex` on Windows now yields nothing rather than a permanent
+`not_present`, because `not_present` means "looked, found nothing" and nothing was looked at.
+Applicable-and-absent is unchanged: a guard that matches makes the anchor applicable even when the
+directory is missing, and that absence is verified and recorded.
+
+Because a baseline therefore covers different anchors on different platforms, each entry records
+the `sys.platform` that produced it in `platform`. The field is optional: entries captured before
+0.5.0 stay valid.
 
 **Redaction matches names and never values.** A secret is protected by the key it sits under, not by
 what it looks like, so a secret sitting under a key no pattern names is copied whole. Two shapes

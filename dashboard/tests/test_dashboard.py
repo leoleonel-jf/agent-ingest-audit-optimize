@@ -3568,9 +3568,26 @@ class KnownGapDocumentationTests(unittest.TestCase):
         text = _collapsed(REFERENCE)
         self.assertIn("only their registrations", text)
 
-    def test_reference_records_the_managed_policy_gap(self) -> None:
+    def test_reference_records_the_managed_policy_gap_as_closed(self) -> None:
+        # 0.5.0 closed it: the three managed-settings paths were verified
+        # against first-party documentation and ship. Asserted in both
+        # directions, like the precedence closure below -- the old claim must
+        # go, and what replaced it must say what is still NOT probed, because
+        # a closure that quietly widens its own scope is the failure this
+        # class exists to catch.
         text = _collapsed(REFERENCE)
-        self.assertIn("platform-specific policy directory", text)
+        self.assertNotIn("The research gives no path for it", text)
+        self.assertIn("Managed policy is probed as of 0.5.0", text)
+        self.assertIn("Windows registry policy keys", text)
+        self.assertIn("any managed-policy location for Codex", text)
+
+    def test_reference_records_the_system_config_gap_as_closed(self) -> None:
+        # The same fix closed it: a platform-guarded candidate makes the
+        # anchor *not applicable* rather than permanently `not_present`.
+        text = _collapsed(REFERENCE)
+        self.assertNotIn("POSIX-only and cannot be declared optional", text)
+        self.assertIn("A layer a platform does not have is skipped", text)
+        self.assertIn("nothing was looked at", text)
 
     @staticmethod
     def _not_covered_section() -> str:
@@ -3593,27 +3610,27 @@ class KnownGapDocumentationTests(unittest.TestCase):
         self.assertNotIn("Per-subsystem precedence is not expressible", text)
         self.assertIn("the ordering now ships as declared data", text)
 
-    def test_not_covered_list_still_holds_the_other_six_gaps(self) -> None:
-        # The same six anchors the per-gap tests in this class assert against
-        # the whole file, re-asserted inside the section itself: dropping gap
-        # 4 must not take a neighbour with it, and a gap paragraph that
-        # drifted out of the list would still satisfy a whole-file search.
+    def test_not_covered_list_still_holds_the_remaining_gaps(self) -> None:
+        # The anchors the per-gap tests in this class assert against the whole
+        # file, re-asserted inside the section itself: closing one gap must not
+        # take a neighbour with it, and a gap paragraph that drifted out of the
+        # list would still satisfy a whole-file search.
         section = self._not_covered_section()
         for phrase in (
             "an eleventh kind to record it under",
             "only their registrations",
-            "platform-specific policy directory",
-            "POSIX-only and cannot be declared optional",
             "Redaction matches names and never values",
             "is a finding, not a refusal",
+            # 0.5.0 replaced two closed gaps with the narrower truths that
+            # survived them. They live in this section too, or the section
+            # would read as though managed policy were fully covered.
+            "Windows registry policy keys",
+            "A layer a platform does not have is skipped",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, section)
         self.assertNotIn("Per-subsystem precedence", section)
-
-    def test_reference_records_the_system_config_gap(self) -> None:
-        text = _collapsed(REFERENCE)
-        self.assertIn("POSIX-only and cannot be declared optional", text)
+        self.assertNotIn("POSIX-only and cannot be declared optional", section)
 
     def test_reference_records_the_key_name_only_redaction_gap(self) -> None:
         # Both halves, because the paragraph makes two claims and either one

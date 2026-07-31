@@ -5,9 +5,32 @@
   "anchors": {
     "$USER_CONFIG": ["$env:CLAUDE_CONFIG_DIR", "~/.claude"],
     "$HOME": ["~"],
-    "$PROJECT": ["."]
+    "$PROJECT": ["."],
+    "$MANAGED_CONFIG": [
+      "$platform:darwin:/Library/Application Support/ClaudeCode",
+      "$platform:linux:/etc/claude-code",
+      "$platform:win32:C:/Program Files/ClaudeCode"
+    ],
+    "$LEGACY_MANAGED_CONFIG": [
+      "$platform:win32:C:/ProgramData/ClaudeCode"
+    ]
   },
   "probes": [
+    { "kind": "model-setting", "scope": "managed",
+      "path": "$MANAGED_CONFIG/managed-settings.json" },
+    { "kind": "permission-rule", "scope": "managed",
+      "path": "$MANAGED_CONFIG/managed-settings.json",
+      "parse": "json", "pointer": "/permissions" },
+    { "kind": "hook", "scope": "managed",
+      "path": "$MANAGED_CONFIG/managed-settings.json",
+      "parse": "json", "pointer": "/hooks" },
+    { "kind": "env-var-name", "scope": "managed",
+      "path": "$MANAGED_CONFIG/managed-settings.json",
+      "parse": "json", "pointer": "/env" },
+    { "kind": "model-setting", "scope": "managed",
+      "glob": "$MANAGED_CONFIG/managed-settings.d/*.json" },
+    { "kind": "model-setting", "scope": "managed",
+      "path": "$LEGACY_MANAGED_CONFIG/managed-settings.json" },
     { "kind": "instruction-file", "scope": "user", "glob": "$USER_CONFIG/CLAUDE.md" },
     { "kind": "instruction-file", "scope": "user", "glob": "$USER_CONFIG/rules/*.md" },
     { "kind": "skill", "scope": "user", "glob": "$USER_CONFIG/skills/*/SKILL.md" },
@@ -61,7 +84,7 @@
     "skill": { "mode": "override", "order": ["user", "project"] },
     "instruction-file": { "mode": "concatenate" },
     "permission-rule": { "mode": "merge" },
-    "model-setting": { "mode": "key-override", "order": ["project", "user"] },
-    "env-var-name": { "mode": "key-override", "order": ["project", "user"] }
+    "model-setting": { "mode": "key-override", "order": ["managed", "project", "user"] },
+    "env-var-name": { "mode": "key-override", "order": ["managed", "project", "user"] }
   }
 }

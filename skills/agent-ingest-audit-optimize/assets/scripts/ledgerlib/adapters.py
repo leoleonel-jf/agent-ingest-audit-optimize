@@ -12,6 +12,7 @@ no JSON Schema library and never grows one. The two are held together by
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
@@ -56,6 +57,17 @@ REQUIRED_RESOLUTION_FIELDS = {"mode"}
 RESOLUTION_FIELDS = {"mode", "order"}
 
 ENV_CANDIDATE_PREFIX = "$env:"
+
+# `$platform:<sys>:<path>` -- a candidate that applies only where
+# `sys.platform` starts with `<sys>`. The prefix match is what makes `linux`
+# cover WSL and the historical `linux2` without enumerating either.
+#
+# This exists because managed policy lives at a different absolute path on
+# every platform, and because an anchor with no applicable candidate is a
+# different answer from one that resolved to nothing: `/etc/codex` on Windows
+# is not an absence anybody verified, it is a concept the platform does not
+# have. `platform_excluded_anchors` is what turns that distinction into data.
+PLATFORM_CANDIDATE_PREFIX = "$platform:"
 
 # The client selected when detection finds no single answer. Looked up in the
 # candidate index by this name rather than opened as `generic.json` directly,
@@ -219,6 +231,19 @@ def _validate_anchors(anchors: object, *, source: str) -> list[str]:
                 findings.append(
                     f"{source}: anchors.{name}[{index}] must be a "
                     f"non-empty string: {candidate!r}"
+                )
+            elif (
+                candidate.startswith(PLATFORM_CANDIDATE_PREFIX)
+                and _split_platform_candidate(candidate) is None
+            ):
+                # Refused rather than skipped: a typo in a guard would
+                # otherwise make its anchor quietly non-applicable, and the
+                # whole layer beneath it quietly missing from the baseline --
+                # which reads exactly like a clean layer.
+                findings.append(
+                    f"{source}: anchors.{name}[{index}] is a malformed "
+                    f"$platform: candidate, expected "
+                    f"$platform:<system>:<path>: {candidate!r}"
                 )
     return findings
 
@@ -395,8 +420,68 @@ def load_adapter(path: Path) -> dict:
     return data
 
 
+def _split_platform_candidate(candidate: str) -> tuple[str, str] | None:
+    """`$platform:win32:C:/x` -> `("win32", "C:/x")`, or None if malformed.
+
+    Split on the FIRST colon after the prefix and nowhere else: a Windows
+    candidate carries a drive colon of its own, and a greedy split would take
+    the drive letter off every path it parses.
+    """
+    rest = candidate[len(PLATFORM_CANDIDATE_PREFIX) :]
+    system, separator, path = rest.partition(":")
+    if not separator or not system or not path:
+        return None
+    return system, path
+
+
+def platform_excluded_anchors(
+    adapter: dict, *, platform: str | None = None
+) -> frozenset[str]:
+    """The bare names of anchors this platform has no candidate for.
+
+    An anchor is excluded when it has candidates and EVERY one of them is
+    guarded by a platform that does not match. One unguarded candidate -- or
+    one guard that matches -- keeps the anchor applicable, even if nothing
+    resolves: applicable-and-absent is a verified absence, and a probe beneath
+    it is honestly `not_present`. Only the fully excluded case is skipped.
+
+    Pure: no filesystem, no environment. It answers a question about the
+    adapter and `sys.platform`, which is why it is separate from
+    `resolve_anchor_roots` rather than another return value from it.
+    """
+    system = sys.platform if platform is None else platform
+    anchors = adapter.get("anchors")
+    if not isinstance(anchors, dict):
+        return frozenset()
+
+    excluded: set[str] = set()
+    for name, candidates in anchors.items():
+        if not isinstance(name, str) or not name.startswith("$"):
+            continue
+        if not isinstance(candidates, list) or not candidates:
+            continue
+        applicable = False
+        for candidate in candidates:
+            if not isinstance(candidate, str) or not candidate:
+                continue
+            if not candidate.startswith(PLATFORM_CANDIDATE_PREFIX):
+                applicable = True
+                break
+            split = _split_platform_candidate(candidate)
+            # A malformed guard is refused by `validate_adapter`, so reaching
+            # one here means an unvalidated document. Treat it as applicable:
+            # a typo must not silently empty a whole layer of the baseline.
+            if split is None or system.startswith(split[0]):
+                applicable = True
+                break
+        if not applicable:
+            excluded.add(name[1:])
+    return frozenset(excluded)
+
+
 def resolve_anchor_roots(
-    adapter: dict, *, project: Path, environ: Mapping[str, str]
+    adapter: dict, *, project: Path, environ: Mapping[str, str],
+    platform: str | None = None
 ) -> tuple[dict[str, Path], list[str]]:
     """Resolve each anchor to the first candidate that is an existing directory.
 
@@ -431,7 +516,9 @@ def resolve_anchor_roots(
     unresolved: list[str] = []
     for name, candidates in anchors.items():
         bare = name[1:] if isinstance(name, str) and name.startswith("$") else name
-        root = _first_existing_directory(candidates, project=base, environ=environ)
+        root = _first_existing_directory(
+            candidates, project=base, environ=environ, platform=platform
+        )
         if root is None:
             unresolved.append(bare)
         else:
@@ -440,14 +527,27 @@ def resolve_anchor_roots(
 
 
 def _first_existing_directory(
-    candidates: object, *, project: Path | None, environ: Mapping[str, str]
+    candidates: object, *, project: Path | None, environ: Mapping[str, str],
+    platform: str | None = None
 ) -> Path | None:
     if not isinstance(candidates, list):
         return None
+    system = sys.platform if platform is None else platform
     for candidate in candidates:
         if not isinstance(candidate, str) or not candidate:
             continue
-        if candidate.startswith(ENV_CANDIDATE_PREFIX):
+        if candidate.startswith(PLATFORM_CANDIDATE_PREFIX):
+            split = _split_platform_candidate(candidate)
+            if split is None:
+                continue
+            guard, path = split
+            # Textual, and before any filesystem call: statting a path that
+            # belongs to another platform is at best wasted and at worst
+            # blocking, and the answer is already known from the string.
+            if not system.startswith(guard):
+                continue
+            resolved = _candidate_path(path, project=project)
+        elif candidate.startswith(ENV_CANDIDATE_PREFIX):
             # Unset and empty are the same thing here. An empty variable is
             # what a shell leaves behind after `export CLAUDE_CONFIG_DIR=`,
             # and treating it as a root would resolve to the process's

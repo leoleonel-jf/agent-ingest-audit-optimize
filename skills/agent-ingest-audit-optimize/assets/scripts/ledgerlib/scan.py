@@ -32,6 +32,7 @@ from ledgerlib.adapters import (
     FALLBACK_SELECTION_REASONS,
     PARSE_FORMATS,
     USER_CONFIG_ANCHOR,
+    platform_excluded_anchors,
     resolve_anchor_roots,
     select_adapter_detail,
 )
@@ -190,16 +191,26 @@ def redact(value: object, patterns: Sequence[str]) -> object:
 
 
 def run_probe(
-    probe: dict, roots: dict[str, Path], patterns: Sequence[str]
+    probe: dict, roots: dict[str, Path], patterns: Sequence[str],
+    excluded: frozenset[str] = frozenset(),
 ) -> list[dict]:
     """The baseline items one probe yields.
 
-    Always at least one item, never an empty list, and never an exception for
-    anything reachable from probe data or from the filesystem. Spec section
-    3.4: a probe that matches nothing is recorded as exactly one item with
-    `state: "not_present"` and a `null` digest -- never an error, never
-    silence. A baseline that omits what it failed to find is a baseline that
-    looks clean, which is the worst output this tool can produce.
+    Always at least one item, never an exception for anything reachable from
+    probe data or from the filesystem. Spec section 3.4: a probe that matches
+    nothing is recorded as exactly one item with `state: "not_present"` and a
+    `null` digest -- never an error, never silence. A baseline that omits what
+    it failed to find is a baseline that looks clean, which is the worst
+    output this tool can produce.
+
+    `excluded` (0.5.0) is the one exception to "always at least one item", and
+    it is the opposite of the failure above rather than an instance of it: an
+    anchor this platform does not have yields NO item, because there is no
+    absence to record. `not_present` means "looked, found nothing"; a layer
+    the platform has no concept of was not looked at, and claiming the
+    verified absence would be the false clean baseline in the other
+    direction. `scan` announces every skip in its messages, so the layer is
+    never silently missing.
 
     The security rule this function exists to enforce: **every** path, whether
     expanded from a glob or named literally, is re-checked before it is opened,
@@ -254,6 +265,13 @@ def run_probe(
     if reference is None:
         return [_item(probe, name=spec, anchor=spec, state="not_present",
                       reason="path_malformed_anchor_reference")]
+
+    if reference.group(1) in excluded:
+        # Not `not_present`: this platform has no such anchor, so nothing was
+        # looked at and no absence was verified. Recording one here would be
+        # the `$SYSTEM_CONFIG`-on-Windows claim `references/LEDGER.md` calls
+        # out -- a permanently "clean" layer nobody ever read.
+        return []
 
     root = roots.get(reference.group(1))
     if root is None:
@@ -758,6 +776,7 @@ def scan(
     bundled: Path | None = None,
     environ: Mapping[str, str] | None = None,
     captured_on: str | None = None,
+    platform: str | None = None,
 ) -> tuple[dict, list[str], int]:
     """Assemble one `baselines[]` entry from one client's configuration.
 
@@ -806,9 +825,20 @@ def scan(
     document = selection["document"]
     notes = selection["notes"]
 
+    system = sys.platform if platform is None else platform
     roots, unresolved = resolve_anchor_roots(
-        document, project=project, environ=environ
+        document, project=project, environ=environ, platform=system
     )
+    # Computed from the adapter and the platform alone -- no filesystem --
+    # and consulted before any probe runs, so a layer this platform does not
+    # have is skipped rather than recorded as a verified absence.
+    excluded = platform_excluded_anchors(document, platform=system)
+    for name in sorted(excluded):
+        notes.append(
+            f"anchor ${name} has no candidate for platform {system!r}: its "
+            "probes were skipped, and this baseline records nothing about "
+            "that layer -- neither present nor absent"
+        )
     findings = _coverage_findings(
         document,
         unresolved=unresolved,
@@ -819,13 +849,18 @@ def scan(
     patterns = document["sensitive_key_patterns"]
     items: list[dict] = []
     for probe in document["probes"]:
-        items.extend(run_probe(probe, roots, patterns))
+        items.extend(run_probe(probe, roots, patterns, excluded))
 
     entry = {
         "id": identifier,
         "captured_on": captured_on,
         "client": document["client"],
         "adapter_version": document["adapter_version"],
+        # Which platform produced this entry. Without it two baselines of one
+        # logical machine taken on different platforms look like they
+        # disagree, and nothing can say the difference is structural -- some
+        # anchors simply do not exist on one of them -- rather than drift.
+        "platform": system,
         "items": items,
     }
     # Exactly the five fields design spec section 7.5 requires. The selection

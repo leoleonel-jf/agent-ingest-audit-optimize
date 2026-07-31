@@ -23,7 +23,7 @@
     },
     "anchors": {
       "type": "object",
-      "description": "Anchor name to an ordered list of candidate roots. A candidate is `$env:NAME` -- the value of that environment variable, skipped when unset or empty -- or a filesystem path with a leading `~` expanded; a relative candidate resolves against the project. The first candidate that resolves to an existing directory wins. If none does the anchor is unresolved and every probe under it is recorded not_present.",
+      "description": "Anchor name to an ordered list of candidate roots. A candidate is `$env:NAME` -- the value of that environment variable, skipped when unset or empty -- or `$platform:<system>:<path>`, applying only where `sys.platform` starts with `<system>` and skipped textually before any filesystem call otherwise -- or a filesystem path with a leading `~` expanded; a relative candidate resolves against the project. The first candidate that resolves to an existing directory wins. If none does the anchor is unresolved and every probe under it is recorded not_present -- EXCEPT when every candidate was skipped by a platform guard, in which case the anchor is not applicable on this platform and its probes are skipped entirely, producing no items and a note: nothing was looked at, so no absence was verified.",
       "propertyNames": { "pattern": "^\\$[A-Z_]+$" },
       "additionalProperties": {
         "type": "array",
