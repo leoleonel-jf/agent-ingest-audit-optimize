@@ -1242,6 +1242,11 @@ footer {
     "footer.version": "Tool version",
     "footer.mode": "Mode",
     "footer.generated": "Generated",
+    "footer.chain": "Chain",
+    "chain.INTACT.tip": "Every record carries a hash link and all of them match: nothing was edited, deleted or reordered since this ledger was sealed. This detects tampering; it does not prevent it, and it cannot detect a chain that was rewritten whole — compare the head digest against the one you recorded outside the ledger.",
+    "chain.PARTIAL.tip": "Records sealed before the chain shipped carry no link, and the chain over the sealed ones is sound. This is the normal state right after migration.",
+    "chain.UNCHAINED.tip": "No record carries a hash link, so nothing here can tell whether this ledger was edited. Seal it by running dashboard.py chain on this ledger with --seal.",
+    "chain.BROKEN.tip": "At least one record does not match its recorded hash, or the links between records do not line up. Something changed this ledger outside the tool. The records named beside this verdict are where the chain breaks.",
     "footer.age": "Age in days",
     "footer.unknown": "not available"
   },
@@ -1499,6 +1504,11 @@ footer {
     "footer.version": "Versão da ferramenta",
     "footer.mode": "Modo",
     "footer.generated": "Gerada em",
+    "footer.chain": "Cadeia",
+    "chain.INTACT.tip": "Todo record carrega um elo de hash e todos conferem: nada foi editado, apagado ou reordenado desde que este ledger foi selado. Isto detecta adulteração; não a impede, e não detecta uma cadeia reescrita por inteiro — compare o digest da cabeça com o que você guardou fora do ledger.",
+    "chain.PARTIAL.tip": "Records anteriores à cadeia não carregam elo, e a cadeia sobre os selados está íntegra. É o estado normal logo após a migração.",
+    "chain.UNCHAINED.tip": "Nenhum record carrega elo de hash, então nada aqui sabe dizer se este ledger foi editado. Sele rodando dashboard.py chain neste ledger com --seal.",
+    "chain.BROKEN.tip": "Pelo menos um record não confere com o hash registrado, ou os elos entre records não se encaixam. Algo alterou este ledger fora da ferramenta. Os records nomeados ao lado do veredito são onde a cadeia quebra.",
     "footer.age": "Idade em dias",
     "footer.unknown": "não disponível"
   }
@@ -1644,6 +1654,18 @@ footer {
     PARTIAL: "warning",
     PASSED: "info",
     FAILED: "error"
+  };
+
+  /* The four chain verdicts. UNCHAINED is a warning rather than an error:
+     a ledger written before the chain shipped is not tampered with, it is
+     simply unprotected, and painting it red would cry wolf on every existing
+     install. BROKEN is the only error, because it is the only one that says
+     a record does not match what it claims. */
+  var CHAIN_SEVERITY = {
+    INTACT: "info",
+    PARTIAL: "info",
+    UNCHAINED: "warning",
+    BROKEN: "error"
   };
 
   /* The date fields a row may carry, in the order recency prefers them.
@@ -4916,7 +4938,8 @@ footer {
       [t("footer.version"), textOr(PAYLOAD.tool_version)],
       [t("footer.mode"), textOr(PAYLOAD.mode)],
       [t("footer.generated"), textOr(PAYLOAD.generated_at)],
-      [t("footer.age"), age === null ? t("footer.unknown") : String(age)]
+      [t("footer.age"), age === null ? t("footer.unknown") : String(age)],
+      [t("footer.chain"), chainCell()]
     ].forEach(function (pair) {
       list.appendChild(h(
         "div",
@@ -4929,6 +4952,39 @@ footer {
 
   function textOr(value) {
     return typeof value === "string" && value !== "" ? value : t("footer.unknown");
+  }
+
+  /* The tamper-evidence verdict, and the honest silence when there is none.
+
+     A static page computed no chain, so it says `unknown` rather than
+     implying the ledger is sound -- the same rule the drift and preview
+     panels already follow. BROKEN names the records that broke it, because
+     "something was tampered with" without saying what is an alarm nobody can
+     act on. The head is shown so a reader can compare it against the digest
+     they recorded OUTSIDE the ledger; this page cannot make that comparison
+     itself, since everything it can see came out of the same file. */
+  function chainCell() {
+    var chain = computedFor("chain");
+    if (!chain || typeof chain !== "object" || typeof chain.verdict !== "string") {
+      return t("footer.unknown");
+    }
+    var severity = own(CHAIN_SEVERITY, chain.verdict);
+    var parts = [vocabChip(
+      chain.verdict,
+      severity === undefined ? "warning" : severity,
+      "chain." + chain.verdict + ".tip"
+    )];
+    var broken = Array.isArray(chain.broken) ? chain.broken : [];
+    broken.forEach(function (row) {
+      parts.push(" ");
+      parts.push(h("code", { lang: "en" }, textOrDash(row.id) + " " + textOrDash(row.reason)));
+    });
+    if (typeof chain.head === "string" && chain.head !== "") {
+      parts.push(" ");
+      parts.push(h("code", { class: "digest", title: chain.head },
+                   chain.head.slice(7, 19)));
+    }
+    return parts;
   }
 
   /* Failure ----------------------------------------------------------- */

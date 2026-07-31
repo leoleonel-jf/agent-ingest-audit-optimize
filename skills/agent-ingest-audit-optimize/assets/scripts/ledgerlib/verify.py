@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from ledgerlib.chain import INTACT, chain_head, verify_chain
 from ledgerlib.errors import LedgerError
 from ledgerlib.paths import (
     load_json,
@@ -17,7 +18,23 @@ from ledgerlib.validate import (
 )
 
 
-def verify(paths: list[Path]) -> int:
+def verify(
+    paths: list[Path], *, chain: bool = False, expect_head: str | None = None
+) -> int:
+    """Validate every named ledger; optionally check its hash chain too.
+
+    `chain` is opt-in, and that is a compatibility decision rather than a
+    preference: every ledger written before the chain shipped is unchained,
+    and reporting that by default would turn a clean run into a finding for
+    every existing user. With the flag, `unchained` is a finding like any
+    other -- the caller asked whether the chain holds, and "there is no chain"
+    is the honest answer to that question.
+
+    `expect_head` compares the chain's head against a digest the caller kept
+    OUTSIDE the ledger. It is the only check here that survives an attacker
+    who rewrote the whole file and re-sealed it, because it is the only input
+    that did not come from the file.
+    """
     findings: list[str] = []
     documents: list[tuple[str, dict]] = []
     errors: list[str] = []
@@ -51,6 +68,26 @@ def verify(paths: list[Path]) -> int:
     findings.extend(
         validate_collection(documents, complete=not errors, digests=digests)
     )
+
+    if chain:
+        for source, data in documents:
+            rows, verdict = verify_chain(data)
+            for row in rows:
+                if row["reason"] is not None:
+                    findings.append(
+                        f"{source}: records[{row['position']}] "
+                        f"{row['id']!r}: {row['reason']}"
+                    )
+            if expect_head is not None:
+                head = chain_head(data)
+                if head != expect_head:
+                    findings.append(
+                        f"{source}: chain head is {head!r} and {expect_head!r} "
+                        "was expected: the chain was recomputed, or this is "
+                        "not the ledger the head was recorded from"
+                    )
+            if verdict == INTACT and expect_head is None:
+                print(f"{source}: chain {verdict}", file=sys.stderr)
     for line in (*findings, *errors):
         print(line, file=sys.stderr)
 

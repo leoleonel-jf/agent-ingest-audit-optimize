@@ -1118,6 +1118,16 @@ FIXTURE_COMPUTED = {
         }
     ],
     "unreachable_projects": ["/gone"],
+    # A broken chain in the built fixture, so the panel's error path is the
+    # one under test by default: a verdict that only ever renders green is a
+    # verdict nobody has seen fail.
+    "chain": {
+        "verdict": "BROKEN",
+        "head": "sha256:" + "c" * 64,
+        "broken": [
+            {"id": "RUN-2026-001", "position": 5, "reason": "digest_mismatch"}
+        ],
+    },
 }
 
 FIXTURE_PAYLOAD = {
@@ -1626,6 +1636,14 @@ PANEL_PROBE = r"""
   };
 
   facts.help = { text: help.textContent };
+
+  var footerNode = document.getElementById("aio-footer");
+  facts.footer = {
+    text: footerNode ? footerNode.textContent : null,
+    vocab: footerNode
+      ? byClass(footerNode, "vocab").map(function (n) { return n.textContent; })
+      : []
+  };
 
   facts.created = globalThis.__AIO_CREATED__;
 
@@ -3215,6 +3233,30 @@ class RuntimePanelTests(ShellTemplateTestCase):
     def test_inventory_renders_the_proposal_origin_as_text(self) -> None:
         self.assertIn("PROP-2026-000", self._panel("inventory")["text"])
 
+    # --- Chain integrity band ------------------------------------------
+
+    def test_the_footer_names_the_chain_verdict(self) -> None:
+        """0.6.0: tamper-evidence is reported where the page's own provenance
+        already lives, beside version, mode and generation time."""
+        self.assertIn("BROKEN", self._panel_footer()["vocab"][0])
+
+    def test_a_broken_chain_names_the_record_that_broke_it(self) -> None:
+        """An alarm that does not say what tripped it is one nobody can act
+        on."""
+        text = self._panel_footer()["text"]
+        self.assertIn("RUN-2026-001", text)
+        self.assertIn("digest_mismatch", text)
+
+    def test_the_footer_shows_the_head_for_external_comparison(self) -> None:
+        """Abbreviated like every other digest on the page. The comparison
+        against a head recorded elsewhere is the reader's to make -- this page
+        cannot make it, because everything it can see came out of one file."""
+        self.assertIn("cccccccccccc", self._panel_footer()["text"])
+
+    def _panel_footer(self) -> dict:
+        self.assertIn("footer", self.facts, self.proc.stdout)
+        return self.facts["footer"]
+
     def test_inventory_links_each_pathed_anchor_to_its_file(self) -> None:
         """0.5.0: a drift row's recorded `path` becomes an Open link.
 
@@ -3805,6 +3847,24 @@ class RuntimeStaticModePanelTests(RuntimePanelTests):
         """The payload reaches this panel only through a preview, and there
         is none -- so the assertion is that it is absent, not inert."""
         self.assertNotIn(XSS_TITLE, self._panel("rollback")["texts"])
+
+    def test_the_footer_names_the_chain_verdict(self) -> None:
+        """A static page computed no chain, so it claims no integrity.
+
+        This is the distinction the whole static mode rests on, applied to
+        the newest verdict: saying INTACT here would assert tamper-evidence
+        that nothing on this page verified.
+        """
+        footer = self._panel_footer()
+        self.assertEqual(footer["vocab"], [])
+        self.assertNotIn("INTACT", footer["text"])
+        self.assertNotIn("BROKEN", footer["text"])
+
+    def test_a_broken_chain_names_the_record_that_broke_it(self) -> None:
+        self.assertNotIn("digest_mismatch", self._panel_footer()["text"])
+
+    def test_the_footer_shows_the_head_for_external_comparison(self) -> None:
+        self.assertNotIn("cccccccccccc", self._panel_footer()["text"])
 
     def test_inventory_links_each_pathed_anchor_to_its_file(self) -> None:
         """No drift report, no recorded paths, no links: a static page has
