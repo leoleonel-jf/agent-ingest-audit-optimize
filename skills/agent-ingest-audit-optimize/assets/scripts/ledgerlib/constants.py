@@ -174,6 +174,13 @@ REQUIRED_BASELINE_ITEM_FIELDS = {
 # manufactures one.
 DRIFT_STATES = {"IN_PLACE", "DRIFTED", "REVERTED", "MISSING", "UNVERIFIABLE"}
 
+# The three-value rollback health indicator `rollback-preview` derives per RUN
+# (design spec section 11). Closed like DRIFT_STATES: a fourth value would
+# need a row in the spec's indicator table first. BROKEN is about the backup,
+# not the targets -- a backup that cannot be trusted makes every other promise
+# moot -- and it is checked first without short-circuiting the four sets.
+ROLLBACK_INDICATORS = {"HEALTHY", "AT_RISK", "BROKEN"}
+
 ANCHOR_REFERENCE = re.compile(r"^\$([A-Z_]+)(?:/(.*))?\Z")
 ANCHOR_NAME = re.compile(r"^[A-Z_]+$")
 # CON, PRN, AUX, NUL, COM1-9, LPT1-9, with or without an extension. Reserved

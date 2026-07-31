@@ -4,9 +4,10 @@
 `verify` validates one or more ledgers. `scan` reads one client's
 configuration and emits a single `baselines[]` entry on stdout. `drift`
 re-resolves a ledger's recorded anchors and classifies every baseline item
-and run target against the environment now. Both are read-only and write no
-file anywhere. Rollback preview and dashboard rendering arrive in later
-phases.
+and run target against the environment now. `rollback-preview` reports the
+four sets and the health indicator for one RUN record. All of them are
+read-only and write no file anywhere. Dashboard rendering arrives in a later
+phase.
 """
 
 from __future__ import annotations
@@ -61,6 +62,7 @@ from ledgerlib.constants import (  # noqa: E402
     REQUIRED_RECORD_FIELDS,
     REQUIRED_RUN_FIELDS,
     REQUIRED_TARGET_FIELDS,
+    ROLLBACK_INDICATORS,
     ROLLBACK_TEST_STATES,
     RUN_RESULTS,
     SCHEMA_VERSION,
@@ -90,6 +92,11 @@ from ledgerlib.drift import (  # noqa: E402
     classify_target,
     drift_command,
     drift_report,
+)
+from ledgerlib.rollback import (  # noqa: E402
+    BACKUP_REASONS,
+    rollback_preview,
+    rollback_preview_command,
 )
 from ledgerlib.scan import (  # noqa: E402
     PARSE_ERRORS,
@@ -184,6 +191,41 @@ def main(argv: list[str] | None = None) -> int:
         help="the configuration root user adapters are read from; skipped when omitted",
     )
 
+    rollback_parser = subparsers.add_parser(
+        "rollback-preview",
+        help="report the four sets and the health indicator for one RUN "
+        "record (read-only)",
+    )
+    rollback_parser.add_argument("ledger", type=Path, help="the ledger holding the run")
+    rollback_parser.add_argument(
+        "run_id",
+        metavar="RUN-ID",
+        help="the RUN record whose rollback is previewed",
+    )
+    # No --client flag, for the reason `drift` has none: the ledger's own
+    # top-level client is the provenance run targets carry, and a flag
+    # overriding it would preview one client's rollback under another
+    # client's anchors.
+    rollback_parser.add_argument(
+        "--project",
+        type=Path,
+        default=None,
+        help="the project root $PROJECT anchors to; the working directory when omitted",
+    )
+    rollback_parser.add_argument(
+        "--adapter",
+        type=Path,
+        default=None,
+        help="an adapter file to use, overriding selection entirely",
+    )
+    rollback_parser.add_argument(
+        "--user-config",
+        dest="user_config",
+        type=Path,
+        default=None,
+        help="the configuration root user adapters are read from; skipped when omitted",
+    )
+
     arguments = parser.parse_args(argv)
 
     if arguments.command == "verify":
@@ -201,6 +243,15 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.command == "drift":
         return drift_command(
             ledger=arguments.ledger,
+            adapter=arguments.adapter,
+            user_config=arguments.user_config,
+            project=arguments.project,
+        )
+
+    if arguments.command == "rollback-preview":
+        return rollback_preview_command(
+            ledger=arguments.ledger,
+            run_id=arguments.run_id,
             adapter=arguments.adapter,
             user_config=arguments.user_config,
             project=arguments.project,
