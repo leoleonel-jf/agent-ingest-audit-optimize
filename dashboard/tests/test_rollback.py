@@ -205,10 +205,11 @@ class FourSetsTests(RollbackTestCase):
     def test_the_report_always_contains_all_four_sets_empty_ones_as_lists(
         self,
     ) -> None:
-        # One scenario per set: a run where every set is empty but that one.
-        # `residual_effects` is the delicate case -- a target always lands in
-        # some state, so the only way to populate residuals alone is an
-        # IN_PLACE target under a broken backup, which belongs to no set.
+        # One scenario per set: a run where every target set is empty but
+        # that one. `residual_effects` cannot be populated alone -- a target
+        # always lands in exactly one of the three target sets, which is the
+        # partition the report owes its reader -- so its scenario pins the
+        # residual beside the set its target occupies.
         scenarios = {
             "will_be_restored": self.run_record(
                 [self.in_place_target()], self.verified_backup()
@@ -218,14 +219,6 @@ class FourSetsTests(RollbackTestCase):
             ),
             "cannot_be_restored": self.run_record(
                 [self.drifted_target()], self.verified_backup()
-            ),
-            "residual_effects": self.run_record(
-                [
-                    self.in_place_target(
-                        "residual.json", residual_effect="a dependency was installed"
-                    )
-                ],
-                None,
             ),
         }
         for populated, record in scenarios.items():
@@ -237,6 +230,28 @@ class FourSetsTests(RollbackTestCase):
                         self.assertEqual(len(report[name]), 1, report)
                     else:
                         self.assertEqual(report[name], [], report)
+        with self.subTest(populated="residual_effects"):
+            report, _, _ = self.preview(
+                [
+                    self.run_record(
+                        [
+                            self.in_place_target(
+                                "residual.json",
+                                residual_effect="a dependency was installed",
+                            )
+                        ],
+                        self.verified_backup(),
+                    )
+                ]
+            )
+            for name in SETS:
+                self.assertIn(name, report)
+            self.assertEqual(
+                report["residual_effects"], ["a dependency was installed"]
+            )
+            self.assertEqual(len(report["will_be_restored"]), 1, report)
+            self.assertEqual(report["will_not_change"], [], report)
+            self.assertEqual(report["cannot_be_restored"], [], report)
 
 
 class SetMembershipTests(RollbackTestCase):
@@ -413,8 +428,10 @@ class IndicatorTests(RollbackTestCase):
 
     def test_broken_does_not_short_circuit_the_sets(self) -> None:
         # BROKEN is checked first, and that is all it is: the sets are still
-        # computed and reported beside the indicator. `will_be_restored` alone
-        # empties, because restoring requires the backup nothing verified.
+        # computed and reported beside the indicator. `will_be_restored`
+        # empties -- restoring requires the backup nothing verified -- and
+        # its intact targets move to `cannot_be_restored` rather than
+        # vanishing from the report.
         report, _, code = self.preview(
             [
                 self.run_record(
@@ -432,11 +449,47 @@ class IndicatorTests(RollbackTestCase):
         self.assertEqual(report["indicator"], "BROKEN")
         self.assertEqual(code, 1)
         self.assertEqual(len(report["will_not_change"]), 1)
-        self.assertEqual(len(report["cannot_be_restored"]), 1)
+        self.assertEqual(len(report["cannot_be_restored"]), 2)
         self.assertEqual(
             report["residual_effects"], ["wrote to an external cache"]
         )
         self.assertEqual(report["will_be_restored"], [])
+
+    def test_an_intact_target_without_a_backup_is_not_restorable(self) -> None:
+        # The first real preview dropped 6 of a run's 17 targets: IN_PLACE,
+        # backup missing -- no set claimed them. Intact and unrestorable is
+        # `cannot_be_restored`, carrying the backup's reason rather than a
+        # drift state, because the backup is what cannot be restored *from*.
+        report, _, _ = self.preview(
+            [self.run_record([self.in_place_target()], None)]
+        )
+        self.assertEqual(len(report["cannot_be_restored"]), 1)
+        row = report["cannot_be_restored"][0]
+        self.assertEqual(row["state"], "IN_PLACE")
+        self.assertEqual(row["reason"], "missing")
+
+    def test_the_sets_partition_every_target(self) -> None:
+        # Four targets, four fates, backup missing: every target appears in
+        # exactly one of the three target sets, whatever the backup did.
+        report, _, _ = self.preview(
+            [
+                self.run_record(
+                    [
+                        self.in_place_target(),
+                        self.reverted_target(),
+                        self.drifted_target(),
+                        self.unverifiable_target(),
+                    ],
+                    None,
+                )
+            ]
+        )
+        counted = (
+            len(report["will_be_restored"])
+            + len(report["will_not_change"])
+            + len(report["cannot_be_restored"])
+        )
+        self.assertEqual(counted, 4)
 
 
 class ToolErrorTests(RollbackTestCase):

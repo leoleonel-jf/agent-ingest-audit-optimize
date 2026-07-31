@@ -218,6 +218,13 @@ def rollback_preview(
         }
         if state == IN_PLACE and verified:
             will_be_restored.append(row)
+        elif state == IN_PLACE:
+            # Intact, and still unrestorable: restoring needs the backup, and
+            # the backup failed verification. Dropping these rows instead
+            # made the first real preview report 11 of a run's 17 targets --
+            # the four sets partition the run's targets, or "the report is
+            # complete" is false.
+            cannot_be_restored.append({**row, "reason": backup_reason})
         elif state == REVERTED:
             will_not_change.append(row)
         elif state in (DRIFTED, MISSING, UNVERIFIABLE):

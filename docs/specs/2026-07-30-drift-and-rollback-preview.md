@@ -216,7 +216,11 @@ present in the report even when empty:
 1. **`will_be_restored`** — targets `IN_PLACE` with a verified backup.
 2. **`will_not_change`** — targets already `REVERTED`.
 3. **`cannot_be_restored`** — targets `DRIFTED` (restoring would destroy a later, unrelated
-   edit), `MISSING`, or `UNVERIFIABLE`, each with its state as the reason.
+   edit), `MISSING`, or `UNVERIFIABLE`, each with its state as the reason; and, when the backup
+   failed verification, the `IN_PLACE` targets too, carrying the backup's failure reason —
+   intact and unrestorable, because the backup is what there is to restore *from*. The first
+   real preview dropped 6 of a run's 17 targets by omitting that last clause: the three target
+   sets partition the run's targets, or "the report is complete" is a false claim.
 4. **`residual_effects`** — every non-null `residual_effect` on the run's targets, verbatim.
    The tool cannot undo an installed dependency or a published artifact, and the preview's job is
    to make sure nobody believes otherwise.
