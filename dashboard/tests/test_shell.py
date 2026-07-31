@@ -301,6 +301,84 @@ TASK_5_KEYS = (
     "help.results",
 )
 
+# Every i18n key Task 6 adds, named for the same reason Task 4's and Task
+# 5's are. The instruction templates themselves are deliberately absent:
+# they are not dictionary content at all (build spec section 1.4) and a key
+# for them would be the first step towards translating one.
+TASK_6_KEYS = (
+    "table.actions",
+    "action.copy_instruction",
+    "action.queue_add",
+    "action.export",
+    "action.copied",
+    "action.queued",
+    "action.copy_manual",
+    "action.copy_manual_label",
+    "action.instructions_are_english",
+    "queue.title",
+    "queue.empty",
+    "queue.order",
+    "queue.copy_all",
+    "queue.clear",
+    "queue.cleared",
+    "rollback.actions",
+    "rollback.prepare",
+    "rollback.confirm",
+    "rollback.confirm_prompt",
+    "rollback.armed",
+    "rollback.locked",
+    "rollback.copy",
+    "overview.projects",
+    "projects.open_root",
+    "projects.open_ledger",
+    "projects.no_path",
+    "projects.unreachable_note",
+)
+
+# --- Task 6: the action model ------------------------------------------
+#
+# Build spec section 1.4 is the whole of this section's reason to exist: a
+# `file:` page cannot run a command, so every button produces text for a
+# human to paste at an agent -- and the only text it may produce is one of
+# four fixed English sentences plus a record id the shell validated itself.
+# No string that came out of a material may ever reach the clipboard.
+
+# The four canonical templates. English in every UI language because they
+# address the agent rather than the reader.
+INSTRUCTION_TEMPLATES = {
+    "implement": "Implement proposal",
+    "rollback": "Roll back run",
+    "revisit": "Revisit backlog entry",
+    "audit": "Re-audit material",
+}
+
+# `ledger.schema.json`'s own record-id pattern, spelled the way JavaScript
+# spells it. It must appear in the template exactly once: a second copy is
+# a second definition, and two definitions drift.
+ID_RE_SOURCE = r"/^(MAT|PROP|RUN|ADR|BASE)-\d{4}-\d{3}(-P)?$/"
+
+# The one line in the whole file that concatenates instruction text. Pinned
+# verbatim, and pinned at exactly one occurrence, so "assembled in exactly
+# one place" is a property a grep can read off the source.
+INSTRUCTION_ASSEMBLY = 'TEMPLATES[action] + " " + id'
+
+# The spellings a `copyText(` argument is allowed to take. This is the
+# amendment to the brief's Step 1: pinning a call *count* would break on
+# every honest refactor, while pinning the *shape of every argument* is the
+# property that actually matters -- text reaches the clipboard only from
+# `instructionFor` (through a local named `instruction`), from `queueText`
+# (which only joins those), or from `exportText` (which is `JSON.stringify`
+# of a payload object).
+COPY_TEXT_ARGUMENT = re.compile(
+    r"^(instruction|queueText\(\)|exportText\([A-Za-z_$][A-Za-z0-9_$]*\))$"
+)
+
+# What a copied instruction may look like, character for character.
+INSTRUCTION_LINE = re.compile(
+    r"^(Implement proposal|Roll back run|Revisit backlog entry|Re-audit material) "
+    r"(MAT|PROP|RUN|ADR|BASE)-\d{4}-\d{3}(-P)?$"
+)
+
 # `class: "a b"` literals in the shell whose last token ends in `-` are
 # completed at runtime from a closed family. The families are declared here
 # so the stylesheet seam can still be checked end to end.
@@ -461,7 +539,8 @@ TAG_CASES = (
 # export never happens and the probe says so.
 SHELL_EXPORT = (
     "  globalThis.__AIO_EXPORTS__ = "
-    "{ safeHref: safeHref, attrAllowed: attrAllowed, h: h };\n"
+    "{ safeHref: safeHref, attrAllowed: attrAllowed, h: h, "
+    "TEMPLATES: TEMPLATES, instructionFor: instructionFor, fileUrl: fileUrl };\n"
 )
 IIFE_CLOSE = "}());"
 
@@ -1504,6 +1583,406 @@ PANEL_PROBE = r"""
 }());
 """
 
+# --- the action fixture ------------------------------------------------
+#
+# A ledger built to attack the clipboard rather than the DOM. Its material
+# is titled like an instruction -- the exact shape a reader would fail to
+# notice in a paste buffer -- and its backlog carries an id that is one
+# digit too long, which must produce no button at all rather than a button
+# that copies an unvalidated string.
+
+# A title that reads as a finished agent instruction. If any button on the
+# page could put a title on the clipboard, this is the title that would do
+# the damage: pasted at an agent it names a record that does not exist, and
+# the trailing tag is the stored-XSS half for good measure.
+ACTION_TITLE = "Implement proposal MAT-9999-999 </script>"
+
+# A second ledger string shaped like the rollback template, in a field a
+# different renderer reaches (a preview set's reason).
+ACTION_REASON = "Roll back run RUN-9999-999"
+
+# Fragments that exist nowhere but in ledger content. No instruction the
+# page copies may contain any of them.
+ACTION_FRAGMENTS = ("MAT-9999-999", "RUN-9999-999", "</script>", "Roll back run RUN-9999")
+
+# An id one digit too long for `ID_RE`: `BASE-2026-1000` matches the eye and
+# not the pattern.
+ACTION_BAD_ID = "BASE-2026-1000"
+
+# Three known projects, one of each shape the Open link has to tell apart:
+# an absolute Windows path with a space in it (linkable), a root the build
+# could not reach (recorded, and deliberately not linkable), and a relative
+# string that is not an absolute local path at all (no link, and no crash).
+ACTION_WINDOWS_ROOT = "C:\\Users\\a b\\proj"
+ACTION_WINDOWS_LEDGER = "C:\\Users\\a b\\proj\\.agent-audit\\ledger.json"
+ACTION_WINDOWS_URL = "file:///C:/Users/a%20b/proj"
+ACTION_WINDOWS_LEDGER_URL = "file:///C:/Users/a%20b/proj/.agent-audit/ledger.json"
+
+ACTION_FIXTURE_LEDGER = {
+    "schema_version": "1.0",
+    "ledger_id": "actions",
+    "scope": "project",
+    "language": "en",
+    "client": "claude-code",
+    "adapter_version": 2,
+    "created": "2026-07-01",
+    "updated": "2026-07-31",
+    "id_authority": True,
+    "sequences": {"MAT": 1, "PROP": 1, "RUN": 1, "ADR": 1, "BASE": 1},
+    "known_projects": [
+        {
+            "project_root": ACTION_WINDOWS_ROOT,
+            "ledger_path": ACTION_WINDOWS_LEDGER,
+            "last_seen": "2026-07-01",
+            "last_digest": DIGEST,
+            "status": "OK",
+        },
+        {
+            "project_root": "/gone",
+            "ledger_path": "/gone/.agent-audit/ledger.json",
+            "last_seen": "2026-07-01",
+            "last_digest": DIGEST,
+            "status": "UNREACHABLE",
+        },
+        {
+            "project_root": "relative/path",
+            "ledger_path": "relative/path/ledger.json",
+            "last_seen": "2026-07-01",
+            "last_digest": DIGEST,
+            "status": "OK",
+        },
+    ],
+    "records": [
+        {
+            "id": "MAT-2026-000",
+            "type": "MATERIAL",
+            "title": ACTION_TITLE,
+            "status": "ANALYZED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-02",
+            "updated": "2026-07-02",
+            "file": "records/MAT-2026-000.md",
+            "links": {},
+            "evidence": [
+                {
+                    "source": ACTION_TITLE,
+                    "kind": "vendor documentation",
+                    "verified_on": "2026-01-02",
+                    "time_sensitive": False,
+                }
+            ],
+        },
+        {
+            "id": "PROP-2026-000",
+            "type": "PROPOSAL",
+            "title": ACTION_TITLE,
+            "status": "DECIDED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-03",
+            "updated": "2026-07-03",
+            "file": "records/PROP-2026-000.md",
+            "links": {"materials": ["MAT-2026-000"]},
+            "evidence": [],
+        },
+        {
+            "id": "RUN-2026-000",
+            "type": "RUN",
+            "title": ACTION_REASON,
+            "status": "IMPLEMENTED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-04",
+            "updated": "2026-07-04",
+            "file": "records/RUN-2026-000.md",
+            "links": {"materials": ["MAT-2026-000"]},
+            "evidence": [],
+            "proposal": "PROP-2026-000",
+            "authorization": {"quote": "go ahead", "recorded_on": "2026-07-04"},
+            "result": "VALIDATED",
+            "targets": [
+                {
+                    "anchor": "$USER_CONFIG/settings.json",
+                    "kind": "instruction-file",
+                    "before_digest": DIGEST,
+                    "after_digest": DIGEST_AFTER,
+                    "reversible": True,
+                    "residual_effect": None,
+                }
+            ],
+            "backup": {"digest": DIGEST, "verified": True},
+            "rollback": {"tested": "PASSED"},
+            "self_reported": ["targets"],
+        },
+        {
+            "id": "ADR-2026-000",
+            "type": "ADR",
+            "title": ACTION_TITLE,
+            "status": "DECIDED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-05",
+            "updated": "2026-07-05",
+            "file": "records/ADR-2026-000.md",
+            "links": {},
+            "evidence": [],
+        },
+    ],
+    "baselines": [
+        {
+            "id": "BASE-2026-000",
+            "captured_on": "2026-07-03",
+            "client": "claude-code",
+            "adapter_version": 2,
+            "items": [
+                {
+                    "kind": "instruction-file",
+                    "name": "CLAUDE.md",
+                    "anchor": "$USER_CONFIG/CLAUDE.md",
+                    "digest": DIGEST,
+                    "attributes": {},
+                    "origin": "pre-existing",
+                    "state": "present",
+                    "portable": True,
+                }
+            ],
+        }
+    ],
+    "backlog": [
+        {
+            "id": "MAT-2026-000",
+            "classification": "MONITOR",
+            "reason": ACTION_REASON,
+            "revisit_trigger": "upstream ships the fix",
+            "revisit_after": None,
+        },
+        {
+            "id": ACTION_BAD_ID,
+            "classification": "NEEDS MORE EVIDENCE",
+            "reason": "an id one digit too long for the pattern",
+            "revisit_trigger": "never",
+            "revisit_after": None,
+        },
+    ],
+}
+
+ACTION_FIXTURE_COMPUTED = {
+    "drift": {"baselines": [], "runs": [], "summary": {}},
+    "previews": {
+        "RUN-2026-000": {
+            "run": "RUN-2026-000",
+            "indicator": "HEALTHY",
+            "backup": {"verified": True, "reason": None},
+            "will_be_restored": [
+                {
+                    "anchor": "$USER_CONFIG/settings.json",
+                    "kind": "instruction-file",
+                    "state": "IN_PLACE",
+                }
+            ],
+            "will_not_change": [],
+            "cannot_be_restored": [],
+            "residual_effects": [ACTION_REASON],
+        }
+    },
+    "expired_evidence": [],
+    "unreachable_projects": ["/gone"],
+}
+
+ACTION_FIXTURE_PAYLOAD = {
+    "payload_schema": 1,
+    "mode": "built",
+    "generated_at": "2026-07-31T00:00:00Z",
+    "tool_version": "0.4.0",
+    "lang": "en",
+    "ledger": ACTION_FIXTURE_LEDGER,
+    "computed": ACTION_FIXTURE_COMPUTED,
+}
+
+# The action probe. It does what no static test can: it presses every button
+# the page built and reads back what the clipboard actually received.
+#
+# Three phases, because the rollback control is the one action whose whole
+# point is that a single press does nothing.
+#
+#   A. press every action button in every panel, in document order. The
+#      rollback block's order is prepare, copy, queue, export, confirm --
+#      so the copy and queue presses in this phase happen *before* the
+#      confirm, and must produce nothing.
+#   B. press the rollback copy again, now that phase A ended on the confirm.
+#   C. queue the rollback and copy the whole queue, to read the batch order.
+#
+# The clipboard is the DOM stub's own record of what `document.execCommand`
+# was asked to copy, which is the real path a `file:` page takes: a file
+# origin is not a secure context, so `navigator.clipboard` is absent and the
+# selection tier is what runs.
+ACTION_PROBE = r"""
+(function () {
+  var bad = [];
+  var api = globalThis.__AIO_EXPORTS__;
+  var clip = globalThis.__AIO_CLIPBOARD__;
+  var facts = { failures: bad };
+
+  function walk(node, fn) {
+    fn(node);
+    (node.childNodes || []).forEach(function (child) { walk(child, fn); });
+  }
+
+  function classes(node) {
+    var value = node.attributes ? node.attributes["class"] : null;
+    return typeof value === "string" ? value.split(" ") : [];
+  }
+
+  function actionNodes(root, tag) {
+    var out = [];
+    walk(root, function (node) {
+      if (node.tagName === tag && classes(node).indexOf("action") !== -1) {
+        out.push(node);
+      }
+    });
+    return out;
+  }
+
+  function press(node) {
+    (node.listeners.click || []).forEach(function (fn) {
+      fn({ preventDefault: function () {}, stopPropagation: function () {} });
+    });
+  }
+
+  function report(code) {
+    process.stdout.write(JSON.stringify(facts, null, 2) + "\n");
+    process.exit(code);
+  }
+
+  if (!api) {
+    bad.push("the shell never reached its export: boot took a fatal path");
+    report(2);
+  }
+  if (!clip) {
+    bad.push("the DOM stub recorded no clipboard");
+    report(2);
+  }
+
+  /* The gate itself, driven directly rather than through a button, so a
+     refusal is named by an input rather than inferred from a missing
+     control. */
+  facts.instructionFor = [
+    ["audit", "MAT-2026-000", api.instructionFor("audit", "MAT-2026-000")],
+    ["audit", "MAT-2026-000-P", api.instructionFor("audit", "MAT-2026-000-P")],
+    ["audit", "BASE-2026-1000", api.instructionFor("audit", "BASE-2026-1000")],
+    ["audit", "MAT-2026-00", api.instructionFor("audit", "MAT-2026-00")],
+    ["audit", "MAT-2026-000 x", api.instructionFor("audit", "MAT-2026-000 x")],
+    ["audit", "x MAT-2026-000", api.instructionFor("audit", "x MAT-2026-000")],
+    ["constructor", "MAT-2026-000", api.instructionFor("constructor", "MAT-2026-000")],
+    ["toString", "MAT-2026-000", api.instructionFor("toString", "MAT-2026-000")],
+    ["__proto__", "MAT-2026-000", api.instructionFor("__proto__", "MAT-2026-000")],
+    ["audit", null, api.instructionFor("audit", null)],
+    [null, "MAT-2026-000", api.instructionFor(null, "MAT-2026-000")]
+  ];
+
+  facts.templatesFrozen = Object.isFrozen(api.TEMPLATES);
+  facts.templatesNullPrototype = Object.getPrototypeOf(api.TEMPLATES) === null;
+  facts.templates = Object.keys(api.TEMPLATES).map(function (name) {
+    return [name, api.TEMPLATES[name]];
+  });
+
+  facts.fileUrl = [
+    ["C:\\Users\\a b\\proj", api.fileUrl("C:\\Users\\a b\\proj")],
+    ["/home/a b", api.fileUrl("/home/a b")],
+    ["C:\\a%b\\c#d", api.fileUrl("C:\\a%b\\c#d")],
+    ["relative/path", api.fileUrl("relative/path")],
+    ["", api.fileUrl("")],
+    ["\\\\server\\share", api.fileUrl("\\\\server\\share")],
+    ["//server/share", api.fileUrl("//server/share")],
+    ["$USER_CONFIG/settings.json", api.fileUrl("$USER_CONFIG/settings.json")]
+  ];
+
+  var panels = globalThis.__AIO_PANEL_IDS__ || [];
+
+  /* Every Open link the page built, with the href the gate let through. */
+  facts.openLinks = [];
+  panels.forEach(function (name) {
+    var root = document.getElementById("aio-panel-" + name);
+    if (!root) { return; }
+    actionNodes(root, "A").forEach(function (node) {
+      facts.openLinks.push({
+        panel: name,
+        label: node.textContent,
+        href: node.attributes.href,
+        title: node.attributes.title || null
+      });
+    });
+  });
+
+  /* Phase A. */
+  var markA = clip.length;
+  facts.pressed = [];
+  panels.forEach(function (name) {
+    var root = document.getElementById("aio-panel-" + name);
+    if (!root) { return; }
+    actionNodes(root, "BUTTON").forEach(function (node) {
+      facts.pressed.push({ panel: name, label: node.textContent });
+      press(node);
+    });
+  });
+  facts.phaseA = clip.slice(markA);
+
+  /* Phase B: the same rollback copy control, after phase A ended on the
+     confirm. The node is re-found rather than remembered, because the queue
+     drawer re-renders and a stale reference would prove nothing. */
+  function rollbackButton(label) {
+    var found = null;
+    actionNodes(document.getElementById("aio-panel-rollback"), "BUTTON")
+      .forEach(function (node) {
+        if (node.textContent === label) { found = node; }
+      });
+    return found;
+  }
+
+  var markB = clip.length;
+  var copy = rollbackButton(globalThis.__AIO_LABELS__.rollback_copy);
+  if (copy === null) {
+    bad.push("the rollback panel built no copy control");
+    report(2);
+  }
+  press(copy);
+  facts.phaseB = clip.slice(markB);
+
+  /* Phase C: queue the rollback, then copy the whole queue. */
+  var markC = clip.length;
+  var queue = rollbackButton(globalThis.__AIO_LABELS__.queue_add);
+  if (queue === null) {
+    bad.push("the rollback panel built no queue control");
+    report(2);
+  }
+  press(queue);
+  var host = document.getElementById("aio-queue");
+  var copyAll = null;
+  actionNodes(host, "BUTTON").forEach(function (node) {
+    if (node.textContent === globalThis.__AIO_LABELS__.copy_all) { copyAll = node; }
+  });
+  if (copyAll === null) {
+    bad.push("the queue drawer built no copy-all control");
+    report(2);
+  }
+  press(copyAll);
+  facts.phaseC = clip.slice(markC);
+  facts.queueText = host.textContent;
+
+  /* The manual tier: the box is revealed and holds exactly what the last
+     copy put on the clipboard. */
+  facts.copyBox = {
+    hidden: document.getElementById("aio-copybox").hidden,
+    value: document.getElementById("aio-copytext").value
+  };
+  facts.live = document.getElementById("aio-live").textContent;
+  facts.clipboard = clip.slice(0);
+
+  report(bad.length === 0 ? 0 : 1);
+}());
+"""
+
 _CACHE: dict[str, object] = {}
 
 
@@ -1538,6 +2017,34 @@ def slice_function(text: str, signature: str) -> str:
             if depth == 0:
                 return text[start : index + 1]
     raise AssertionError("unbalanced braces after " + signature)
+
+
+def call_arguments(text: str, name: str) -> list[str]:
+    """Every argument list `name(...)` is *called* with, paren-matched.
+
+    The definition is skipped: `function copyText(text)` is not a call site,
+    and counting it would make the allow-list test pass on a parameter name.
+    Paren-matched rather than split on commas, so a nested call reaches the
+    caller whole -- which is the point, since `copyText(exportText(record))`
+    is precisely the shape being allowed.
+    """
+    found: list[str] = []
+    for match in re.finditer(r"(?<![\w$.])" + re.escape(name) + r"\(", text):
+        if text[: match.start()].rstrip().endswith("function"):
+            continue
+        index = match.end()
+        depth = 1
+        while depth:
+            char = text[index]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        found.append(text[match.end() : index])
+    return found
 
 
 def boot_shell(
@@ -2171,11 +2678,19 @@ class PanelRendererSourceTests(ShellTemplateTestCase):
     def test_task_5_panels_build_no_link_elements(self) -> None:
         """Anchors and evidence sources are text in these panels too.
 
-        The `file:` Open links belong to Task 6, which adds them behind
-        `safeHref` deliberately and all at once. Until then a target anchor
-        is exactly what an evidence source already is -- a string that is
-        frequently a path and is never a click -- and the way to keep that
-        true is for these renderers to build no `a` at all.
+        This was written expecting Task 6 to relax it. Task 6 did not, and
+        the reason is worth keeping: the payload carries no resolved path
+        for anything these panels show. An anchor is stored as `$NAME/...`
+        by construction -- `ledgerlib.paths.resolve_anchored` refuses an
+        absolute one -- and neither the drift report nor the rollback
+        preview records the file it actually opened, only the anchor it
+        classified. So a target anchor is exactly what an evidence source
+        already is: a string that is frequently a path and is never a click.
+
+        The Open links Task 6 did add live on the Overview, over
+        `known_projects[].project_root` and `.ledger_path`, which the ledger
+        stores as real paths and `build` stats directly. See `fileUrl` in
+        the shell.
         """
         for signature in (
             "function renderChanges(section)",
@@ -3363,6 +3878,524 @@ class RuntimeMaliciousKeyPanelTests(ShellTemplateTestCase):
         by_field = {badge["field"]: badge["text"] for badge in badges}
         self.assertIn("__proto__", by_field["__proto__"])
         self.assertIn("SELF-REPORTED", by_field["__proto__"])
+
+
+class ActionModelSourceTests(ShellTemplateTestCase):
+    """Build spec section 1.4, read off the template text.
+
+    The security property here is narrower and stronger than "the page
+    escapes what it renders": no string that came out of a material may
+    reach the clipboard *at all*. That is only true if there is exactly one
+    place in the file where instruction text is assembled, exactly one
+    pattern deciding which ids are allowed, and a closed set of shapes any
+    `copyText` argument may take. All three are grep-able properties of the
+    source, which is what these cases pin; `RuntimeActionTests` below then
+    presses every button and reads the clipboard back.
+    """
+
+    shell: str
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.shell = extract_shell(cls.text)
+
+    def _templates_block(self) -> str:
+        at = self.shell.index("var TEMPLATES = ")
+        return self.shell[at : self.shell.index("}));", at)]
+
+    def test_the_id_pattern_appears_exactly_once(self) -> None:
+        """One definition. A second copy is a second definition."""
+        self.assertEqual(self.text.count(ID_RE_SOURCE), 1)
+
+    def test_the_template_map_is_frozen_and_null_prototype(self) -> None:
+        """Frozen so nothing can add a fifth template later; null-prototype
+        so an action of `"constructor"` reads back undefined rather than the
+        inherited function -- the same guard `own` exists for everywhere
+        else in this file, needed here because the action half of the lookup
+        is a plain string a caller supplies.
+        """
+        self.assertIn(
+            "Object.freeze(Object.assign(Object.create(null)",
+            self._templates_block(),
+        )
+
+    def test_the_template_map_holds_exactly_the_four_canonical_sentences(self) -> None:
+        found = dict(re.findall(r'(\w+):\s*"([^"]*)"', self._templates_block()))
+        self.assertEqual(found, INSTRUCTION_TEMPLATES)
+
+    def test_no_instruction_template_is_in_either_dictionary(self) -> None:
+        """Design spec section 12.2: the templates address the agent, so
+        they stay English in every UI language. A template that acquired a
+        dictionary key would be one translation away from an instruction the
+        agent was never taught.
+        """
+        dicts = json.loads(self.islands["aio-i18n"])
+        for code, table in dicts.items():
+            for sentence in INSTRUCTION_TEMPLATES.values():
+                with self.subTest(lang=code, sentence=sentence):
+                    self.assertNotIn(sentence, set(table.values()))
+
+    def test_the_assembly_line_appears_exactly_once(self) -> None:
+        self.assertEqual(self.shell.count(INSTRUCTION_ASSEMBLY), 1)
+
+    def test_the_assembly_line_lives_inside_instruction_for(self) -> None:
+        body = slice_function(self.shell, "function instructionFor(action, id)")
+        self.assertIn(INSTRUCTION_ASSEMBLY, body)
+        self.assertIn("own(TEMPLATES, action)", body)
+        self.assertIn("ID_RE.test(id)", body)
+
+    def test_instruction_for_refuses_by_returning_null(self) -> None:
+        """Two refusals, one per half, and neither of them throws: a caller
+        renders no control at all when it gets null back.
+        """
+        body = slice_function(self.shell, "function instructionFor(action, id)")
+        self.assertEqual(body.count("return null;"), 2)
+
+    def test_no_template_literal_appears_anywhere_in_the_template(self) -> None:
+        """`${` is how a title would get interpolated into an instruction."""
+        self.assertNotIn("${", self.text)
+
+    def test_every_copy_text_call_site_takes_an_allowed_argument(self) -> None:
+        found = call_arguments(self.shell, "copyText")
+        self.assertGreaterEqual(len(found), 4)
+        for argument in found:
+            with self.subTest(argument=argument):
+                self.assertRegex(argument, COPY_TEXT_ARGUMENT)
+
+    def test_every_instruction_variable_comes_from_instruction_for(self) -> None:
+        """The allow-list above permits a local named `instruction`; this is
+        what stops that name from being assigned anything else.
+        """
+        found = re.findall(r"var instruction = (.+);", self.shell)
+        self.assertGreaterEqual(len(found), 2)
+        for source in found:
+            with self.subTest(source=source):
+                self.assertTrue(source.startswith("instructionFor("), source)
+
+    def test_export_text_is_nothing_but_json_stringify(self) -> None:
+        body = slice_function(self.shell, "function exportText(value)")
+        self.assertIn("JSON.stringify(value, null, 2)", body)
+        self.assertEqual(body.count("return"), 1)
+
+    def test_queue_text_only_joins_what_it_was_handed(self) -> None:
+        """No template, no concatenation, no ledger field: the queue's batch
+        is the instruction strings already produced by `instructionFor`.
+        """
+        body = slice_function(self.shell, "function queueText()")
+        self.assertIn(".join(", body)
+        self.assertNotIn("TEMPLATES", body)
+        self.assertNotIn('+ " "', body)
+
+    def test_the_queue_orders_rollbacks_before_implementations(self) -> None:
+        """Design spec section 12.2's "safe order": undo before redo. A
+        rollback pasted after an implementation would be applied to a setup
+        the implementation had already changed.
+        """
+        at = self.shell.index("var QUEUE_ORDER = ")
+        line = self.shell[at : self.shell.index("\n", at)]
+        self.assertLess(line.index('"rollback"'), line.index('"implement"'))
+
+    def test_the_manual_fallback_textarea_ships_read_only(self) -> None:
+        """Build spec section 1.4's third tier is not a fallback but a
+        constant: the box exists in the shipped markup, so it is there even
+        for a browser that has neither clipboard API.
+        """
+        self.assertEqual(self.text.count("<textarea"), 1)
+        self.assertIn('id="aio-copytext"', self.text)
+        self.assertIn("readonly", self.text)
+
+    def test_the_live_region_announces_politely(self) -> None:
+        self.assertIn('id="aio-live"', self.text)
+        self.assertIn('aria-live="polite"', self.text)
+
+    def test_copy_text_fills_the_box_before_it_tries_either_api(self) -> None:
+        """Order matters: the box is filled first, so a clipboard call that
+        throws, rejects, or silently does nothing still leaves the reader
+        with the text in front of them.
+        """
+        body = slice_function(self.shell, "function copyText(text)")
+        self.assertLess(body.index("revealCopy("), body.index("writeViaClipboard("))
+        self.assertLess(
+            body.index("writeViaClipboard("), body.index("writeViaSelection(")
+        )
+
+    def test_the_file_url_builder_refuses_everything_but_a_local_path(self) -> None:
+        body = slice_function(self.shell, "function fileUrl(path)")
+        self.assertIn('"file:///"', body)
+        self.assertIn("encodeURIComponent", body)
+        self.assertGreaterEqual(body.count("return null;"), 2)
+
+    def test_the_rollback_control_is_armed_by_a_flag_not_an_attribute(self) -> None:
+        """The `disabled` attribute is presentation; the guard is the
+        handler's own refusal. A stylesheet, an assistive technology, or a
+        future edit that forgets the attribute must not be able to reach the
+        instruction.
+        """
+        body = slice_function(self.shell, "function rollbackActions(record, preview)")
+        self.assertIn("if (!armed)", body)
+        self.assertEqual(body.count("armed = true;"), 1)
+
+
+class ActionDictionaryTests(ShellTemplateTestCase):
+    """Task 6's strings: in both dictionaries, and actually translated."""
+
+    dicts: dict
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.dicts = json.loads(cls.islands["aio-i18n"])
+
+    def test_every_task_6_key_is_in_both_dictionaries(self) -> None:
+        for code in ("en", "pt-BR"):
+            for key in TASK_6_KEYS:
+                with self.subTest(lang=code, key=key):
+                    self.assertIn(key, self.dicts[code])
+
+    def test_no_task_6_string_was_filled_by_paste(self) -> None:
+        """A Portuguese value identical to the English one is a key someone
+        copied rather than translated. The exceptions are the ones that are
+        the same word in both languages.
+        """
+        same = {
+            key
+            for key in TASK_6_KEYS
+            if self.dicts["en"][key] == self.dicts["pt-BR"][key]
+        }
+        self.assertEqual(same, set())
+
+
+class RuntimeActionTests(ShellTemplateTestCase):
+    """The action model, run: every button pressed, the clipboard read back.
+
+    This is the case the whole of Task 6 exists to make true. The fixture's
+    material is *titled* like a finished agent instruction -- `Implement
+    proposal MAT-9999-999 </script>` -- which is exactly the string nobody
+    would notice in a paste buffer. Pressing every control on the page must
+    never put it, or any fragment of it, on the clipboard as an instruction.
+
+    The clipboard here is the DOM stub's record of what `document.execCommand`
+    was asked to copy, which is the tier a `file:` page actually reaches: a
+    file origin is not a secure context, so `navigator.clipboard` is absent
+    and the selection path is what runs.
+    """
+
+    proc: subprocess.CompletedProcess[str]
+    facts: dict
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        if NODE is None:
+            raise unittest.SkipTest("node is not installed")
+        labels = json.loads(cls.islands["aio-i18n"])["en"]
+        cls.proc = boot_shell(
+            cls.text,
+            cls.islands,
+            ACTION_FIXTURE_PAYLOAD,
+            probe=ACTION_PROBE,
+            extra_globals={
+                "__AIO_PANEL_IDS__": list(PANEL_IDS),
+                "__AIO_LABELS__": {
+                    "rollback_copy": labels["rollback.copy"],
+                    "queue_add": labels["action.queue_add"],
+                    "copy_all": labels["queue.copy_all"],
+                },
+            },
+        )
+        try:
+            cls.facts = json.loads(cls.proc.stdout)
+        except ValueError:
+            cls.facts = {}
+
+    def _fact(self, name: str):
+        self.assertIn(
+            name,
+            self.facts,
+            "\n".join((self.proc.stdout.strip(), self.proc.stderr.strip())),
+        )
+        return self.facts[name]
+
+    def test_the_probe_ran_and_the_shell_booted(self) -> None:
+        self.assertEqual(
+            self.proc.returncode,
+            0,
+            "\n".join(
+                ("node reported:", self.proc.stdout.strip(), self.proc.stderr.strip())
+            ),
+        )
+        self.assertEqual(self.facts.get("failures"), [])
+
+    # --- the gate ------------------------------------------------------
+
+    def test_the_template_map_is_frozen_at_runtime(self) -> None:
+        self.assertIs(self._fact("templatesFrozen"), True)
+        self.assertIs(self._fact("templatesNullPrototype"), True)
+
+    def test_the_template_map_holds_the_four_canonical_sentences(self) -> None:
+        self.assertEqual(dict(self._fact("templates")), INSTRUCTION_TEMPLATES)
+
+    def test_instruction_for_answers_only_for_a_valid_pair(self) -> None:
+        answers = {
+            (row[0], row[1]): row[2] for row in self._fact("instructionFor")
+        }
+        self.assertEqual(answers[("audit", "MAT-2026-000")], "Re-audit material MAT-2026-000")
+        self.assertEqual(
+            answers[("audit", "MAT-2026-000-P")], "Re-audit material MAT-2026-000-P"
+        )
+        for pair, answer in answers.items():
+            if pair in (("audit", "MAT-2026-000"), ("audit", "MAT-2026-000-P")):
+                continue
+            with self.subTest(pair=pair):
+                self.assertIsNone(answer)
+
+    def test_an_id_one_digit_too_long_is_refused(self) -> None:
+        """The ablation's named case: delete `ID_RE.test(id)` from
+        `instructionFor` and this is the assertion that goes red.
+        """
+        answers = {
+            (row[0], row[1]): row[2] for row in self._fact("instructionFor")
+        }
+        self.assertIsNone(answers[("audit", ACTION_BAD_ID)])
+
+    # --- the clipboard -------------------------------------------------
+
+    def _instructions(self) -> list[str]:
+        """Every capture that is not a JSON export."""
+        return [
+            text
+            for text in self._fact("clipboard")
+            if not text.lstrip().startswith("{")
+        ]
+
+    def _exports(self) -> list[str]:
+        return [
+            text for text in self._fact("clipboard") if text.lstrip().startswith("{")
+        ]
+
+    def test_pressing_every_button_copied_something(self) -> None:
+        """A purity assertion over an empty clipboard would pass forever."""
+        self.assertGreater(len(self._fact("clipboard")), 4)
+        self.assertGreater(len(self._instructions()), 2)
+        self.assertGreater(len(self._exports()), 2)
+
+    def test_no_copied_instruction_carries_a_word_from_the_ledger(self) -> None:
+        """The headline property. The fixture's material is titled like an
+        instruction and its run is titled like a rollback instruction;
+        neither may appear in anything the page copies as an instruction.
+        """
+        for text in self._instructions():
+            for fragment in ACTION_FRAGMENTS:
+                with self.subTest(copied=text, fragment=fragment):
+                    self.assertNotIn(fragment, text)
+
+    def test_every_copied_instruction_line_matches_the_pinned_shape(self) -> None:
+        for text in self._instructions():
+            for line in text.split("\n"):
+                with self.subTest(line=line):
+                    self.assertRegex(line, INSTRUCTION_LINE)
+
+    def test_every_json_export_is_a_payload_object_verbatim(self) -> None:
+        """An export may -- and does -- carry the hostile title, because it
+        is the record itself. What it may not do is carry anything the
+        payload does not: each capture must parse back to an object that is
+        in the payload, not to something this page composed.
+        """
+        known = [record for record in ACTION_FIXTURE_LEDGER["records"]]
+        known.extend(ACTION_FIXTURE_LEDGER["backlog"])
+        known.extend(ACTION_FIXTURE_COMPUTED["previews"].values())
+        for text in self._exports():
+            with self.subTest(export=text[:60]):
+                self.assertIn(json.loads(text), known)
+
+    # --- the two-step ---------------------------------------------------
+
+    def test_the_rollback_instruction_is_not_copied_before_the_confirm(self) -> None:
+        """Phase A pressed the rollback copy and queue controls before the
+        confirm, in document order. Neither may have produced anything.
+        """
+        for text in self._fact("phaseA"):
+            with self.subTest(copied=text[:60]):
+                self.assertNotEqual(text, "Roll back run RUN-2026-000")
+
+    def test_the_rollback_instruction_is_copied_after_the_confirm(self) -> None:
+        self.assertEqual(self._fact("phaseB"), ["Roll back run RUN-2026-000"])
+
+    def test_the_queue_puts_the_rollback_before_the_implementation(self) -> None:
+        """Phase A queued the implement instruction from the Provenance
+        chain; phase C queued the rollback afterwards and copied the batch.
+        The batch must still lead with the rollback.
+        """
+        batch = self._fact("phaseC")
+        self.assertEqual(len(batch), 1)
+        lines = batch[0].split("\n")
+        self.assertEqual(lines[0], "Roll back run RUN-2026-000")
+        self.assertIn("Implement proposal PROP-2026-000", lines)
+        self.assertLess(
+            lines.index("Roll back run RUN-2026-000"),
+            lines.index("Implement proposal PROP-2026-000"),
+        )
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertRegex(line, INSTRUCTION_LINE)
+
+    # --- the manual tier ------------------------------------------------
+
+    def test_the_read_only_box_is_revealed_and_holds_the_last_text(self) -> None:
+        box = self._fact("copyBox")
+        self.assertIs(box["hidden"], False)
+        self.assertEqual(box["value"], self._fact("clipboard")[-1])
+
+    def test_the_live_region_says_what_happened(self) -> None:
+        self.assertNotEqual(self._fact("live"), "")
+
+    # --- Open -----------------------------------------------------------
+
+    def test_the_reachable_project_is_the_only_one_with_open_links(self) -> None:
+        """Three known projects, one linkable: an absolute Windows root, a
+        root the build could not reach, and a relative string that is not a
+        local path at all.
+        """
+        hrefs = [link["href"] for link in self._fact("openLinks")]
+        self.assertEqual(
+            sorted(hrefs), sorted([ACTION_WINDOWS_URL, ACTION_WINDOWS_LEDGER_URL])
+        )
+
+    def test_no_open_link_was_downgraded_by_the_href_gate(self) -> None:
+        """`safeHref` answers `#` for anything it refuses, so a builder that
+        produced the wrong shape would show up here as a dead fragment.
+        """
+        for link in self._fact("openLinks"):
+            with self.subTest(href=link["href"]):
+                self.assertTrue(link["href"].startswith("file:///"), link["href"])
+                self.assertNotEqual(link["href"][8], "/")
+
+    def test_the_file_url_builder_answers_match_the_pinned_encoding(self) -> None:
+        answers = dict(self._fact("fileUrl"))
+        self.assertEqual(answers["C:\\Users\\a b\\proj"], ACTION_WINDOWS_URL)
+        self.assertEqual(answers["/home/a b"], "file:///home/a%20b")
+        self.assertEqual(answers["C:\\a%b\\c#d"], "file:///C:/a%25b/c%23d")
+        for path in (
+            "relative/path",
+            "",
+            "\\\\server\\share",
+            "//server/share",
+            "$USER_CONFIG/settings.json",
+        ):
+            with self.subTest(path=path):
+                self.assertIsNone(answers[path])
+
+    # --- the buttons themselves -----------------------------------------
+
+    def test_the_invalid_backlog_id_got_no_instruction_button(self) -> None:
+        """Two backlog entries, one with an id `ID_RE` refuses. The valid one
+        carries a copy and a queue control; the invalid one carries only the
+        export, because a control that produced nothing would be worse than
+        no control.
+        """
+        labels = [
+            row["label"] for row in self._fact("pressed") if row["panel"] == "backlog"
+        ]
+        dicts = json.loads(self.islands["aio-i18n"])["en"]
+        self.assertEqual(labels.count(dicts["action.copy_instruction"]), 1)
+        self.assertEqual(labels.count(dicts["action.queue_add"]), 1)
+        self.assertEqual(labels.count(dicts["action.export"]), 2)
+
+
+# A probe that presses one ordinary copy control and reads back all three
+# tiers at once: what the clipboard got, what the box holds, and what the
+# live region said.
+CLIPBOARD_API_PROBE = r"""
+(function () {
+  var clip = globalThis.__AIO_CLIPBOARD__;
+  var out = { api: typeof window.navigator.clipboard, failures: [] };
+
+  function walk(node, fn) {
+    fn(node);
+    (node.childNodes || []).forEach(function (child) { walk(child, fn); });
+  }
+
+  var found = null;
+  walk(document.getElementById("aio-panel-materials"), function (node) {
+    var value = node.attributes ? node.attributes["class"] : null;
+    var classes = typeof value === "string" ? value.split(" ") : [];
+    if (node.tagName === "BUTTON" && classes.indexOf("action") !== -1 && found === null) {
+      found = node;
+    }
+  });
+  if (found === null) {
+    out.failures.push("the materials panel built no action button");
+    process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+    process.exit(2);
+  }
+  (found.listeners.click || []).forEach(function (fn) { fn({}); });
+
+  out.label = found.textContent;
+  out.clipboard = clip.slice(0);
+  out.box = document.getElementById("aio-copytext").value;
+  out.live = document.getElementById("aio-live").textContent;
+  process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+  process.exit(0);
+}());
+"""
+
+
+class RuntimeClipboardApiTests(ShellTemplateTestCase):
+    """The first copy tier, on a browser that offers it.
+
+    Every other runtime case here runs the `file:` reality -- no
+    `navigator.clipboard`, so the selection tier is what executes. That
+    leaves `writeViaClipboard` unexercised, which is how a branch nothing
+    runs ends up shipping broken. This case turns the API on in the stub and
+    presses one ordinary copy control.
+
+    The assertion is not only "the API was used": it is that the read-only
+    box was filled *anyway*. Build spec section 1.4 makes the box a constant
+    rather than a fallback, and a copy path that skipped it whenever the
+    fast tier worked would leave the reader with nothing to check against.
+    """
+
+    proc: subprocess.CompletedProcess[str]
+    facts: dict
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        if NODE is None:
+            raise unittest.SkipTest("node is not installed")
+        cls.proc = boot_shell(
+            cls.text,
+            cls.islands,
+            ACTION_FIXTURE_PAYLOAD,
+            probe=CLIPBOARD_API_PROBE,
+            extra_globals={"__AIO_CLIPBOARD_API__": True},
+        )
+        try:
+            cls.facts = json.loads(cls.proc.stdout)
+        except ValueError:
+            cls.facts = {}
+
+    def test_the_probe_ran(self) -> None:
+        self.assertEqual(
+            self.proc.returncode,
+            0,
+            "\n".join((self.proc.stdout.strip(), self.proc.stderr.strip())),
+        )
+        self.assertEqual(self.facts.get("failures"), [])
+        self.assertEqual(self.facts.get("api"), "object")
+
+    def test_the_fast_tier_carried_the_instruction(self) -> None:
+        self.assertEqual(
+            self.facts.get("clipboard"), ["Re-audit material MAT-2026-000"]
+        )
+
+    def test_the_read_only_box_was_filled_anyway(self) -> None:
+        self.assertEqual(self.facts.get("box"), "Re-audit material MAT-2026-000")
+
+    def test_the_reader_was_told_the_copy_succeeded(self) -> None:
+        dicts = json.loads(self.islands["aio-i18n"])["en"]
+        self.assertEqual(self.facts.get("live"), dicts["action.copied"])
 
 
 if __name__ == "__main__":

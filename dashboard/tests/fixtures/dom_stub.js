@@ -31,6 +31,10 @@ function El(tag) {
   this.hidden = false;
   this.id = "";
   this.lang = "";
+  /* Task 6's manual copy tier writes here. A real textarea's `value` is
+     what the reader sees and what a selection copies, so it is the one
+     property the copy path reads back. */
+  this.value = "";
 }
 
 El.prototype.setAttribute = function (name, value) {
@@ -58,6 +62,23 @@ El.prototype.addEventListener = function (type, fn) {
 };
 
 El.prototype.focus = function () { this.focused = true; };
+
+/* The clipboard affordances Task 6's copy path really uses, and nothing
+   more. Everything here fails closed.
+
+   `select` records what a copy would take, exactly as a browser's selection
+   would: whatever is in the element's `value` at the moment of the call.
+   `document.execCommand` below then copies *that*, so the recorded
+   clipboard is the text the page actually put in front of the reader --
+   not the text some test handed the function. If the shell ever filled the
+   box with one string and copied another, the two would disagree here. */
+El.prototype.select = function () {
+  globalThis.__AIO_SELECTED__ = String(this.value);
+  this.selected = true;
+};
+
+/* Every string the page succeeded in copying, in order. */
+var clipboard = [];
 
 Object.defineProperty(El.prototype, "firstChild", {
   get: function () { return this.childNodes.length === 0 ? null : this.childNodes[0]; }
@@ -110,6 +131,16 @@ var document = {
     }
     return registry[id];
   },
+  /* Refuses every command but "copy", and refuses even that unless
+     something was selected first -- which is what a browser does, and what
+     makes a shell that forgot to select show up as a failure rather than
+     as a silent success. */
+  execCommand: function (name) {
+    if (String(name) !== "copy") { return false; }
+    if (typeof globalThis.__AIO_SELECTED__ !== "string") { return false; }
+    clipboard.push(globalThis.__AIO_SELECTED__);
+    return true;
+  },
   addEventListener: function () {}
 };
 
@@ -128,7 +159,23 @@ var window = {
     hash: String(globalThis.__AIO_HASH__ || ""),
     replace: function (value) { this.hash = String(value); }
   },
-  navigator: { language: String(globalThis.__AIO_LANG__ || "en") },
+  navigator: {
+    language: String(globalThis.__AIO_LANG__ || "en"),
+    /* Absent by default, which is what a `file:` origin really offers: a
+       file page is not a secure context, so `navigator.clipboard` is not
+       there and the selection tier is the one that runs. A getter rather
+       than a property because the opt-in global is seeded by the preamble,
+       which the harness concatenates *after* this file. */
+    get clipboard() {
+      if (!globalThis.__AIO_CLIPBOARD_API__) { return undefined; }
+      return {
+        writeText: function (text) {
+          clipboard.push(String(text));
+          return Promise.resolve();
+        }
+      };
+    }
+  },
   localStorage: storage,
   matchMedia: function (query) {
     return {
@@ -145,3 +192,4 @@ globalThis.document = document;
 globalThis.window = window;
 globalThis.__AIO_REGISTRY__ = registry;
 globalThis.__AIO_CREATED__ = created;
+globalThis.__AIO_CLIPBOARD__ = clipboard;

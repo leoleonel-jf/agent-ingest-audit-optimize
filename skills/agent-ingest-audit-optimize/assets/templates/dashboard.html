@@ -458,6 +458,114 @@ main:focus { outline: none; }
   padding-inline-start: 1.1rem;
 }
 
+/* Actions ---------------------------------------------------------------
+   Design spec section 12.2. A file: page cannot run a command, so these are
+   not controls that act -- they are controls that hand the reader something
+   to paste. They are deliberately quiet: smaller than the chrome's own
+   buttons, laid out in a row that wraps, and never the first thing a panel
+   offers. The one exception is the Open link, which is a real anchor and is
+   styled to look like the buttons beside it so a row of actions reads as
+   one group rather than as a button, a button, and a link. */
+
+.actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin-block-start: var(--step);
+}
+
+.action { font-size: 0.78rem; padding: 0.15rem 0.45rem; }
+
+a.action {
+  display: inline-block;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  text-decoration: none;
+}
+
+a.action:hover { text-decoration: underline; }
+
+/* A control whose guard has not been satisfied yet. The attribute is the
+   appearance; the refusal itself is in the handler (see rollbackActions),
+   so this rule is allowed to be purely cosmetic. */
+button.action[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.confirm-step {
+  margin-block-start: var(--step);
+  padding: var(--step) 0.5rem;
+  border-inline-start: 3px solid var(--warning);
+  background: var(--bg);
+}
+
+.confirm { border-color: var(--warning); color: var(--warning); }
+
+/* The action queue (design spec section 12.2). A drawer rather than a
+   panel: it is a scratch list, it lives only in this tab's memory, and it
+   should not compete with the ledger for the reader's attention. */
+
+.queue { padding: 0 var(--gap); }
+
+.queue-drawer {
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 0.35rem 0.6rem;
+  background: var(--surface);
+}
+
+.queue-drawer summary { cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+
+.queue-body { margin-block-start: var(--step); }
+
+.queue-list {
+  margin: 0 0 var(--step);
+  padding-inline-start: 1.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+/* The manual copy tier (build spec section 1.4). Always the same box, always
+   holding exactly what the last action produced, so a browser with no
+   clipboard API at all still leaves the reader something to select. */
+
+.copybox {
+  margin: var(--step) var(--gap) 0;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--surface);
+}
+
+.copybox-label { margin: 0 0 var(--step); font-size: 0.85rem; font-weight: 600; }
+
+.copybox-text {
+  inline-size: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 0.3rem;
+  resize: vertical;
+}
+
+/* The announcement. Visible as well as announced: a reader watching the
+   button they just pressed should not have to take a screen reader's word
+   for what happened. */
+.live {
+  margin: var(--step) 0 0;
+  padding: 0 var(--gap);
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+  min-block-size: 1.2rem;
+}
+
 /* An evidence source is frequently a URL, and it is rendered as text on
    purpose (design spec section 1.3): it wraps anywhere so a long one does
    not push the table wider than the viewport. An anchor and a digest get the
@@ -622,10 +730,18 @@ footer {
     --info: #000000;
   }
 
+  /* Controls do not print. An action button on paper is a button nobody
+     can press, and the queue and the copy box are scratch state rather than
+     ledger content -- printing them would put a half-finished list of
+     instructions into a document meant to be the record. */
   .skip-link,
   .panels,
   .filters,
-  .actions { display: none !important; }
+  .actions,
+  .actions-row,
+  .queue,
+  .copybox,
+  .live { display: none !important; }
 
   body { background: #ffffff; color: #000000; font-size: 11pt; }
   main { padding: 0; }
@@ -669,6 +785,21 @@ footer {
 </header>
 
 <nav class="panels" id="aio-nav" role="tablist"></nav>
+
+<div class="queue" id="aio-queue"></div>
+
+<!-- Build spec section 1.4's third clipboard tier, and the only one that is
+     always available: a file: page is not a secure context, so a browser may
+     offer neither navigator.clipboard nor document.execCommand. The box
+     therefore ships in the markup rather than being built on demand, is
+     filled on every copy whether or not either API worked, and is read-only
+     so the text in it is always exactly what the button produced. -->
+<div class="copybox" id="aio-copybox" hidden>
+  <p class="copybox-label" id="aio-copylabel"></p>
+  <textarea class="copybox-text" id="aio-copytext" readonly rows="3" aria-labelledby="aio-copylabel"></textarea>
+</div>
+
+<p class="live" id="aio-live" role="status" aria-live="polite"></p>
 
 <main id="aio-main" tabindex="-1">
   <noscript>
@@ -862,6 +993,34 @@ footer {
     "help.cmd.drift": "Compare every recorded item and run target against the files on disk now.",
     "help.cmd.rollback_preview": "Show what undoing one run would restore, leave alone, and fail to restore.",
     "help.cmd.build": "Generate this page from a ledger. It refuses any ledger that verify would reject.",
+
+    "table.actions": "Actions",
+    "action.copy_instruction": "Copy instruction",
+    "action.queue_add": "Add to queue",
+    "action.export": "Export JSON",
+    "action.copied": "Copied to the clipboard.",
+    "action.queued": "Added to the action queue.",
+    "action.copy_manual": "This browser would not let the page reach the clipboard. The text is in the box above — select it and copy it by hand.",
+    "action.copy_manual_label": "Ready to copy",
+    "action.instructions_are_english": "Instructions stay in English in every language: they are written for the agent, not for you, and a translated one is an instruction it was never taught.",
+    "queue.title": "Action queue",
+    "queue.empty": "Nothing queued. Add instructions from any panel, then copy them as one batch. The queue lives in this tab only and is gone when you close it.",
+    "queue.order": "Copied in a safe order: undo before redo, so a rollback is never pasted after a change it was meant to precede.",
+    "queue.copy_all": "Copy the whole queue",
+    "queue.clear": "Empty the queue",
+    "queue.cleared": "The action queue is empty again.",
+    "rollback.actions": "Rollback actions",
+    "rollback.prepare": "Prepare rollback",
+    "rollback.confirm": "Yes, undo this run",
+    "rollback.confirm_prompt": "Read the four sets above first: they say what this undo restores, what it cannot restore, and what it leaves behind. Confirm to unlock the instruction for run",
+    "rollback.armed": "Confirmed. The rollback instruction can now be copied or queued.",
+    "rollback.locked": "Prepare and confirm this rollback first — the instruction is not available until you have.",
+    "rollback.copy": "Copy rollback instruction",
+    "overview.projects": "Known projects",
+    "projects.open_root": "Open folder",
+    "projects.open_ledger": "Open ledger",
+    "projects.no_path": "No absolute path was recorded, so there is nothing to open from here.",
+    "projects.unreachable_note": "The recorded root could not be reached, so it is not offered as a link.",
 
     "vocab.class.ADOPT GLOBALLY.tip": "Worth applying to every project, in the user-global configuration.",
     "vocab.class.ADOPT AS A DEFAULT FOR NEW PROJECTS.tip": "Worth building into new projects, without touching the ones that exist.",
@@ -1075,6 +1234,34 @@ footer {
     "help.cmd.drift": "Compara cada item registrado e cada alvo de execução com os arquivos que estão em disco agora.",
     "help.cmd.rollback_preview": "Mostra o que desfazer uma execução restauraria, deixaria intacto e não conseguiria restaurar.",
     "help.cmd.build": "Gera esta página a partir de um ledger. Ele recusa qualquer ledger que o verify rejeitaria.",
+
+    "table.actions": "Ações",
+    "action.copy_instruction": "Copiar instrução",
+    "action.queue_add": "Pôr na fila",
+    "action.export": "Exportar JSON",
+    "action.copied": "Copiado para a área de transferência.",
+    "action.queued": "Adicionado à fila de ações.",
+    "action.copy_manual": "Este navegador não deixou a página alcançar a área de transferência. O texto está na caixa acima — selecione e copie na mão.",
+    "action.copy_manual_label": "Pronto para copiar",
+    "action.instructions_are_english": "As instruções ficam em inglês em qualquer idioma: elas são escritas para o agente, não para você, e uma instrução traduzida é uma instrução que ele nunca aprendeu.",
+    "queue.title": "Fila de ações",
+    "queue.empty": "Nada na fila. Junte instruções de qualquer painel e copie tudo de uma vez. A fila existe só nesta aba e some quando você fecha.",
+    "queue.order": "Copiada em ordem segura: desfazer antes de refazer, para que um rollback nunca seja colado depois da mudança que ele deveria preceder.",
+    "queue.copy_all": "Copiar a fila inteira",
+    "queue.clear": "Esvaziar a fila",
+    "queue.cleared": "A fila de ações está vazia de novo.",
+    "rollback.actions": "Ações de rollback",
+    "rollback.prepare": "Preparar rollback",
+    "rollback.confirm": "Sim, desfazer esta execução",
+    "rollback.confirm_prompt": "Leia antes os quatro conjuntos acima: eles dizem o que este desfazer restaura, o que não consegue restaurar e o que deixa para trás. Confirme para liberar a instrução da execução",
+    "rollback.armed": "Confirmado. A instrução de rollback já pode ser copiada ou posta na fila.",
+    "rollback.locked": "Prepare e confirme este rollback antes — a instrução não fica disponível enquanto isso não acontecer.",
+    "rollback.copy": "Copiar instrução de rollback",
+    "overview.projects": "Projetos conhecidos",
+    "projects.open_root": "Abrir pasta",
+    "projects.open_ledger": "Abrir ledger",
+    "projects.no_path": "Nenhum caminho absoluto foi registrado, então não há o que abrir daqui.",
+    "projects.unreachable_note": "A raiz registrada não pôde ser alcançada, então ela não vira link.",
 
     "vocab.class.ADOPT GLOBALLY.tip": "Vale aplicar em todos os projetos, na configuração global do usuário.",
     "vocab.class.ADOPT AS A DEFAULT FOR NEW PROJECTS.tip": "Vale embutir em projetos novos, sem mexer nos que já existem.",
@@ -1805,6 +1992,292 @@ footer {
     return node;
   }
 
+  /* Actions -------------------------------------------------------------
+     Design spec section 12.2, under build spec section 1.4's rule. A
+     file: page cannot run a command, write a file, or speak to the agent,
+     so nothing here acts: every control produces text for a person to
+     paste, and the whole security question is which text.
+
+     The answer is: one of four fixed English sentences, plus a record id
+     this file matched against a pattern of its own, and nothing else --
+     no title, no reason, no anchor, no field of any record. A material is
+     an untrusted document; a clipboard is a place people paste without
+     reading; an instruction assembled from a material's own words would be
+     the shortest path there is from "someone wrote a hostile title" to
+     "the agent was told to do something nobody asked for".
+
+     Four properties carry that, and each one is pinned by a test:
+
+       1. TEMPLATES is frozen, so no later code can add a fifth entry, and
+          null-prototype, so an action of "constructor" reads back
+          undefined rather than the inherited function.
+       2. ID_RE's source appears exactly once in this file.
+       3. `instructionFor` is the only producer of instruction text, and
+          the concatenation below is the only line that assembles any --
+          one line, no template literal, greppable.
+       4. Every `copyText` call site is handed either a local assigned from
+          `instructionFor`, the queue's join of those, or `JSON.stringify`
+          of a payload object. */
+
+  var TEMPLATES = Object.freeze(Object.assign(Object.create(null), {
+    implement: "Implement proposal",
+    rollback: "Roll back run",
+    revisit: "Revisit backlog entry",
+    audit: "Re-audit material"
+  }));
+
+  /* ledger.schema.json's own record-id pattern, anchored at both ends. */
+  var ID_RE = /^(MAT|PROP|RUN|ADR|BASE)-\d{4}-\d{3}(-P)?$/;
+
+  /* The safe order for a batch: undo before redo. A rollback pasted after
+     an implementation would be applied to a setup that implementation had
+     already changed, which is the one ordering mistake a queue can make
+     that is worse than having no queue. */
+  var QUEUE_ORDER = ["rollback", "revisit", "audit", "implement"];
+
+  /* In memory, in this tab, and nowhere else. The queue is scratch state,
+     not ledger content: persisting it would put a half-finished list of
+     instructions in localStorage for the next reader to find. */
+  var QUEUE = [];
+
+  /* The only producer of instruction text in this file. Both halves are
+     checked before they meet, and either failure returns null rather than
+     a partial string: a caller that gets null renders no control at all,
+     because a button that produced nothing would be worse than a button
+     that is not there. */
+  function instructionFor(action, id) {
+    if (typeof own(TEMPLATES, action) !== "string") { return null; }
+    if (typeof id !== "string" || !ID_RE.test(id)) { return null; }
+    return TEMPLATES[action] + " " + id;
+  }
+
+  /* A payload object as JSON, which is the one export that cannot invent
+     anything: it is the document's own object, stringified. It does carry
+     the record's own words -- that is what an export is -- and it is
+     therefore never routed anywhere an instruction is expected. */
+  function exportText(value) {
+    return JSON.stringify(value, null, 2);
+  }
+
+  /* Build spec section 1.4's tiers, in order, and the third is not a
+     fallback but a constant: the read-only box is filled and revealed on
+     every copy, whether or not either programmatic tier worked. A file:
+     origin is not a secure context, so `navigator.clipboard` is usually
+     absent there; a browser that has also retired the selection path
+     leaves the box as the whole mechanism, and it is still enough. */
+  function copyText(text) {
+    var value = typeof text === "string" ? text : "";
+    var box = revealCopy(value);
+    if (writeViaClipboard(value)) { announce(t("action.copied")); return; }
+    if (writeViaSelection(box)) { announce(t("action.copied")); return; }
+    announce(t("action.copy_manual"));
+  }
+
+  /* Tier one. The promise is not awaited -- there is nothing to do with
+     the result but say so -- but a rejection is caught, because an
+     uncaught one would leave the reader with "Copied" on screen and an
+     empty clipboard. */
+  function writeViaClipboard(value) {
+    var nav = window.navigator;
+    var api = nav && typeof nav === "object" ? nav.clipboard : null;
+    if (!api || typeof api.writeText !== "function") { return false; }
+    try {
+      var pending = api.writeText(value);
+      if (pending && typeof pending.catch === "function") {
+        pending.catch(function () { announce(t("action.copy_manual")); });
+      }
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /* Tier two: select the box's own contents and ask the document to copy
+     the selection. The box is both the selection source and the manual
+     tier, so there is one element holding the text rather than two that
+     could disagree about what was copied. */
+  function writeViaSelection(node) {
+    if (!node || typeof node.select !== "function") { return false; }
+    if (typeof document.execCommand !== "function") { return false; }
+    try {
+      node.focus();
+      node.select();
+      return document.execCommand("copy") === true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function revealCopy(value) {
+    var label = document.getElementById("aio-copylabel");
+    if (label) { label.textContent = t("action.copy_manual_label"); }
+    var area = document.getElementById("aio-copytext");
+    if (!area) { return null; }
+    area.value = value;
+    var box = document.getElementById("aio-copybox");
+    if (box) { box.hidden = false; }
+    return area;
+  }
+
+  /* One live region for every action's result. Visible as well as
+     announced: a reader watching the button they just pressed should not
+     have to take a screen reader's word for what happened. */
+  function announce(message) {
+    var live = document.getElementById("aio-live");
+    if (live) { live.textContent = message; }
+  }
+
+  function actionButton(labelKey, onActivate) {
+    var node = h("button", { type: "button", class: "action" }, t(labelKey));
+    node.addEventListener("click", onActivate);
+    return node;
+  }
+
+  /* The copy/queue pair for one instruction, or nothing at all when the
+     pair `instructionFor` was given is not one it will answer for. */
+  function instructionActions(kind, id) {
+    var instruction = instructionFor(kind, id);
+    if (instruction === null) { return null; }
+    return h(
+      "span",
+      { class: "actions-row", role: "group", "aria-label": t("table.actions") },
+      actionButton("action.copy_instruction", function () {
+        copyText(instruction);
+      }),
+      actionButton("action.queue_add", function () {
+        enqueue(kind, instruction);
+      })
+    );
+  }
+
+  function exportButton(record) {
+    return actionButton("action.export", function () {
+      copyText(exportText(record));
+    });
+  }
+
+  /* The row of controls a record gets: its instruction, if this page has
+     one for that kind of record, and its export, which every record has.
+     A `kind` of null is how a panel says "export only" -- `own` answers
+     undefined for it, so the pair above is simply absent. */
+  function recordActions(kind, record) {
+    return h(
+      "div",
+      { class: "actions-row", role: "group", "aria-label": t("table.actions") },
+      instructionActions(kind, record.id),
+      exportButton(record)
+    );
+  }
+
+  function enqueue(kind, instruction) {
+    var i;
+    for (i = 0; i !== QUEUE.length; i += 1) {
+      if (QUEUE[i].text === instruction) { announce(t("action.queued")); return; }
+    }
+    QUEUE.push({ kind: kind, text: instruction });
+    announce(t("action.queued"));
+    renderQueue();
+  }
+
+  /* Sorts a copy, and the sort is stable, so two instructions of the same
+     kind keep the order they were added in. */
+  function queueOrdered() {
+    return QUEUE.slice().sort(function (left, right) {
+      return QUEUE_ORDER.indexOf(left.kind) - QUEUE_ORDER.indexOf(right.kind);
+    });
+  }
+
+  function queueText() {
+    return queueOrdered().map(function (entry) {
+      return entry.text;
+    }).join("\n");
+  }
+
+  /* Rebuilt in place rather than through `render()`: a full render would
+     also rebuild the Rollback panel, and rebuilding that panel resets the
+     confirmation a reader had just given. Adding something to a queue
+     should not silently disarm a control on another tab. */
+  function renderQueue() {
+    var host = document.getElementById("aio-queue");
+    if (!host) { return; }
+    clear(host);
+    var body = h("div", { class: "queue-body" });
+    if (QUEUE.length === 0) {
+      body.appendChild(h("p", { class: "note" }, t("queue.empty")));
+    } else {
+      body.appendChild(h("p", { class: "note" }, t("queue.order")));
+      body.appendChild(h("ol", { class: "queue-list" }, queueOrdered().map(
+        function (entry) {
+          return h("li", { lang: "en" }, entry.text);
+        }
+      )));
+      body.appendChild(h(
+        "div",
+        { class: "actions-row", role: "group", "aria-label": t("queue.title") },
+        actionButton("queue.copy_all", function () { copyText(queueText()); }),
+        actionButton("queue.clear", function () {
+          QUEUE.length = 0;
+          announce(t("queue.cleared"));
+          renderQueue();
+        })
+      ));
+    }
+    host.appendChild(h(
+      "details",
+      { class: "queue-drawer" },
+      h("summary", null, t("queue.title") + " " + String(QUEUE.length)),
+      body
+    ));
+  }
+
+  /* A file: URL for a path the ledger recorded *as a path*, and never for
+     an anchor.
+
+     This is the one place Task 6 had to narrow design spec section 12.2.
+     The section offers to open "the record, the backup, or the changed
+     file", and none of the three is reachable from this payload: an anchor
+     is stored as "$NAME/..." by construction -- `resolve_anchored` refuses
+     an absolute one -- and neither the drift report nor the rollback
+     preview carries the path it actually opened, only the anchor it
+     classified. A record's `file` is relative to the ledger, which this
+     page cannot resolve without knowing where the ledger is. So the honest
+     set of linkable paths is the one the ledger stores as real paths:
+     `known_projects[].project_root` and `.ledger_path`, which `build`
+     itself stats directly. Everything else gets no link rather than a
+     guess.
+
+     Returns null for anything that is not an absolute local path, which is
+     what makes "no path, no Open button" a property of this function
+     rather than of each caller. The encoding, pinned by test: backslashes
+     become forward slashes, every segment is percent-encoded, and the
+     drive letter's colon is left alone -- "file:///C:/Users/a%20b". A UNC
+     path is refused outright: it names a host, and following it would be a
+     request over the network wearing a local scheme, which is exactly what
+     `safeHref` refuses on the other side. */
+  function fileUrl(path) {
+    if (typeof path !== "string" || path === "") { return null; }
+    if (path.indexOf(SEPARATOR) !== -1) { return null; }
+    var slashed = path.replace(/\\/g, "/");
+    var drive = /^([A-Za-z]):\//.exec(slashed);
+    var head = "";
+    var rest = "";
+    if (drive !== null) {
+      head = drive[1] + ":/";
+      rest = slashed.slice(drive[0].length);
+    } else if (slashed.charAt(0) === "/" && slashed.charAt(1) !== "/") {
+      rest = slashed.slice(1);
+    } else {
+      return null;
+    }
+    return "file:///" + head + rest.split("/").map(encodeURIComponent).join("/");
+  }
+
+  function openLink(labelKey, path) {
+    var url = fileUrl(path);
+    if (url === null) { return null; }
+    return h("a", { class: "action", href: url, title: path }, t(labelKey));
+  }
+
   /* Language ---------------------------------------------------------- */
 
   function t(key) {
@@ -1942,6 +2415,7 @@ footer {
     document.title = t("app.title");
     renderChrome(state);
     renderNav(state);
+    renderQueue();
     renderPanels(state);
     renderFooter();
   }
@@ -2213,12 +2687,57 @@ footer {
     section.appendChild(h("h3", null, t("overview.cards")));
     section.appendChild(cards);
 
+    var projects = projectList(unreachable);
+    if (projects !== null) {
+      section.appendChild(h("h3", null, t("overview.projects")));
+      section.appendChild(projects);
+    }
+
     if (unreachable.length !== 0) {
       section.appendChild(h("h3", null, t("overview.unreachable")));
       section.appendChild(h("ul", { class: "keys" }, unreachable.map(function (root) {
         return h("li", null, h("code", { class: "path" }, root));
       })));
     }
+  }
+
+  /* The only Open links on this page (see `fileUrl` for why). A known
+     project records two real paths, and they are the only two strings in
+     the whole payload that are paths rather than anchors.
+
+     A project whose root the build could not reach gets no link: an Open
+     that leads nowhere is worse than no Open at all, because it reads as a
+     promise the page can keep and cannot. A root that is not an absolute
+     local path gets none either, and says so rather than going quiet --
+     the reader should know the ledger recorded something this page cannot
+     turn into a link, not be left wondering why one row has buttons and
+     the next does not. */
+  function projectList(unreachable) {
+    var entries = ledgerList("known_projects").filter(function (entry) {
+      return Boolean(entry) && typeof entry === "object";
+    });
+    if (entries.length === 0) { return null; }
+    return h("ul", { class: "keys" }, entries.map(function (entry) {
+      var gone = unreachable.indexOf(entry.project_root) !== -1;
+      var root = gone ? null : openLink("projects.open_root", entry.project_root);
+      var book = gone ? null : openLink("projects.open_ledger", entry.ledger_path);
+      var note = null;
+      if (gone) {
+        note = h("span", { class: "note" }, t("projects.unreachable_note"));
+      } else if (root === null && book === null) {
+        note = h("span", { class: "note" }, t("projects.no_path"));
+      }
+      return h(
+        "li",
+        null,
+        h("code", { class: "path" }, textOrDash(entry.project_root)),
+        " ",
+        h("code", { lang: "en" }, textOrDash(entry.status)),
+        " ",
+        note,
+        h("span", { class: "actions-row" }, root, book)
+      );
+    }));
   }
 
   function indicatorCard(labelKey, panel, indicator, unavailableKey) {
@@ -2561,6 +3080,11 @@ footer {
     block.appendChild(targetsTable(record, states));
     var leftover = selfReportedLeftover(record, ["result", "targets"]);
     if (leftover !== null) { block.appendChild(leftover); }
+    /* Export only. A run's own instruction is "roll it back", and that one
+       belongs to the Rollback panel, behind the confirmation -- offering it
+       here as one button among several is precisely the casual reach the
+       two-step exists to prevent. */
+    block.appendChild(recordActions(null, record));
     return block;
   }
 
@@ -2776,12 +3300,15 @@ footer {
   function chainList(record, byId, expired) {
     var list = h("ul", { class: "chain-list" });
     var proposal = recordById(byId, record.proposal);
+    /* The one place a PROPOSAL id is named on this page, and so the one
+       place the `implement` template has a call site. */
     list.appendChild(h(
       "li",
       null,
       t("provenance.proposal") + " ",
       h("code", { lang: "en" }, textOrDash(record.proposal)),
-      proposal === null ? null : " " + textOrDash(proposal.title)
+      proposal === null ? null : " " + textOrDash(proposal.title),
+      instructionActions("implement", record.proposal)
     ));
     var materials = materialIdsFor(record, proposal);
     if (materials.length === 0) {
@@ -2949,13 +3476,102 @@ footer {
     ));
     if (preview === null) {
       block.appendChild(h("p", { class: "note" }, t("rollback.preview_missing")));
+      block.appendChild(rollbackActions(record, preview));
       return block;
     }
     PREVIEW_SETS.forEach(function (key) {
       var meta = PREVIEW_SET_META[key];
       appendSet(block, meta.labelKey, preview[key], meta.withReason);
     });
+    /* After the four sets, never before them: design spec section 12.2
+       asks for the preview to be *displayed* before the copy is enabled,
+       and a control the reader meets before the evidence is a control they
+       decide about before they have read anything. */
+    block.appendChild(rollbackActions(record, preview));
     return block;
+  }
+
+  /* Design spec section 12.2's two-step, built as three controls rather
+     than a dialog: this page has no modal, needs none, and a modal would
+     have to be dismissible -- which is another way to leave a control
+     armed after the reader stopped paying attention.
+
+     The copy and queue controls exist from the start, visibly inert and
+     saying why, because a control that only appears after a click is a
+     control the reader has to discover twice.
+
+     `armed` is the guard; the `aria-disabled` attribute is only its
+     appearance. The handlers refuse on the flag, so a stylesheet, an
+     assistive technology that ignores the attribute, or a future edit that
+     forgets to set it cannot reach the instruction. Nothing re-arms and
+     nothing disarms silently: there is no blur handler, no timer, and no
+     escape key here at all. A re-render -- leaving this panel and coming
+     back -- rebuilds the block with `armed` false again, which is the safe
+     direction for the state to reset in, and is why `renderQueue` refreshes
+     the drawer in place instead of calling `render`. */
+  function rollbackActions(record, preview) {
+    var group = h("div", {
+      class: "actions-row",
+      role: "group",
+      "aria-label": t("rollback.actions")
+    });
+    var instruction = instructionFor("rollback", record.id);
+    if (instruction === null) {
+      if (preview !== null) { group.appendChild(exportButton(preview)); }
+      return group;
+    }
+    var armed = false;
+    var copy = h(
+      "button",
+      { type: "button", class: "action", "aria-disabled": "true" },
+      t("rollback.copy")
+    );
+    var queue = h(
+      "button",
+      { type: "button", class: "action", "aria-disabled": "true" },
+      t("action.queue_add")
+    );
+    var agree = h(
+      "button",
+      { type: "button", class: "action confirm" },
+      t("rollback.confirm")
+    );
+    var step = h(
+      "div",
+      { class: "confirm-step" },
+      h(
+        "p",
+        { class: "note" },
+        t("rollback.confirm_prompt") + " ",
+        h("code", { lang: "en" }, textOrDash(record.id))
+      ),
+      agree
+    );
+    step.hidden = true;
+    var prepare = actionButton("rollback.prepare", function () {
+      step.hidden = false;
+      announce(t("rollback.confirm_prompt"));
+    });
+    agree.addEventListener("click", function () {
+      armed = true;
+      copy.setAttribute("aria-disabled", "false");
+      queue.setAttribute("aria-disabled", "false");
+      announce(t("rollback.armed"));
+    });
+    copy.addEventListener("click", function () {
+      if (!armed) { announce(t("rollback.locked")); return; }
+      copyText(instruction);
+    });
+    queue.addEventListener("click", function () {
+      if (!armed) { announce(t("rollback.locked")); return; }
+      enqueue("rollback", instruction);
+    });
+    group.appendChild(prepare);
+    group.appendChild(copy);
+    group.appendChild(queue);
+    if (preview !== null) { group.appendChild(exportButton(preview)); }
+    group.appendChild(step);
+    return group;
   }
 
   /* Two different facts about one backup, and blurring them would be the
@@ -3050,7 +3666,10 @@ footer {
     wide(section);
     section.appendChild(gridTable(
       "backlog.caption",
-      ["table.record", "table.classification", "table.reason", "table.revisit"],
+      [
+        "table.record", "table.classification", "table.reason",
+        "table.revisit", "table.actions"
+      ],
       sorted.map(function (entry) { return backlogRow(entry, today); })
     ));
   }
@@ -3080,7 +3699,11 @@ footer {
       cell("table.record", h("code", { lang: "en" }, textOrDash(entry.id))),
       cell("table.classification", classificationChip(entry.classification, severity)),
       cell("table.reason", textOrDash(entry.reason)),
-      cell("table.revisit", revisit)
+      cell("table.revisit", revisit),
+      /* A backlog entry's id is the record it defers, so the instruction is
+         "revisit it". An entry whose id `ID_RE` refuses gets the export and
+         nothing else -- see `instructionActions`. */
+      cell("table.actions", recordActions("revisit", entry))
     ]);
   }
 
@@ -3113,7 +3736,7 @@ footer {
       "decisions.caption",
       [
         "table.record", "table.title", "table.status",
-        "table.updated", "table.links"
+        "table.updated", "table.links", "table.actions"
       ],
       focused.concat(rest).map(function (record) {
         return decisionRow(record, replaced, focused.indexOf(record) !== -1);
@@ -3184,7 +3807,12 @@ footer {
       cell("table.title", textOrDash(record.title)),
       cell("table.status", statusChip(record.status, "info")),
       cell("table.updated", textOrDash(record.updated)),
-      cell("table.links", links.length === 0 ? t("value.unknown") : links)
+      cell("table.links", links.length === 0 ? t("value.unknown") : links),
+      /* Export only. None of the four templates addresses a decision: an
+         ADR is a record of a choice already made, and "re-audit" or
+         "revisit" would each say something about it this page has no
+         grounds to say. */
+      cell("table.actions", recordActions(null, record))
     ]);
   }
 
@@ -3221,7 +3849,7 @@ footer {
       "materials.caption",
       [
         "table.record", "table.title", "table.status",
-        "table.classification", "table.evidence"
+        "table.classification", "table.evidence", "table.actions"
       ],
       sorted.map(function (record) { return materialRow(record, expired); })
     ));
@@ -3319,7 +3947,8 @@ footer {
       cell(
         "table.evidence",
         evidenceOf(record).length === 0 ? t("value.unknown") : list
-      )
+      ),
+      cell("table.actions", recordActions("audit", record))
     ]);
   }
 
@@ -3355,6 +3984,11 @@ footer {
     section.appendChild(h("p", { class: "empty" }, t("help.modes")));
     section.appendChild(h("p", { class: "empty" }, t("help.self_reported")));
     section.appendChild(h("p", { class: "empty" }, t("help.canonical_labels")));
+    /* Why every instruction on this page is in English even when the page
+       is not. Said here rather than beside each button: it is one rule
+       about the whole action model, and repeating it on every row would
+       make it furniture. */
+    section.appendChild(h("p", { class: "empty" }, t("action.instructions_are_english")));
 
     section.appendChild(h("h3", null, t("help.states")));
     section.appendChild(glossary(
