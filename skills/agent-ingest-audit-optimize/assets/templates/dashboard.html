@@ -876,7 +876,7 @@ footer {
 
     "value.yes": "sim",
     "value.no": "não",
-    "value.unknown": "não registrado",
+    "value.unknown": "sem registro",
 
     "filter.kind": "Tipo",
     "filter.all": "Todos",
@@ -1219,6 +1219,20 @@ footer {
 
   function clear(node) {
     while (node.firstChild) { node.removeChild(node.firstChild); }
+  }
+
+  /* Safety --------------------------------------------------------------
+     Ledger content routinely supplies the *key* half of a lookup -- a drift
+     state, a rollback indicator, a record id -- and every plain object
+     literal in this file (`{}`) inherits from Object.prototype. A ledger
+     string of "constructor", "toString", or similar would otherwise read
+     back a function instead of undefined: silently corrupting a computed
+     severity, or crashing the next line that assumed the result was an
+     array. `own` is the one gate every lookup on a ledger-derived key routes
+     through: it answers only for the map's own keys, never its inherited
+     ones. */
+  function own(map, key) {
+    return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined;
   }
 
   /* The severity word. Every caller but one reaches it through the
@@ -1888,7 +1902,7 @@ footer {
     if (summary && typeof summary === "object") {
       Object.keys(summary).forEach(function (state) {
         var count = summary[state];
-        var severity = DRIFT_SEVERITY[state];
+        var severity = own(DRIFT_SEVERITY, state);
         if (typeof count !== "number" || count === 0) { return; }
         if (severity === undefined || severity === "info") { return; }
         total += count;
@@ -1904,7 +1918,7 @@ footer {
     Object.keys(previews).forEach(function (runId) {
       var preview = previews[runId];
       if (!preview || typeof preview !== "object") { return; }
-      var severity = INDICATOR_SEVERITY[preview.indicator];
+      var severity = own(INDICATOR_SEVERITY, preview.indicator);
       if (severity === undefined || severity === "info") { return; }
       total += 1;
       if (severityRank(severity) < severityRank(worst)) { worst = severity; }
@@ -2023,7 +2037,7 @@ footer {
 
   function inventorySeverity(entry) {
     if (entry.drift === null) { return "info"; }
-    var severity = DRIFT_SEVERITY[entry.drift];
+    var severity = own(DRIFT_SEVERITY, entry.drift);
     /* A state this page does not know is not quietly a note: an unknown
        classification is exactly the case where the reader should look. */
     return severity === undefined ? "warning" : severity;
@@ -2169,7 +2183,13 @@ footer {
      built here rather than read, because the replacement itself records
      nothing about what it displaced. */
   function supersessionIndex(adrs) {
-    var index = {};
+    /* Object.create(null): `other` is a ledger-supplied ADR id, and a value
+       of "constructor" on a plain `{}` would read back the inherited
+       Function rather than undefined -- `!index[other]` would then be
+       false, skipping the array, and `index[other].push` would throw on a
+       function that has no such method. A null-prototype object has no
+       inherited names to collide with. */
+    var index = Object.create(null);
     adrs.forEach(function (record) {
       if (record.status !== "SUPERSEDED") { return; }
       linkedAdrs(record).forEach(function (other) {
@@ -2202,7 +2222,13 @@ footer {
         ));
       });
     }
-    (replaced[record.id] || []).forEach(function (other) {
+    /* `replaced` is already a null-prototype map (see supersessionIndex), so
+       a ledger record id of "toString" reads back undefined here rather than
+       Object.prototype.toString -- but the array check stays explicit rather
+       than resting on that alone, since a plain object arriving here from
+       any future caller would otherwise hand this `.forEach` a function
+       instead of a list. */
+    (Array.isArray(replaced[record.id]) ? replaced[record.id] : []).forEach(function (other) {
       links.push(h(
         "p",
         { class: "note" },

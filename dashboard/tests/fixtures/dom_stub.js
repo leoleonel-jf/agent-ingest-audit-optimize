@@ -73,12 +73,17 @@ Object.defineProperty(El.prototype, "textContent", {
 
 var registry = Object.create(null);
 
-/* Every tag name `createElement` was *asked for*, counted before any
-   coercion. The shell's `safeTag` turns `script` into `span`, so a count
-   under a forbidden name here is the one observation that would show a tag
-   name reaching the DOM from ledger content -- and unlike a look at the
-   finished tree, it survives the element being coerced into something
-   harmless. `dashboard/tests/test_shell.py` asserts on it. */
+/* A tally of every argument `createElement` actually received. `h()` always
+   calls `createElement(safeTag(tag))`, so by the time a name lands here it
+   has already been through `safeTag`'s coercion -- this counter cannot show
+   what tag ledger content *asked* for, only what tag name ultimately reached
+   `createElement`. Its value is narrower than that: it catches a future
+   direct `createElement` call that bypasses `h()` (and therefore `safeTag`)
+   entirely, which a look at the finished tree would not, since the finished
+   tree only ever shows the coerced result either way. The actual inertness
+   guarantee -- that ledger content never becomes an element at all -- is the
+   text-node assertion in `dashboard/tests/test_shell.py`
+   (`RuntimePanelTests`), not this counter. */
 var created = Object.create(null);
 
 var document = {

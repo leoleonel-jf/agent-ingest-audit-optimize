@@ -761,6 +761,226 @@ DEGRADED_FIXTURE_PAYLOAD = dict(
     computed=dict(FIXTURE_COMPUTED, drift={"error": "unknown client 'nope'"}),
 )
 
+# --- the I1 fixture: ledger strings used as plain-object keys -----------
+#
+# Every plain object literal in the shell (`{}`) inherits from
+# Object.prototype, so a ledger-supplied string of "constructor",
+# "toString", or similar can read back a function instead of undefined from
+# a lookup keyed on it. This ledger carries exactly the two shapes a
+# reviewer named: an ADR record whose own id is "toString" (the read side --
+# `decisionRow` looks up `replaced[record.id]`), and a second ADR, marked
+# SUPERSEDED, whose `links.adrs` names "constructor" (the write side --
+# `supersessionIndex` does `index[other] = []; index[other].push(...)`,
+# which throws on a plain `{}` because `index["constructor"]` is already the
+# truthy inherited Function and has no `.push`). The computed report adds a
+# drift summary keyed "toString" and a baseline item whose drift state is
+# "constructor", for the two lookups in `driftIndicator` and
+# `inventorySeverity`.
+MALICIOUS_KEY_FIXTURE_LEDGER = {
+    "schema_version": "1.0",
+    "ledger_id": "malicious-keys",
+    "scope": "project",
+    "language": "en",
+    "client": "claude-code",
+    "adapter_version": 2,
+    "created": "2026-07-01",
+    "updated": "2026-07-31",
+    "id_authority": True,
+    "sequences": {"MAT": 0, "PROP": 0, "RUN": 0, "ADR": 2, "BASE": 1},
+    "known_projects": [],
+    "records": [
+        {
+            "id": "toString",
+            "type": "ADR",
+            "title": "A record id that collides with Object.prototype.toString",
+            "status": "DECIDED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-05",
+            "updated": "2026-07-05",
+            "file": "records/ADR-toString.md",
+            "links": {},
+            "evidence": [],
+        },
+        {
+            "id": "ADR-2026-CTOR",
+            "type": "ADR",
+            "title": "A superseding record whose links.adrs names constructor",
+            "status": "SUPERSEDED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-06",
+            "updated": "2026-07-06",
+            "file": "records/ADR-2026-CTOR.md",
+            "links": {"adrs": ["constructor"]},
+            "evidence": [],
+        },
+    ],
+    "baselines": [
+        {
+            "id": "BASE-2026-000",
+            "captured_on": "2026-07-03",
+            "client": "claude-code",
+            "adapter_version": 2,
+            "items": [
+                {
+                    "kind": "instruction-file",
+                    "name": "poisoned",
+                    "anchor": "$USER_CONFIG/poisoned",
+                    "digest": DIGEST,
+                    "attributes": {},
+                    "origin": "pre-existing",
+                    "state": "present",
+                    "portable": True,
+                }
+            ],
+        }
+    ],
+    "backlog": [],
+}
+
+MALICIOUS_KEY_FIXTURE_COMPUTED = {
+    "drift": {
+        "baselines": [
+            {
+                "id": "BASE-2026-000",
+                "client": "claude-code",
+                "items": [
+                    {
+                        "kind": "instruction-file",
+                        "name": "poisoned",
+                        "anchor": "$USER_CONFIG/poisoned",
+                        "scope": None,
+                        "recorded_state": "present",
+                        # Not one of the five real drift states: this is the
+                        # `inventorySeverity` case -- an unrecognised state
+                        # must fall through to the unknown/undefined
+                        # treatment (a plain "row-warning"), never to a class
+                        # built by concatenating a stringified function.
+                        "state": "constructor",
+                        "reason": None,
+                    }
+                ],
+            }
+        ],
+        "runs": [],
+        # The five real states are all zero; "toString" carries a large
+        # count that must NOT reach the Drifted card, because
+        # `DRIFT_SEVERITY` has no *own* "toString" key.
+        "summary": {
+            "IN_PLACE": 0,
+            "DRIFTED": 0,
+            "MISSING": 0,
+            "REVERTED": 0,
+            "UNVERIFIABLE": 0,
+            "toString": 999999,
+        },
+    },
+    "previews": {},
+    "expired_evidence": [],
+    "unreachable_projects": [],
+}
+
+MALICIOUS_KEY_FIXTURE_PAYLOAD = {
+    "payload_schema": 1,
+    "mode": "built",
+    "generated_at": "2026-07-31T00:00:00Z",
+    "tool_version": "0.4.0",
+    "lang": "en",
+    "ledger": MALICIOUS_KEY_FIXTURE_LEDGER,
+    "computed": MALICIOUS_KEY_FIXTURE_COMPUTED,
+}
+
+# A dedicated probe rather than a reuse of PANEL_PROBE: this fixture is
+# about facts PANEL_PROBE never gathers -- whether every one of the nine
+# panel sections exists at all, whether the footer got populated, and the
+# actual CSS class a poisoned inventory row was built with -- not the six
+# panels' usual content facts.
+MALICIOUS_KEY_PROBE = r"""
+(function () {
+  var bad = [];
+
+  function walk(node, fn) {
+    fn(node);
+    (node.childNodes || []).forEach(function (child) { walk(child, fn); });
+  }
+
+  function classes(node) {
+    var value = node.attributes ? node.attributes["class"] : null;
+    return typeof value === "string" ? value.split(" ") : [];
+  }
+
+  function byClass(root, name) {
+    var out = [];
+    walk(root, function (node) {
+      if (classes(node).indexOf(name) !== -1) { out.push(node); }
+    });
+    return out;
+  }
+
+  function byTag(root, tag) {
+    var out = [];
+    walk(root, function (node) { if (node.tagName === tag) { out.push(node); } });
+    return out;
+  }
+
+  function bodyRows(root) {
+    var bodies = byTag(root, "TBODY");
+    if (bodies.length === 0) { return []; }
+    return byTag(bodies[0], "TR");
+  }
+
+  function report(code) {
+    process.stdout.write(JSON.stringify(facts, null, 2) + "\n");
+    process.exit(code);
+  }
+
+  var facts = { failures: bad };
+
+  if (!globalThis.__AIO_EXPORTS__) {
+    bad.push("the shell never reached its export: boot took a fatal path");
+    report(2);
+  }
+
+  var panelIds = globalThis.__AIO_PANEL_IDS__ || [];
+  facts.panelsPresent = {};
+  panelIds.forEach(function (name) {
+    facts.panelsPresent[name] = Boolean(document.getElementById("aio-panel-" + name));
+  });
+
+  facts.tabs = document.getElementById("aio-nav").childNodes.length;
+
+  var footer = document.getElementById("aio-footer");
+  facts.footerEntries = footer ? footer.childNodes.length : 0;
+
+  var overview = document.getElementById("aio-panel-overview");
+  facts.driftCard = null;
+  byClass(overview, "card").forEach(function (card) {
+    var label = byClass(card, "card-label")[0];
+    if (label && label.textContent === "Drifted items") {
+      var counts = byClass(card, "card-count");
+      facts.driftCard = {
+        count: counts.length ? counts[0].textContent : null,
+        severity: classes(card).filter(function (name) {
+          return name.lastIndexOf("card-", 0) === 0 && name !== "card-count";
+        })
+      };
+    }
+  });
+
+  var inventory = document.getElementById("aio-panel-inventory");
+  facts.inventoryRows = bodyRows(inventory).map(function (row) {
+    return { classes: classes(row), text: row.textContent };
+  });
+
+  var decisions = document.getElementById("aio-panel-decisions");
+  facts.decisionsRows = bodyRows(decisions).length;
+  facts.decisionsText = decisions.textContent;
+
+  report(bad.length === 0 ? 0 : 1);
+}());
+"""
+
 # The panel probe. Unlike `PROBE` it does not hold its own expectations: it
 # walks the rendered tree and reports facts, and the Python cases below do
 # the comparing, so a regression is named by a test rather than by a line in
@@ -881,7 +1101,8 @@ PANEL_PROBE = r"""
   facts.materials = {
     rows: bodyRows(materials).length,
     texts: textValues(materials),
-    text: materials.textContent
+    text: materials.textContent,
+    anchors: byTag(materials, "A").length
   };
 
   facts.help = { text: help.textContent };
@@ -929,7 +1150,11 @@ def slice_function(text: str, signature: str) -> str:
 
 
 def boot_shell(
-    text: str, islands: dict, payload: dict
+    text: str,
+    islands: dict,
+    payload: dict,
+    probe: str = PANEL_PROBE,
+    extra_globals: dict | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the real shell over `payload` under node, and return the process.
 
@@ -938,6 +1163,12 @@ def boot_shell(
     payload island replaced by `serialize_payload(payload)`. Serialized by
     the very function `build` calls, so the island the shell parses here has
     been through the section 1.1 escaping exactly as a real one would.
+
+    `probe` defaults to `PANEL_PROBE` but callers with a different question to
+    ask of the rendered tree -- `RuntimeMaliciousKeyPanelTests`, for one --
+    can supply their own. `extra_globals` seeds additional `globalThis` names
+    the alternate probe may need, JSON-serialized the same way the standard
+    globals above it are.
     """
     shell = extract_shell(text).rstrip()
     assert shell.endswith(IIFE_CLOSE), "the shell is no longer a bare IIFE"
@@ -946,16 +1177,17 @@ def boot_shell(
     seeded = dict(islands)
     seeded["aio-payload"] = serialize_payload(payload)
 
-    preamble = "\n".join(
-        (
-            "globalThis.__AIO_ISLANDS__ = " + json.dumps(seeded) + ";",
-            'globalThis.__AIO_HASH__ = "";',
-            'globalThis.__AIO_LANG__ = "en";',
-            "",
-        )
-    )
+    preamble_lines = [
+        "globalThis.__AIO_ISLANDS__ = " + json.dumps(seeded) + ";",
+        'globalThis.__AIO_HASH__ = "";',
+        'globalThis.__AIO_LANG__ = "en";',
+    ]
+    for name, value in (extra_globals or {}).items():
+        preamble_lines.append("globalThis." + name + " = " + json.dumps(value) + ";")
+    preamble_lines.append("")
+    preamble = "\n".join(preamble_lines)
     script = "\n".join(
-        (DOM_STUB.read_text(encoding="utf-8"), preamble, wired, PANEL_PROBE)
+        (DOM_STUB.read_text(encoding="utf-8"), preamble, wired, probe)
     )
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "shell_panels.js"
@@ -1570,10 +1802,23 @@ class PanelRendererSourceTests(ShellTemplateTestCase):
         Rendering one as a link would put a network scheme in the document
         and hand a reader a click that leaves the offline guarantee behind,
         so the materials renderer must not build an `a` at all.
+
+        `renderMaterials` only assembles the table shell -- the row markup,
+        where each evidence source is actually placed on the page, is built
+        by `materialRow`. A slice of `renderMaterials` alone would pass this
+        assertion even if `materialRow` built a link, which is exactly the
+        gap a reviewer found: this now checks both functions' source, and
+        `RuntimePanelTests.test_materials_panel_builds_no_anchor_elements`
+        below checks the rendered tree itself rather than only the source.
         """
-        body = slice_function(self.shell, "function renderMaterials(section)")
-        self.assertNotIn('h("a"', body)
-        self.assertNotIn("href", body)
+        for signature in (
+            "function renderMaterials(section)",
+            "function materialRow(record, expired)",
+        ):
+            with self.subTest(function=signature):
+                body = slice_function(self.shell, signature)
+                self.assertNotIn('h("a"', body)
+                self.assertNotIn("href", body)
 
     def test_no_object_literal_line_starts_with_an_id_key(self) -> None:
         """M1 again, over the code Task 4 adds: `id` never reaches `h()`."""
@@ -1711,10 +1956,15 @@ class RuntimePanelTests(ShellTemplateTestCase):
     comparing.
 
     The last case is the one that matters most: a material whose title is
-    `</script><script>x` must reach the document as one literal text node,
-    and the DOM stub's `createElement` counter must show that no element was
-    ever built for it. That is design spec section 7's acceptance item 2,
-    asserted against a render rather than against a grep.
+    `</script><script>x` must reach the document as one literal text node.
+    That is design spec section 7's acceptance item 2, asserted against a
+    render rather than against a grep. The DOM stub's `createElement` tally
+    is a separate, narrower check, not the proof of that item: `h()` always
+    calls `createElement(safeTag(tag))`, so the tally only ever sees a tag
+    name after `safeTag` has already coerced it. It cannot show that the
+    payload was never *offered* to `createElement` as a tag; it can only
+    catch a future code path that calls `createElement` directly, bypassing
+    `h()` and `safeTag` both.
     """
 
     proc: subprocess.CompletedProcess[str]
@@ -1862,6 +2112,16 @@ class RuntimePanelTests(ShellTemplateTestCase):
     def test_materials_renders_the_evidence_source_as_text(self) -> None:
         self.assertIn("vendor documentation, page 4", self._panel("materials")["text"])
 
+    def test_materials_panel_builds_no_anchor_elements(self) -> None:
+        """The behavioral half of I2: not just absent from the source, absent
+        from the render. `test_evidence_sources_are_never_routed_through_href`
+        greps `materialRow`'s body; this counts `<a>` elements in the actual
+        rendered Materials panel and requires zero, so a source built through
+        some path the grep does not slice -- or added later -- still fails
+        here.
+        """
+        self.assertEqual(self._panel("materials")["anchors"], 0)
+
     # --- The regression this whole file exists for ---------------------
 
     def test_a_script_payload_in_a_material_title_lands_as_one_text_node(self) -> None:
@@ -1876,9 +2136,17 @@ class RuntimePanelTests(ShellTemplateTestCase):
     def test_rendering_that_payload_created_no_script_element(self) -> None:
         """The counter the DOM stub keeps of every `createElement` argument.
 
-        `safeTag` coerces `script` to `span`, so a shell that somehow routed
-        the title through a tag name would show up here as a count rather
-        than as a subtly different-looking page.
+        This is a narrower guarantee than it looks. `h()` always calls
+        `createElement(safeTag(tag))`, so the name this counter records has
+        already been through `safeTag`'s coercion by the time `createElement`
+        sees it -- a shell that somehow routed the title through `h("script",
+        ...)` would still only ever tally "span" here, the same as any other
+        coerced tag. What a zero under "script"/"SCRIPT" actually rules out is
+        a *future* code path calling `createElement` directly, bypassing
+        `h()` and `safeTag` both. The proof that this title specifically
+        never became an element is
+        `test_a_script_payload_in_a_material_title_lands_as_one_text_node`,
+        just above, which asserts on the text node rather than on this tally.
         """
         created = self.facts.get("created", {})
         self.assertEqual(created.get("script"), None)
@@ -2006,6 +2274,105 @@ class RuntimeDegradedPanelTests(ShellTemplateTestCase):
         """A failed drift report is not a drift report: no chip, no claim."""
         self.assertEqual(self.facts["inventory"]["vocab"], [])  # type: ignore[attr-defined]
         self.assertEqual(self.facts["inventory"]["rows"], 3)  # type: ignore[attr-defined]
+
+
+@unittest.skipUnless(NODE, "node is not on PATH -- this suite needs it")
+class RuntimeMaliciousKeyPanelTests(ShellTemplateTestCase):
+    """I1: ledger strings used as plain-object keys, run against the real
+    shell rather than argued about in the abstract.
+
+    `MALICIOUS_KEY_FIXTURE_LEDGER` carries a record id of "toString" and a
+    SUPERSEDED record whose `links.adrs` names "constructor"; the computed
+    report adds a drift summary keyed "toString" and a baseline item whose
+    drift state is "constructor". Before this fix, the second of those threw
+    inside `supersessionIndex` (`index["constructor"].push` on the inherited
+    Function, which has no such method) and the first would have returned
+    `Object.prototype.toString` to `decisionRow`'s `.forEach` call. Both are
+    exercised by simply rendering the Decisions panel; nothing here calls
+    either function directly, because a fix that only worked when called
+    directly, and not from the render path, would not be a fix.
+    """
+
+    proc: subprocess.CompletedProcess[str]
+    facts: dict
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.proc = boot_shell(
+            cls.text,
+            cls.islands,
+            MALICIOUS_KEY_FIXTURE_PAYLOAD,
+            probe=MALICIOUS_KEY_PROBE,
+            extra_globals={"__AIO_PANEL_IDS__": list(PANEL_IDS)},
+        )
+        try:
+            cls.facts = json.loads(cls.proc.stdout)
+        except ValueError:
+            cls.facts = {}
+
+    def test_the_shell_booted_without_throwing(self) -> None:
+        """(a): a "constructor"-linking, "toString"-named ledger must not
+        crash the render. Before the `Object.create(null)` fix in
+        `supersessionIndex`, this exited nonzero with an uncaught TypeError.
+        """
+        self.assertEqual(
+            self.proc.returncode,
+            0,
+            "\n".join(
+                ("node reported:", self.proc.stdout.strip(), self.proc.stderr.strip())
+            ),
+        )
+        self.assertEqual(self.facts.get("failures"), [])
+
+    def test_every_panel_is_present(self) -> None:
+        """(a) continued: all nine sections, not just the ones this fixture
+        happens to populate."""
+        self.assertEqual(self.facts.get("tabs"), 9)
+        present = self.facts.get("panelsPresent", {})
+        for panel in PANEL_IDS:
+            with self.subTest(panel=panel):
+                self.assertTrue(present.get(panel), panel + " is absent")
+
+    def test_the_footer_is_populated(self) -> None:
+        """(a) continued: a render that crashed partway would leave the
+        footer empty rather than absent, since `renderFooter` runs last."""
+        self.assertGreater(self.facts.get("footerEntries", 0), 0)
+
+    def test_the_decisions_panel_rendered_both_records(self) -> None:
+        """The render this fixture is really testing: the ADR with id
+        "toString" and the SUPERSEDED ADR whose links.adrs names
+        "constructor" both reach the Decisions table."""
+        self.assertEqual(self.facts.get("decisionsRows"), 2)
+        self.assertIn("toString", self.facts.get("decisionsText", ""))
+        self.assertIn("constructor", self.facts.get("decisionsText", ""))
+
+    def test_drift_summary_key_toString_does_not_inflate_the_card(self) -> None:
+        """(b): the fixture's five real states are all zero; only a lookup
+        that treated "toString" as if it were one of `DRIFT_SEVERITY`'s own
+        keys would make this card show anything but a clean zero.
+        """
+        card = self.facts.get("driftCard")
+        self.assertIsNotNone(card, "no Drifted items card in the render")
+        self.assertEqual(card["count"], "0")
+        self.assertIn("card-info", card["severity"])
+
+    def test_drift_state_constructor_gets_the_unknown_treatment(self) -> None:
+        """(c): an inventory item whose drift state is "constructor" must
+        fall through `inventorySeverity`'s explicit unknown-state branch --
+        rendered as a plain "row-warning" -- rather than reading back
+        `DRIFT_SEVERITY`'s inherited `constructor` (the Object function) and
+        stringifying it into the row's class list.
+        """
+        rows = self.facts.get("inventoryRows", [])
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertIn("row-warning", row["classes"])
+        for css_class in row["classes"]:
+            with self.subTest(css_class=css_class):
+                self.assertNotIn("function", css_class.lower())
+                self.assertNotIn("[native code]", css_class)
+        self.assertIn("constructor", row["text"])
 
 
 if __name__ == "__main__":
