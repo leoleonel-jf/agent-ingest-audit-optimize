@@ -1,8 +1,8 @@
 # Roadmap — de 0.4.0 a 1.0 e além
 
-- Data: 2026-07-31
-- Status: PROPOSTA PARA DELIBERAÇÃO (nada aqui está aprovado)
-- Base: 0.4.0 + o incremento "resolved paths for Open" (merge `dce11e8`)
+- Data: 2026-07-31 (atualizado no mesmo dia, após execução)
+- Status: PARCIALMENTE EXECUTADO — ver §7
+- Base: 0.4.0 + os quatro incrementos de 2026-07-31 (PRs #13, #15, #16, #17)
 
 > Este documento é levantamento e proposta. Ele **não** autoriza implementação. Cada tema vira
 > spec + plano próprios, como todo incremento até aqui.
@@ -162,6 +162,30 @@ Se fosse escolher três coisas, nesta ordem:
    que separa esta ferramenta de um arquivo de anotações, e é barato perto do impacto.
 3. **Mapeamento de conformidade (0.9.0, antecipável)** — a janela regulatória abre em 2 de
    agosto de 2026. O ledger já produz o artefato; falta o dicionário que traduz record → controle.
+
+## 7. O que já saiu (2026-07-31)
+
+Três dos itens abaixo saíram do papel no mesmo dia em que este documento foi escrito, na ordem
+recomendada no §6. Cada um tem spec e plano próprios em `docs/specs/` e `docs/plans/`.
+
+| Item | Onde estava | Estado |
+|---|---|---|
+| Caminhos resolvidos p/ Open | Pilar I, 0.5.0 | **em `main`** (PR #13) |
+| Política gerenciada + `$platform:` | Pilar I, 0.5.0 | **em `main`** (PR #15) |
+| Ledger encadeado por hash + `chain --head` | Pilar II, 0.6.0 | **em `main`** (PR #16) |
+| Mapeamento de conformidade (EU AI Act, ISO 42001) | Pilar III, antecipado | **em `main`** (PR #17) |
+
+Duas coisas que o próprio trabalho ensinou, e que mudam o resto do roadmap:
+
+- **O validador de adapter é melhor do que eu supunha.** Ele recusou uma precedência `managed`
+  que eu havia declarado para `mcp-server` sem embarcar sonda correspondente. Vale confiar nele
+  como porta de entrada para os itens de supply chain do 0.7.0.
+- **A honestidade sobre o limite vende melhor que a promessa.** A tabela de ameaças da cadeia
+  (o que ela *não* detecta) virou a parte mais útil do recurso, e o mesmo padrão deve valer para
+  o trust score e a varredura de injeção do 0.7.0: declarar o limite antes de declarar o número.
+
+Nada mudou nas tensões do §5: `serve`, federação e SIEM seguem exigindo emenda ao §3, e
+`rollback --execute` segue sendo o item que quebraria a propriedade read-only.
 
 ## Fontes
 
