@@ -144,6 +144,18 @@ python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py scan --id 
 `0` clean, `1` findings, `2` a tool error. See
 [PRIVACY.md](PRIVACY.md) for what it reads and what a baseline can contain.
 
+Check a captured baseline against the environment as it stands with `drift`, and preview what a
+rollback of a recorded run would and would not restore with `rollback-preview`:
+
+```text
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py drift <path-to-ledger.json>
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py rollback-preview <path-to-ledger.json> RUN-YYYY-NNN
+```
+
+Both are read-only like `scan` and print one JSON report on standard output. Exit codes: `0`
+everything in place (`drift`) or a healthy rollback (`rollback-preview`), `1` drift, risk, or
+findings, `2` a tool error.
+
 See [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md) for the
 record model, and [assets/schemas/ledger.schema.json](skills/agent-ingest-audit-optimize/assets/schemas/ledger.schema.json)
 for the contract the validator enforces.
