@@ -354,7 +354,7 @@ main:focus { outline: none; }
 
 .filters {
   position: sticky;
-  inset-block-start: 2.6rem;
+  inset-block-start: 3rem;
   z-index: 1;
   display: flex;
   flex-wrap: wrap;
@@ -975,7 +975,7 @@ footer {
   <div class="palette-box">
     <h2 class="palette-title" id="aio-palette-title"></h2>
     <label class="palette-label" for="aio-palette-input" id="aio-palette-label"></label>
-    <input class="palette-input" id="aio-palette-input" type="text" autocomplete="off" spellcheck="false">
+    <input class="palette-input" id="aio-palette-input" type="text" autocomplete="off" spellcheck="false" aria-controls="aio-palette-results">
     <p class="palette-count" id="aio-palette-count"></p>
     <div id="aio-palette-note"></div>
     <ul class="palette-results" id="aio-palette-results"></ul>
@@ -1781,6 +1781,12 @@ footer {
   var PALETTE_MATCHES = [];
   var PALETTE_STOPS = [];
   var PALETTE_INVOKER = null;
+  /* M5: the count last written to the live region, so a keystroke that
+     leaves the match count unchanged does not repeat an announcement a
+     screen reader already heard. Reset to `null` on every open, so the
+     first count of a fresh session always announces regardless of what
+     the previous session last said. */
+  var PALETTE_LAST_ANNOUNCED = null;
 
   /* Building the DOM ------------------------------------------------- */
 
@@ -2799,7 +2805,9 @@ footer {
 
     ledgerList("baselines").forEach(function (entry) {
       if (!entry || typeof entry !== "object") { return; }
-      add(entry.id, "inventory");
+      /* Not `add(entry.id, "inventory")`: a baseline's own id (`BASE-...`)
+         renders on no panel at all -- Inventory lists items, not baselines
+         -- so indexing it could only ever dead-end a search. */
       var items = Array.isArray(entry.items) ? entry.items : [];
       items.forEach(function (item) {
         if (!item || typeof item !== "object") { return; }
@@ -2856,6 +2864,17 @@ footer {
     });
     stops.push(document.getElementById("aio-palette-close"));
     PALETTE_STOPS = stops;
+    /* M3: a rebuild replaces every result button with a new one, so a focus
+       that was on one of the old buttons is now on a node this render just
+       discarded -- a detached focus the Tab trap cannot recover, because it
+       only ever looks at the *current* stops. The input and the close
+       button are never rebuilt, so this only fires exactly when it needs
+       to: never while the reader is typing (focus stays on the input,
+       which is always in `stops`), and always when the render that just
+       ran pulled the rug out from under a result button. */
+    if (paletteIsOpen() && stops.indexOf(document.activeElement) === -1) {
+      document.getElementById("aio-palette-input").focus();
+    }
     var total = String(PALETTE_MATCHES.length);
     count.textContent = t("palette.results") + " " + total;
     clear(document.getElementById("aio-palette-note"));
@@ -2868,8 +2887,14 @@ footer {
     }
     /* The visible count is inside the dialog; the announcement goes through
        the page's one live region, so a screen reader hears the tally change
-       as it is typed without a second polite region competing with it. */
-    announce(t("palette.results") + " " + total);
+       as it is typed without a second polite region competing with it. M5:
+       only when that count actually changed, so retyping the same total
+       (a backspace and its undo, two keystrokes either side of a debounce
+       window) does not repeat an announcement already heard. */
+    if (PALETTE_MATCHES.length !== PALETTE_LAST_ANNOUNCED) {
+      PALETTE_LAST_ANNOUNCED = PALETTE_MATCHES.length;
+      announce(t("palette.results") + " " + total);
+    }
   }
 
   function paletteResult(entry) {
@@ -2897,6 +2922,9 @@ footer {
     PALETTE_INVOKER = invoker && typeof invoker.focus === "function" ? invoker : null;
     var input = document.getElementById("aio-palette-input");
     input.value = "";
+    /* M5: a fresh session announces its first count regardless of what the
+       last session last said, so this cannot read as silence. */
+    PALETTE_LAST_ANNOUNCED = null;
     paletteNode().hidden = false;
     renderPaletteResults("");
     input.focus();
@@ -2930,9 +2958,23 @@ footer {
     PALETTE_STOPS[next].focus();
   }
 
+  /* M4: an exact, case-insensitive label match wins over an earlier
+     substring one. `PALETTE_MATCHES` is in payload order, which is a
+     reasonable default when nothing matches exactly -- but a reader who
+     typed a whole record title, expecting the record that title names,
+     should not land on an unrelated record whose label merely contains it
+     and happens to sort first. Falls back to the first match, exactly the
+     prior behaviour, when nothing is exact. */
+  function paletteChoice(query) {
+    var wanted = String(query === null || query === undefined ? "" : query).toLowerCase();
+    for (var i = 0; i < PALETTE_MATCHES.length; i += 1) {
+      if (PALETTE_MATCHES[i].label.toLowerCase() === wanted) { return PALETTE_MATCHES[i]; }
+    }
+    return PALETTE_MATCHES[0];
+  }
+
   /* One handler on the dialog, reached by bubbling from whichever of its
-     controls has the focus. Enter takes the first match because the list is
-     already in payload order and the reader is looking at the top of it. */
+     controls has the focus. */
   function onPaletteKey(event) {
     var key = typeof event.key === "string" ? event.key : "";
     if (key === "Escape") {
@@ -2946,7 +2988,9 @@ footer {
     }
     if (key === "Enter") {
       event.preventDefault();
-      if (PALETTE_MATCHES.length !== 0) { paletteGo(PALETTE_MATCHES[0]); }
+      if (PALETTE_MATCHES.length !== 0) {
+        paletteGo(paletteChoice(document.getElementById("aio-palette-input").value));
+      }
     }
   }
 
@@ -2955,7 +2999,18 @@ footer {
      shortcut there, and a page that honoured only one would be advertising
      a key that does nothing on half the machines that open it. Escape is
      handled here as well as on the dialog, so a stray focus outside the
-     dialog still leaves the reader a way out. */
+     dialog still leaves the reader a way out.
+
+     M3: so is Tab. `trapTab` is reached from the dialog's own `keydown`
+     listener, which only ever fires when the focus is somewhere inside the
+     dialog for a browser's bubbling to find it. A focus that has gone
+     detached -- outside the dialog entirely, whether from a rebuild this
+     render missed or from anything else -- produces a Tab keydown no
+     element inside the dialog ever sees, and the browser is then free to
+     move real focus behind the backdrop. `document` sees every keydown
+     regardless of where focus is, so the trap is repeated here as a
+     backstop: while the palette is open, Tab is never allowed to leave it,
+     even from a focus this page can no longer account for. */
   function onGlobalKey(event) {
     var key = typeof event.key === "string" ? event.key : "";
     if ((event.ctrlKey === true || event.metaKey === true) && key.toLowerCase() === "k") {
@@ -2964,7 +3019,8 @@ footer {
       openPalette(document.activeElement);
       return;
     }
-    if (key === "Escape" && paletteIsOpen()) { closePalette(); }
+    if (key === "Escape" && paletteIsOpen()) { closePalette(); return; }
+    if (key === "Tab" && paletteIsOpen()) { trapTab(event); }
   }
 
   /* Wired once, at boot. Wiring it from `render` would add one listener per
@@ -3864,13 +3920,18 @@ footer {
       section.appendChild(h("p", { class: "empty" }, t("panel.provenance.empty")));
       return;
     }
-    var visible = filterRows(index, state.f, chainText);
+    /* Built before the filter runs: `chainText` needs it to resolve each
+       run's proposal, and a reader arriving from the palette is filtering
+       on exactly that proposal's id or title (see `chainText` below). */
+    var byId = recordIndex();
+    var visible = filterRows(index, state.f, function (entry) {
+      return chainText(entry, byId);
+    });
     if (!appendFilters(
       section, state, "provenance", visible.length, index.length, null, null
     )) {
       return;
     }
-    var byId = recordIndex();
     var expired = expiredEvidenceIndex();
     section.appendChild(h("p", { class: "note" }, t("provenance.intro")));
     section.appendChild(h("p", { class: "note" }, t("materials.source_is_text")));
@@ -3881,12 +3942,19 @@ footer {
 
   /* The anchor and the key are the entry's identity, and the ids of the
      runs under it are what a reader arriving from the Changes panel has in
-     hand. Both are what the palette indexes, so both find the chain. */
-  function chainText(entry) {
+     hand. The palette also indexes each run's proposal -- both its id and,
+     when the ledger still carries that record, its title -- because the
+     one place a PROPOSAL id and title appear on screen is inside this
+     chain (see `chainList`). Without them, choosing a PROPOSAL result from
+     the palette wrote a filter this panel could never match: I1. */
+  function chainText(entry, byId) {
     var values = [entry.anchor, entry.key];
     entry.runs.forEach(function (record) {
       values.push(record.id);
       values.push(record.title);
+      values.push(record.proposal);
+      var proposal = byId ? recordById(byId, record.proposal) : null;
+      if (proposal !== null) { values.push(proposal.title); }
     });
     return searchText(values);
   }

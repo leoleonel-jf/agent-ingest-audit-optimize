@@ -554,7 +554,8 @@ TAG_CASES = (
 SHELL_EXPORT = (
     "  globalThis.__AIO_EXPORTS__ = "
     "{ safeHref: safeHref, attrAllowed: attrAllowed, h: h, "
-    "TEMPLATES: TEMPLATES, instructionFor: instructionFor, fileUrl: fileUrl };\n"
+    "TEMPLATES: TEMPLATES, instructionFor: instructionFor, fileUrl: fileUrl, "
+    "buildPaletteIndex: buildPaletteIndex };\n"
 )
 IIFE_CLOSE = "}());"
 
@@ -5424,6 +5425,300 @@ class RuntimeBookmarkedFilterTests(ShellTemplateTestCase):
         found = self._fact("byKind")
         self.assertEqual(found["inventory"]["rows"], 1)
         self.assertEqual(found["changes"]["runs"], 1)
+
+
+# --- I1: the palette-index invariant -------------------------------------
+#
+# Reviewer-specified: every entry the palette itself indexes must land on a
+# panel where that entry's own filter actually shows something. This does
+# not pick one query by hand -- it walks the *real* index the shell builds
+# from the fixture ledger (`api.buildPaletteIndex()`, exported for exactly
+# this) and, for each entry, writes that entry's own `panel` + `f` onto the
+# fragment (precisely what `paletteGo` does) and counts what rendered.
+PALETTE_INVARIANT_PROBE = r"""
+(function () {
+  var bad = [];
+  var facts = { failures: bad };
+  var fire = globalThis.__AIO_FIRE__;
+  var api = globalThis.__AIO_EXPORTS__;
+
+  function walk(node, fn) {
+    fn(node);
+    (node.childNodes || []).forEach(function (child) { walk(child, fn); });
+  }
+
+  function classNames(node) {
+    var value = node.attributes ? node.attributes["class"] : null;
+    return typeof value === "string" ? value.split(" ") : [];
+  }
+
+  function byClass(root, name) {
+    var out = [];
+    walk(root, function (node) {
+      if (classNames(node).indexOf(name) !== -1) { out.push(node); }
+    });
+    return out;
+  }
+
+  function byTag(root, tag) {
+    var out = [];
+    walk(root, function (node) { if (node.tagName === tag) { out.push(node); } });
+    return out;
+  }
+
+  function rowsIn(root) {
+    var bodies = byTag(root, "TBODY");
+    if (bodies.length === 0) { return 0; }
+    return byTag(bodies[0], "TR").length;
+  }
+
+  function report(code) {
+    process.stdout.write(JSON.stringify(facts, null, 2) + "\n");
+    process.exit(code);
+  }
+
+  if (!api) {
+    bad.push("the shell never reached its export: boot took a fatal path");
+    report(2);
+  }
+  if (typeof api.buildPaletteIndex !== "function") {
+    bad.push("buildPaletteIndex was not exported for this probe to call");
+    report(2);
+  }
+
+  var index = api.buildPaletteIndex();
+  facts.indexSize = index.length;
+  facts.results = index.map(function (entry) {
+    window.location.hash =
+      "#panel=" + encodeURIComponent(entry.panel) + "&f=" + encodeURIComponent(entry.f);
+    fire(window, "hashchange", {});
+    var node = document.getElementById("aio-panel-" + entry.panel);
+    var rendered = node
+      ? rowsIn(node) + byClass(node, "chain").length + byClass(node, "run").length
+      : 0;
+    if (rendered === 0) {
+      bad.push(
+        "palette entry " + JSON.stringify(entry.label) + " (panel=" + entry.panel +
+        ", f=" + JSON.stringify(entry.f) + ") rendered nothing"
+      );
+    }
+    return { label: entry.label, panel: entry.panel, f: entry.f, rendered: rendered };
+  });
+
+  report(bad.length === 0 ? 0 : 1);
+}());
+"""
+
+
+class RuntimePaletteInvariantTests(ShellTemplateTestCase):
+    """I1: no palette entry may dead-end.
+
+    Every entry `buildPaletteIndex()` produces from the fixture ledger is
+    replayed through the real router (a hash write and a `hashchange`,
+    exactly what `paletteGo` does) and the target panel is inspected for at
+    least one rendered row, chain, or run block. Before the fix, every
+    PROPOSAL entry -- `PROP-2026-000` and `PROP-2026-001`, by id and by
+    title -- named the Provenance panel, but `chainText` read only the
+    anchor, the key, and each run's own id/title, never the run's
+    `proposal` field or that proposal's title. A search built from exactly
+    the label the palette itself offered therefore found zero chains.
+    """
+
+    proc: subprocess.CompletedProcess[str]
+    facts: dict
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        if NODE is None:
+            raise unittest.SkipTest("node is not installed")
+        cls.proc = boot_shell(
+            cls.text,
+            cls.islands,
+            FIXTURE_PAYLOAD,
+            probe=PALETTE_INVARIANT_PROBE,
+        )
+        try:
+            cls.facts = json.loads(cls.proc.stdout)
+        except ValueError:
+            cls.facts = {}
+
+    def test_the_probe_ran_and_every_index_entry_rendered_somewhere(self) -> None:
+        self.assertGreater(
+            self.facts.get("indexSize", 0),
+            0,
+            "\n".join((self.proc.stdout.strip(), self.proc.stderr.strip())),
+        )
+        self.assertEqual(
+            self.facts.get("failures"),
+            [],
+            "\n".join((self.proc.stdout.strip(), self.proc.stderr.strip())),
+        )
+        self.assertEqual(
+            self.proc.returncode,
+            0,
+            "\n".join(
+                ("node reported:", self.proc.stdout.strip(), self.proc.stderr.strip())
+            ),
+        )
+
+
+# --- M4: exact-match-first on Enter ---------------------------------------
+#
+# A dedicated, minimal ledger rather than the shared fixture: the point is
+# the tie-break rule in isolation. Two MATERIAL records share the token
+# "hooks" -- the first, in payload order, titled "hooks documentation" (a
+# substring match only), the second titled exactly "hooks". Enter must take
+# the second despite it sorting later in `PALETTE_MATCHES`.
+EXACT_MATCH_FIXTURE_LEDGER = {
+    "schema_version": "1.0",
+    "ledger_id": "exact-match",
+    "scope": "project",
+    "language": "en",
+    "client": "claude-code",
+    "adapter_version": 2,
+    "created": "2026-07-01",
+    "updated": "2026-07-31",
+    "id_authority": True,
+    "sequences": {"MAT": 2, "PROP": 0, "RUN": 0, "ADR": 0, "BASE": 0},
+    "known_projects": [],
+    "records": [
+        {
+            "id": "MAT-2026-000",
+            "type": "MATERIAL",
+            "title": "hooks documentation",
+            "status": "ANALYZED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-02",
+            "updated": "2026-07-02",
+            "file": "records/MAT-2026-000.md",
+            "links": {},
+            "evidence": [],
+        },
+        {
+            "id": "MAT-2026-001",
+            "type": "MATERIAL",
+            "title": "hooks",
+            "status": "ANALYZED",
+            "classification": "ADOPT LOCALLY",
+            "scope": "project",
+            "created": "2026-07-03",
+            "updated": "2026-07-03",
+            "file": "records/MAT-2026-001.md",
+            "links": {},
+            "evidence": [],
+        },
+    ],
+    "baselines": [],
+    "backlog": [],
+}
+
+EXACT_MATCH_FIXTURE_PAYLOAD = {
+    "payload_schema": 1,
+    "mode": "static",
+    "generated_at": None,
+    "tool_version": None,
+    "lang": None,
+    "ledger": EXACT_MATCH_FIXTURE_LEDGER,
+    "computed": None,
+}
+
+EXACT_MATCH_PROBE = r"""
+(function () {
+  var bad = [];
+  var facts = { failures: bad };
+  var fire = globalThis.__AIO_FIRE__;
+
+  function report(code) {
+    process.stdout.write(JSON.stringify(facts, null, 2) + "\n");
+    process.exit(code);
+  }
+
+  if (!globalThis.__AIO_EXPORTS__) {
+    bad.push("the shell never reached its export: boot took a fatal path");
+    report(2);
+  }
+
+  var dialog = document.getElementById("aio-palette");
+  var input = document.getElementById("aio-palette-input");
+
+  var invoker = document.createElement("div");
+  invoker.focus();
+  fire(document, "keydown", { key: "k", ctrlKey: true });
+
+  input.value = "hooks";
+  fire(input, "input", {});
+  facts.matchLabels = (function () {
+    var out = [];
+    (document.getElementById("aio-palette-results").childNodes || []).forEach(
+      function (li) {
+        (li.childNodes || []).forEach(function (button) {
+          out.push(button.textContent);
+        });
+      }
+    );
+    return out;
+  }());
+  facts.hashBeforeEnter = window.location.hash;
+  fire(dialog, "keydown", { key: "Enter" });
+  facts.hashAfterEnter = window.location.hash;
+
+  report(bad.length === 0 ? 0 : 1);
+}());
+"""
+
+
+class RuntimePaletteExactMatchTests(ShellTemplateTestCase):
+    """M4: Enter prefers an exact, case-insensitive label match on Enter.
+
+    Before the fix, Enter always took `PALETTE_MATCHES[0]` -- the first
+    substring match in payload order -- so a reader who typed the *whole*
+    record title, expecting the record that title names, could still land
+    on an earlier, merely-containing match instead.
+    """
+
+    proc: subprocess.CompletedProcess[str]
+    facts: dict
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        if NODE is None:
+            raise unittest.SkipTest("node is not installed")
+        cls.proc = boot_shell(
+            cls.text,
+            cls.islands,
+            EXACT_MATCH_FIXTURE_PAYLOAD,
+            probe=EXACT_MATCH_PROBE,
+        )
+        try:
+            cls.facts = json.loads(cls.proc.stdout)
+        except ValueError:
+            cls.facts = {}
+
+    def test_the_probe_ran(self) -> None:
+        self.assertEqual(
+            self.proc.returncode,
+            0,
+            "\n".join(
+                ("node reported:", self.proc.stdout.strip(), self.proc.stderr.strip())
+            ),
+        )
+        self.assertEqual(self.facts.get("failures"), [])
+
+    def test_both_the_substring_and_the_exact_match_are_offered(self) -> None:
+        labels = self.facts.get("matchLabels") or []
+        self.assertEqual(len(labels), 2)
+        self.assertIn("hooks documentation", labels[0])
+        self.assertIn("hooks", labels[1])
+        self.assertNotIn("documentation", labels[1])
+
+    def test_enter_prefers_the_exact_match_over_an_earlier_substring_match(
+        self,
+    ) -> None:
+        self.assertEqual(self.facts.get("hashBeforeEnter"), "")
+        self.assertEqual(self.facts.get("hashAfterEnter"), "#panel=materials&f=hooks")
 
 
 if __name__ == "__main__":
