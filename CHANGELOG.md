@@ -2,6 +2,73 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.4.0 - 2026-07-31
+
+The dashboard (`docs/plans/2026-07-31-dashboard-0.4.0.md`, `docs/specs/2026-07-31-dashboard-build.md`):
+a single offline HTML file a ledger renders to, and the first release whose dogfood confirmed
+rather than discovered.
+
+- adds `dashboard.py build LEDGER [--out PATH] [--lang CODE] [--force] [--project PATH]
+  [--adapter FILE] [--user-config PATH]`: assembles the nine-panel payload by calling the same
+  `drift` and `rollback-preview` code the standalone commands run — same code, not similar code,
+  so a payload's `computed.drift` and `computed.previews` can never disagree with what those
+  commands report standalone. The gate is `verify`'s own: a ledger `verify` would reject fails the
+  build with `verify`'s exit semantics and writes nothing, so a built page only ever carries a
+  ledger that already passed validation. Writes exactly one file, atomically — temp file, then
+  rename — and refuses to overwrite an existing `--out` unless that file already carries the shell
+  marker `id="aio-payload"` (`--force` overrides). The serializer that fills the payload island
+  escapes every `<` (and line/paragraph separator) as a `\u00XX` sequence unconditionally, over
+  the entire serialized envelope, not just the ledger text or strings that look dangerous — a
+  material title or evidence source an audited document supplied gets no special-casing, because
+  the property has to hold everywhere or it holds nowhere; the static-injection recipe for
+  no-Python clients repeats the same escaping step by hand, in `references/DASHBOARD.md`, with the
+  same warning;
+- ships `dashboard.html` as a single self-contained template: nine panels (overview, inventory,
+  changes, provenance, rollback, backlog, decisions, materials, help), a strict
+  `Content-Security-Policy` (`default-src 'none'`), and rendering that touches the DOM only through
+  `textContent` — never `innerHTML` — so ledger content can describe an attack but never become
+  one. `dashboard/tests/test_shell.py` boots the real shell against a DOM stub
+  (`dashboard/tests/fixtures/dom_stub.js`) and runs it under Node, not just Python fixtures, so the
+  runtime behavior a browser actually executes is what the suite pins. Two UI languages ship,
+  `en` and `pt-BR`, resolved fragment-param → payload `lang` → `localStorage` → `navigator.language`
+  → `en`; operating states, drift states, rollback indicators, classifications, statuses, and
+  record ids stay in English in both languages, because they are identifiers an operator matches
+  against ledger content and other tooling, not prose to translate. The action model is a fixed
+  English template plus a record id validated against the ledger's own identifier pattern
+  immediately before assembly — four templates, nothing else reaches the clipboard path — with an
+  in-memory queue (never persisted) that orders a batch `rollback`, `revisit`, `audit`, `implement`,
+  a per-record/per-preview JSON export, and a two-step rollback confirmation that never re-arms or
+  disarms silently. `Ctrl`/`Cmd`+`K` opens a command palette built once from the payload, indexing
+  every record and, for `RUN` records, every target's anchor and key. The page is legible without
+  color (glyph plus label on every indicator), usable at 360px (cards replace tables, nav wraps),
+  printable (all nine panels in sequence, provenance `<details>` expanded), respects
+  `prefers-color-scheme: dark` and `prefers-reduced-motion: reduce`, and issues zero network
+  requests — verified over a full click-through in real Chrome and in headless Edge for the
+  `file:` case;
+- narrows three things on purpose rather than shipping a false promise: **Open** links render only
+  where the payload carries an actual resolved filesystem path — a known project's `project_root`
+  and `ledger_path` (`known_projects[]`) — because every other panel deals in anchors
+  (`$USER_CONFIG/...`) that `resolve_anchored` never stores as an absolute path; making "open the
+  record, the backup, or the changed file" true everywhere the design spec asked for is a 0.5.0
+  change to the Python side (spec §8 records the deferral), not shipped here. **Export** is
+  per-record and per-preview JSON, not a ledger-wide download button — it covers the pull-one-
+  record-out audit-evidence use without a second copy of the whole ledger to keep in sync.
+  **Staleness** is the dashboard's own generation age (footer timestamp, a warning banner past
+  seven days, a rebuild hint), not a true newer-than-the-file-on-disk comparison, because a `file:`
+  page cannot stat `ledger.json` without issuing a request and the zero-network property is the
+  point of a generated dashboard; the true comparison is deferred to a future `serve` mode (§18)
+  that can actually read the file;
+- adds three §17 eval cases — XSS-001 (inert script payloads), CLP-001 (template-only clipboard
+  text), NET-001 (zero network requests) — bringing the suite to 33 cases, and a packaging test
+  proving both distribution zips ship the dashboard shell templates, verified by ablation;
+- dogfooded against this machine's live project ledger in a real browser (Chrome via Playwright)
+  and headless Edge (`file:` protocol, print, 360px): all six design-spec §16 acceptance criteria
+  pass, and **no defect was found** — the first increment whose dogfood confirmed rather than
+  discovered, because the node-harness runtime tests and four adversarial review waves had already
+  caught what previous increments' dogfoods caught late (prototype-key crashes, a vacuous no-link
+  test, palette dead-ends, a UNC `file://` hole). Full record in
+  `docs/validation/dashboard-dogfood-0.4.0.md`.
+
 ## 0.3.0 - 2026-07-30
 
 The third of three increments toward the design spec's 0.3.0
