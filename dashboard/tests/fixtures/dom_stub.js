@@ -61,7 +61,10 @@ El.prototype.addEventListener = function (type, fn) {
   this.listeners[type].push(fn);
 };
 
-El.prototype.focus = function () { this.focused = true; };
+El.prototype.focus = function () {
+  this.focused = true;
+  document.activeElement = this;
+};
 
 /* The clipboard affordances Task 6's copy path really uses, and nothing
    more. Everything here fails closed.
@@ -111,6 +114,11 @@ var document = {
   title: "",
   documentElement: new El("html"),
   body: new El("body"),
+  /* Real, mutated only by `El.prototype.focus`, which is the one thing
+     that touches it: the shell's manual copy tier reads it back before
+     it steals focus, so a stub that never moved it would let a focus
+     leak pass as a focus restore. */
+  activeElement: null,
   createElement: function (tag) {
     var name = String(tag);
     created[name] = (created[name] || 0) + 1;
@@ -139,10 +147,16 @@ var document = {
     if (String(name) !== "copy") { return false; }
     if (typeof globalThis.__AIO_SELECTED__ !== "string") { return false; }
     clipboard.push(globalThis.__AIO_SELECTED__);
+    /* Consumed, not left behind: a stale selection is a copy waiting to
+       reuse someone else's text. Deleting the global rather than setting
+       it to "" keeps the "nothing selected" check above (`typeof ... !==
+       "string"`) honest for whatever calls execCommand next. */
+    delete globalThis.__AIO_SELECTED__;
     return true;
   },
   addEventListener: function () {}
 };
+document.activeElement = document.body;
 
 /* `file:` origins throw on storage in some browsers; the shell wraps every
    read and write for that reason. Here storage simply works, so the wrap is

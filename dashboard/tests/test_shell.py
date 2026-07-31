@@ -373,6 +373,15 @@ COPY_TEXT_ARGUMENT = re.compile(
     r"^(instruction|queueText\(\)|exportText\([A-Za-z_$][A-Za-z0-9_$]*\))$"
 )
 
+# The same amendment, for `enqueue(`: the queue's whole safety property is
+# that every entry's text is one of the four canonical instructions, never a
+# record field, so the second argument may only ever be the local named
+# `instruction` (bound by `instructionFor`, per the allow-list above). The
+# first argument names the action kind, either `instructionActions`'s own
+# `kind` parameter or the literal `"rollback"` `rollbackActions` calls it
+# with -- never anything read off a record.
+ENQUEUE_ARGUMENT = re.compile(r'^(kind|"(implement|rollback|revisit|audit)"), instruction$')
+
 # What a copied instruction may look like, character for character.
 INSTRUCTION_LINE = re.compile(
     r"^(Implement proposal|Roll back run|Revisit backlog entry|Re-audit material) "
@@ -1946,7 +1955,16 @@ ACTION_PROBE = r"""
     bad.push("the rollback panel built no copy control");
     report(2);
   }
+  /* M2: the selection tier is the only one reachable here -- this probe
+     seeds no clipboard API, exactly like a `file:` page -- and it
+     focuses the manual copy box to select it. It must give focus back
+     afterwards: a reader's place on the page should survive a click of
+     "Copy" the same way the clipboard survives it. */
+  var focusHolder = document.createElement("div");
+  focusHolder.focus();
+  facts.focusBeforeCopy = document.activeElement === focusHolder;
   press(copy);
+  facts.focusRestoredAfterCopy = document.activeElement === focusHolder;
   facts.phaseB = clip.slice(markB);
 
   /* Phase C: queue the rollback, then copy the whole queue. */
@@ -1956,7 +1974,21 @@ ACTION_PROBE = r"""
     bad.push("the rollback panel built no queue control");
     report(2);
   }
+  /* I1: `renderQueue` throws the whole drawer away and rebuilds it on
+     every call, so a reader who opened it must have that state read off
+     the outgoing node and restored on the new one -- not merely
+     preserved by accident because nothing changed. Phase A already
+     queued the implement instruction, so a drawer exists; force it
+     open, add one more entry, and check the *new* drawer this press
+     produces. */
+  var queueHost = document.getElementById("aio-queue");
+  var drawerBefore = queueHost.firstChild;
+  if (drawerBefore) { drawerBefore.open = true; }
+  facts.drawerOpenBeforeQueue = drawerBefore ? drawerBefore.open === true : null;
   press(queue);
+  facts.drawerOpenAfterQueue = queueHost.firstChild
+    ? queueHost.firstChild.open === true
+    : null;
   var host = document.getElementById("aio-queue");
   var copyAll = null;
   actionNodes(host, "BUTTON").forEach(function (node) {
@@ -3963,6 +3995,17 @@ class ActionModelSourceTests(ShellTemplateTestCase):
             with self.subTest(argument=argument):
                 self.assertRegex(argument, COPY_TEXT_ARGUMENT)
 
+    def test_every_enqueue_call_site_takes_the_pinned_shape(self) -> None:
+        """`copyText`'s allow-list above has a mirror image here: a queue
+        entry is only ever the `instruction` local, never a record field
+        the reader would not recognize as one of the four templates.
+        """
+        found = call_arguments(self.shell, "enqueue")
+        self.assertGreaterEqual(len(found), 2)
+        for argument in found:
+            with self.subTest(argument=argument):
+                self.assertRegex(argument, ENQUEUE_ARGUMENT)
+
     def test_every_instruction_variable_comes_from_instruction_for(self) -> None:
         """The allow-list above permits a local named `instruction`; this is
         what stops that name from being assigned anything else.
@@ -3995,6 +4038,13 @@ class ActionModelSourceTests(ShellTemplateTestCase):
         at = self.shell.index("var QUEUE_ORDER = ")
         line = self.shell[at : self.shell.index("\n", at)]
         self.assertLess(line.index('"rollback"'), line.index('"implement"'))
+        # Statically pins the same guarantee for a machine with no node to
+        # run `RuntimeActionTests` on: the batch `queueText` hands to the
+        # clipboard is built from `queueOrdered()`, the one function that
+        # applies `QUEUE_ORDER` above, not from `QUEUE` directly -- so the
+        # sort just proven correct is provably the sort actually used.
+        body = slice_function(self.shell, "function queueText()")
+        self.assertIn("queueOrdered(", body)
 
     def test_the_manual_fallback_textarea_ships_read_only(self) -> None:
         """Build spec section 1.4's third tier is not a fallback but a
@@ -4249,6 +4299,26 @@ class RuntimeActionTests(ShellTemplateTestCase):
 
     def test_the_live_region_says_what_happened(self) -> None:
         self.assertNotEqual(self._fact("live"), "")
+
+    # --- focus and drawer state -----------------------------------------
+
+    def test_copying_via_selection_restores_the_prior_focus(self) -> None:
+        """M2: the selection tier moves focus onto the manual copy box to
+        select it. It must give focus back to whatever had it, not leave
+        the reader's place on the page wherever the copy happened to put
+        it.
+        """
+        self.assertIs(self._fact("focusBeforeCopy"), True)
+        self.assertIs(self._fact("focusRestoredAfterCopy"), True)
+
+    def test_the_queue_drawer_stays_open_across_a_render(self) -> None:
+        """I1: `renderQueue` rebuilds the drawer from scratch on every
+        call. `open` is a DOM property, not an attribute -- it is not in
+        `ALLOWED_ATTRS` -- so it survives only if the shell reads it off
+        the outgoing node and reapplies it to the new one.
+        """
+        self.assertIs(self._fact("drawerOpenBeforeQueue"), True)
+        self.assertIs(self._fact("drawerOpenAfterQueue"), True)
 
     # --- Open -----------------------------------------------------------
 

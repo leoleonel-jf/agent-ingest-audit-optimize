@@ -2099,12 +2099,23 @@ footer {
   function writeViaSelection(node) {
     if (!node || typeof node.select !== "function") { return false; }
     if (typeof document.execCommand !== "function") { return false; }
+    /* Copying is not the reader's cue to lose their place: this tier
+       moves focus onto the read-only box to select it, so whatever had
+       focus before this call is put back afterwards. Guarded on both
+       sides -- there may be nothing to restore, and the thing there may
+       not be a real, focusable element -- so a page with nothing focused
+       yet fails closed into doing nothing rather than throwing. */
+    var previous = document.activeElement;
     try {
       node.focus();
       node.select();
       return document.execCommand("copy") === true;
     } catch (err) {
       return false;
+    } finally {
+      if (previous && previous !== node && typeof previous.focus === "function") {
+        previous.focus();
+      }
     }
   }
 
@@ -2138,9 +2149,16 @@ footer {
   function instructionActions(kind, id) {
     var instruction = instructionFor(kind, id);
     if (instruction === null) { return null; }
+    /* No role/aria-label on this span: `recordActions` below wraps it in
+       its own role="group" carrying the same label, and a group nested
+       inside an identically-labelled group is a duplicate a screen
+       reader would announce twice for nothing. The one caller that uses
+       this span by itself -- `chainList`'s provenance line -- puts it in
+       a plain list item, not a group, and its two buttons still carry
+       their own labels either way. */
     return h(
       "span",
-      { class: "actions-row", role: "group", "aria-label": t("table.actions") },
+      { class: "actions-row" },
       actionButton("action.copy_instruction", function () {
         copyText(instruction);
       }),
@@ -2200,6 +2218,15 @@ footer {
   function renderQueue() {
     var host = document.getElementById("aio-queue");
     if (!host) { return; }
+    /* `open` is a DOM property a reader toggles by hand, never an
+       attribute this file writes -- it is deliberately absent from
+       ALLOWED_ATTRS, so it cannot be set through h()'s attrs object (the
+       same reason `step.hidden` above is set as a property rather than
+       routed through h()). Read the outgoing drawer's state before it is
+       discarded and rebuilt, so adding one more item to an open drawer
+       does not close it on the reader. */
+    var previousDrawer = host.firstChild;
+    var wasOpen = previousDrawer ? previousDrawer.open === true : false;
     clear(host);
     var body = h("div", { class: "queue-body" });
     if (QUEUE.length === 0) {
@@ -2222,12 +2249,14 @@ footer {
         })
       ));
     }
-    host.appendChild(h(
+    var drawer = h(
       "details",
       { class: "queue-drawer" },
       h("summary", null, t("queue.title") + " " + String(QUEUE.length)),
       body
-    ));
+    );
+    drawer.open = wasOpen;
+    host.appendChild(drawer);
   }
 
   /* A file: URL for a path the ledger recorded *as a path*, and never for
@@ -2413,11 +2442,30 @@ footer {
     LANG = resolveLang(state.lang, PAYLOAD ? PAYLOAD.lang : null);
     document.documentElement.lang = LANG;
     document.title = t("app.title");
+    renderCopyChrome();
     renderChrome(state);
     renderNav(state);
     renderQueue();
     renderPanels(state);
     renderFooter();
+  }
+
+  /* The two pieces of chrome that live outside any panel and outside
+     `renderQueue`, and that a language switch would otherwise leave
+     stale: the manual-copy box's label, which `revealCopy` only ever
+     sets in the language of whichever copy last ran, and the live
+     region, whose last announcement is a message from before the switch
+     and would otherwise sit there in the old language until the next
+     action. The label is re-set even while the box is hidden -- it
+     costs nothing and it means the box is never one render behind by
+     the time it is revealed. The live region is cleared rather than
+     re-translated: there is no message to translate, only a stale one
+     to retire. */
+  function renderCopyChrome() {
+    var label = document.getElementById("aio-copylabel");
+    if (label) { label.textContent = t("action.copy_manual_label"); }
+    var live = document.getElementById("aio-live");
+    if (live) { live.textContent = ""; }
   }
 
   function renderChrome(state) {
