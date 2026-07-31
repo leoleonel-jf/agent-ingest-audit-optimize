@@ -7,6 +7,16 @@ import re
 
 SCHEMA_VERSION = "1.0"
 
+# The single source of truth for the plugin's own version is
+# `.claude-plugin/plugin.json` -> `version`, but the bundle ships without
+# that file (packaging strips everything outside `skills/`), so a value
+# baked in here at release time is the only one `dashboard.py build` can
+# read at runtime. `packaging/tests/test_version_consistency.py` pins every
+# *other* copy of the version to that one source; this one is kept in step
+# by the same release step that bumps the rest, not by an import that would
+# require shipping the manifest inside the bundle.
+TOOL_VERSION = "0.4.0"
+
 REQUIRED_LEDGER_FIELDS = {
     "schema_version",
     "ledger_id",
