@@ -35,6 +35,7 @@ import json
 import os
 import sys
 import tempfile
+import webbrowser
 from pathlib import Path
 
 from ledgerlib import drift, rollback
@@ -442,6 +443,48 @@ def write_dashboard(html: str, out: Path, *, force: bool) -> None:
         raise
 
 
+def _open_url(url: str) -> bool:
+    """Hand `url` to the platform's default browser.
+
+    A one-line wrapper so that `_open_after_write` has a module attribute to
+    reach through rather than a name bound at import time: a test replaces
+    `build._open_url` exactly the way `rollback` replaces `classify_target`,
+    and no test opens a browser.
+    """
+    return webbrowser.open(url)
+
+
+def _open_after_write(out: Path) -> None:
+    """Show the dashboard just written, and never fail the build for it.
+
+    `--open` is a courtesy, not a deliverable: by the time this runs the file
+    is on disk, which was the command's job. Turning a written dashboard into
+    a failing exit code because no browser answered would make the flag
+    unusable in exactly the environments this bundle is shaped for -- a CI
+    runner has no display, and `webbrowser.open` there returns `False` at
+    best and raises at worst.
+
+    So both outcomes become one note on stderr, never stdout: `scan_command`
+    fixed that contract for the bundle -- stdout carries the answer and
+    nothing else. `BaseException` is deliberately not caught; a
+    `KeyboardInterrupt` during the launch is still the operator's word.
+    """
+    try:
+        opened = _open_url(out.resolve().as_uri())
+    except Exception as exc:
+        # Deliberately broad. `webbrowser` raises `webbrowser.Error` when it
+        # knows it failed, but the launchers underneath it are platform code
+        # that can surface an `OSError` instead, and the whole point of this
+        # function is that no failure here reaches the exit code.
+        print(f"could not open {str(out)!r} in a browser: {exc}", file=sys.stderr)
+        return
+    if not opened:
+        print(
+            f"could not open {str(out)!r}: no browser is available here",
+            file=sys.stderr,
+        )
+
+
 def build_command(
     ledger: Path,
     out: Path | None,
@@ -450,6 +493,7 @@ def build_command(
     adapter: Path | None = None,
     user_config: Path | None = None,
     project: Path | None = None,
+    open_after: bool = False,
 ) -> int:
     """`build` as a command: assemble the payload, inject it, write the file.
 
@@ -545,4 +589,8 @@ def build_command(
         return 1
 
     print(f"wrote {out_path}")
+    # After the write and only after it: every `return` above this line left
+    # nothing on disk to show.
+    if open_after:
+        _open_after_write(out_path)
     return 0

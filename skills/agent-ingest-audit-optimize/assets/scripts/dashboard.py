@@ -95,6 +95,11 @@ from ledgerlib.build import (  # noqa: E402
     serialize_payload,
     write_dashboard,
 )
+from ledgerlib.update import (  # noqa: E402
+    WHAT_CHOICES,
+    next_baseline_id,
+    update_command,
+)
 from ledgerlib.chain import (  # noqa: E402
     CHAIN_REASONS,
     CHAIN_VERDICTS,
@@ -385,6 +390,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="overwrite --out even if it does not look like a generated dashboard",
     )
+    build_parser.add_argument(
+        "--open",
+        dest="open_after",
+        action="store_true",
+        help="open the dashboard in the default browser once it is written",
+    )
     # Mirrors `drift`'s flags exactly, for the reason `drift_parser` already
     # gives: `build_payload` re-resolves the ledger's anchors through
     # `drift_report` and `rollback_preview`, the same anchor-resolution layer
@@ -402,6 +413,83 @@ def main(argv: list[str] | None = None) -> int:
         help="an adapter file to use, overriding selection entirely",
     )
     build_parser.add_argument(
+        "--user-config",
+        dest="user_config",
+        type=Path,
+        default=None,
+        help="the configuration root user adapters are read from; skipped when omitted",
+    )
+
+    update_parser = subparsers.add_parser(
+        "update",
+        help="refresh the ledger, the dashboard, or both",
+    )
+    update_parser.add_argument("ledger", type=Path, help="the ledger to update")
+    # Optional, with a default, so that a bare `update <ledger>` does the
+    # read-only thing and `update -h` lists the three words without their
+    # meanings being written out twice.
+    update_parser.add_argument(
+        "what",
+        nargs="?",
+        default="anchors",
+        choices=WHAT_CHOICES,
+        help=(
+            "all: capture the environment, then re-render; "
+            "ledger: capture the environment into a new baseline, writing "
+            "the ledger and not the dashboard; "
+            "anchors (the default): re-render the dashboard from the ledger "
+            "as it stands, writing no ledger"
+        ),
+    )
+    update_parser.add_argument(
+        "--id",
+        dest="identifier",
+        default=None,
+        help=(
+            "the identifier for the new baseline; minted from this ledger's "
+            "own sequence when omitted"
+        ),
+    )
+    update_parser.add_argument(
+        "--client",
+        default=None,
+        help="the client to scan; the adapter decides when omitted",
+    )
+    update_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="where to write the dashboard; defaults to dashboard.html beside the ledger",
+    )
+    update_parser.add_argument(
+        "--lang",
+        default=None,
+        help="override the dashboard language; falls back to ledger.language, then 'en'",
+    )
+    update_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite --out even if it does not look like a generated dashboard",
+    )
+    update_parser.add_argument(
+        "--open",
+        dest="open_after",
+        action="store_true",
+        help="open the dashboard in the default browser once it is written",
+    )
+    update_parser.add_argument(
+        "--project",
+        type=Path,
+        default=None,
+        help="the project root $PROJECT anchors to; the working directory when omitted",
+    )
+    update_parser.add_argument(
+        "--adapter",
+        type=Path,
+        default=None,
+        help="an adapter file to use, overriding selection entirely",
+    )
+    update_parser.add_argument(
         "--user-config",
         dest="user_config",
         type=Path,
@@ -482,6 +570,22 @@ def main(argv: list[str] | None = None) -> int:
             adapter=arguments.adapter,
             user_config=arguments.user_config,
             project=arguments.project,
+            open_after=arguments.open_after,
+        )
+
+    if arguments.command == "update":
+        return update_command(
+            arguments.ledger,
+            arguments.what,
+            identifier=arguments.identifier,
+            client=arguments.client,
+            out=arguments.out,
+            lang=arguments.lang,
+            force=arguments.force,
+            adapter=arguments.adapter,
+            user_config=arguments.user_config,
+            project=arguments.project,
+            open_after=arguments.open_after,
         )
 
 

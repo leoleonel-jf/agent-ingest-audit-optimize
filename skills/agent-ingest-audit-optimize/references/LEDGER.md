@@ -233,6 +233,18 @@ next successful global write, rewriting every reference. `verify` checks only th
 `-P` id without `pending_id_reconciliation: true` is a finding. It does not check that
 references were actually rewritten.
 
+**`update` is a stated exception to the paragraph above, for baselines only.** When `--id` is
+omitted, `dashboard.py update ledger` mints the next `BASE` identifier from the ledger's own
+sequence rather than requesting it from the authority, and it does not use the `-P` form. The
+provisional path would be worse here than the liberty it avoids: `verify` checks
+`pending_id_reconciliation` on records, not on baselines, so a `-P` baseline would pass carrying
+no reconciliation marker — a silent lie in place of a visible one. Instead the command names the
+identifier as locally minted on stderr and reports `"minted": "local"` on stdout, and the
+residual risk is left where the layer that can see it lives: if the authority later issues the
+same number, a verified set holding both documents reports the duplicate. Pass `--id` to keep
+the authority in the loop. The reasoning is recorded in
+`docs/specs/2026-08-01-dashboard-open-and-update.md` section 4.
+
 `verify` checks that a ledger's `sequences` value for a prefix is at least one past the highest
 number that ledger's own records already use. It is a floor, not an equality: a value above it
 passes too, so a padded `sequences` is never flagged. Keeping it at exactly the next free number is

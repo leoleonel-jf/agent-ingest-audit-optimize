@@ -2,6 +2,53 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+Spec under `docs/specs/2026-08-01-dashboard-open-and-update.md`. Two commands and one slash
+command, and each entry states the rule it narrows before it states the feature.
+
+- adds `--open` to `build`, which hands the written file to the platform's default browser.
+  Three properties define it and each is pinned by a test: it never fires for a build that wrote
+  nothing, so a `verify` refusal (exit `2`) and an overwrite refusal (exit `1`) open nothing; a
+  failed open never changes the exit code, because by the time it runs the file is on disk and
+  that was the command's job — a machine with no browser gets one note on stderr and still exits
+  `0`, which is what keeps the flag usable on a CI runner with no display; and the note goes to
+  stderr, never stdout, the contract `scan_command` fixed for the bundle. The opener is reached
+  through the module attribute `build._open_url`, exactly as `rollback` reaches `classify_target`,
+  so no test in the suite launches a browser. There is no `--browser`: choosing one was considered
+  and cut, because `webbrowser.get(name)` fails in enough platform-specific ways that supporting
+  it means supporting its failures.
+- adds `update <ledger> [all|ledger|anchors]`, which names the three things a reader can mean by
+  "refresh" instead of leaving `build` to answer all three. `anchors` — the default, so a bare
+  `update` does the read-only thing — re-renders the dashboard and delegates to `build_command`
+  wholesale; it is deliberately a second entry point on one implementation, and the design spec
+  says so rather than pretending otherwise. `ledger` captures the environment into a new
+  `baselines[]` entry and writes no dashboard. `all` appends before it renders, so the page shows
+  the entry just added. `verify`'s two checks run before any write for all three words. A `scan`
+  reporting findings still appends: the findings describe the environment that was captured, not
+  a defect in the capture, and refusing would leave the ledger asserting an older, cleaner state
+  is still current — the exit code carries the finding instead. stdout is one JSON object, so
+  `build`'s own `wrote <path>` line is captured and moved to stderr rather than a quiet mode being
+  added to `build_command`, which would have loosened a contract its own tests pin.
+- **the hash chain is untouched by every word of `update`.** `chain._records` links `records[]`,
+  and a baseline is not a record, so appending one changes no digest and `verify --expect-head`
+  keeps passing against a head recorded beforehand. An earlier draft of the design wrongly
+  required a reseal; the correction is recorded because the wrong version was the one that
+  justified the shape of the command.
+- **narrows the ID-authority rule for baselines, in the open.** With `--id` omitted, `update`
+  mints the next `BASE` identifier from the ledger's own sequence — taking the higher of the two
+  floors, so a padded `sequences` stays meaningful — instead of requesting it from the global
+  ledger as `references/LEDGER.md` requires. The provisional `-P` path is not used, and not
+  because it was overlooked: `verify` checks `pending_id_reconciliation` on records and not on
+  baselines, so a `-P` baseline would pass carrying no reconciliation marker, which is a silent
+  lie in place of a visible liberty. The liberty is instead made loud — a stderr note naming the
+  identifier as locally minted, and `"minted": "local"` on stdout — and `LEDGER.md` gains the
+  exception in its Identifiers section rather than being quietly contradicted by a command. The
+  residual collision risk is stated and left to `verify`'s set-level duplicate check.
+- adds the plugin's first `commands/` entry, `/dashboard`. It resolves the ledger and forwards to
+  `update`, and it may choose only `anchors` on its own: `ledger` and `all` write to the ledger,
+  and a bare command name is not the unambiguous instruction a persistent change requires.
+
 ## 0.5.0 - 2026-07-31
 
 Five increments, each with its own spec and plan under `docs/specs/2026-07-31-*.md` and
