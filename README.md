@@ -189,10 +189,31 @@ Render a ledger into a single offline HTML dashboard with `build` — vanilla JS
 no network request, and it never writes back to the ledger:
 
 ```text
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py build <path-to-ledger.json> [--out PATH] [--lang CODE]
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py build <path-to-ledger.json> [--out PATH] [--lang CODE] [--open]
 ```
 
 Exit codes: `0` written, `1` I/O error or overwrite refusal, `2` a ledger `verify` would reject.
+
+`--open` shows the file in the default browser once it is written. It never fires for a build
+that wrote nothing, and it never changes the exit code: a machine with no browser gets a note on
+stderr and still exits `0`, because the dashboard is on disk and that was the command's job.
+
+Bring things up to date with `update`, which names the three things "refresh" can mean:
+
+```text
+python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py update <path-to-ledger.json> [all|ledger|anchors] [--open] [--id BASE-YYYY-NNN]
+```
+
+`anchors` is the default and re-renders the dashboard, writing no ledger. `ledger` captures the
+environment into a new `baselines[]` entry, writing no dashboard. `all` does the first, then the
+second. The hash chain is untouched by all three — it links `records[]`, and a baseline is not a
+record, so `verify --expect-head` keeps passing against a head recorded beforehand. Exit codes:
+`0` clean, `1` findings or a write refusal, `2` a tool error or a ledger `verify` would reject,
+in which case nothing is written at all.
+
+Omitting `--id` mints the next baseline identifier from the ledger's own sequence and says so on
+stderr. See [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md) for
+why that is a stated exception to the ID-authority rule rather than a silent one.
 
 See [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md) for the
 record model, and [assets/schemas/ledger.schema.json](skills/agent-ingest-audit-optimize/assets/schemas/ledger.schema.json)
