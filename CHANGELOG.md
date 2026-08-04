@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.6.0 - 2026-08-04
 
 Spec under `docs/specs/2026-08-01-dashboard-open-and-update.md`. Two commands and one slash
 command, and each entry states the rule it narrows before it states the feature.
