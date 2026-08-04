@@ -16,7 +16,7 @@ This file is the review-ready source of truth for public directory submissions: 
 
 - **Submission type:** Skills only
 - **Plugin name:** Agent Ingest, Audit & Optimize
-- **Version:** 0.5.0
+- **Version:** 0.6.0
 - **Developer identity:** Leonardo Leonel Sobral
 - **Category:** Productivity
 - **Short description:** Audit & optimize agent systems
