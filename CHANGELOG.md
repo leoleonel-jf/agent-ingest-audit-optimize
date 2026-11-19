@@ -2,10 +2,46 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.6.1 - 2026-11-19
+
+Two defects in what the archives ship, both found by the 2026-11 review
+(`docs/reviews/2026-11-18-revisao-do-plugin.md`), and the repository tooling that review asked for.
+Spec for the two defects under `docs/specs/2026-11-19-withheld-text-and-complete-archive.md`.
+
+- **`scan` no longer copies any text out of a parsed file.** Redaction matched key names only, so
+  a credential under a key no pattern named was copied into the baseline as written. Two shapes
+  were reproduced with synthetic data against the shipped `claude-code` patterns: a hook whose
+  `command` carried a password argument, and a permission rule carrying an authorization header.
+  Both reached the baseline, and through `update` the ledger file. Every string a parsed document
+  holds is now replaced by the same `{"redacted": true, "digest": …}` marker, whatever key it sits
+  under. A baseline keeps the document's shape (key names, nesting, array lengths, numbers,
+  booleans and nulls) and one digest per string, which is enough to say which leaf changed and
+  never enough to say what it held. Nothing in the bundle read those values back: `drift` compares
+  file digests, and no dashboard panel renders them;
+- `sensitive_key_patterns` keep their job, which is the part a digest per string does not do: a
+  matching key withholds its whole subtree, key names included. The finding for a `parse` probe
+  over an empty pattern list stays and now says what is actually exposed in that case: key names
+  and numbers, not values;
+- **three limits are stated rather than closed.** A secret used as a key name outside a withheld
+  subtree is copied. A numeric secret is copied. And the digests are unsalted, so a short or
+  common value can be confirmed by hashing a guess. `PRIVACY.md` and `references/LEDGER.md` say so,
+  and tests pin that they do;
+- **a baseline captured by 0.6.0 or earlier keeps the text it copied.** Capturing a new baseline
+  does not rewrite an old one. This project's own dogfood ledger holds 42 copied strings in each
+  of its two baselines, 18 of them from hook definitions. Review old baselines before sharing a
+  ledger;
+- **the plugin archive now ships `commands/`.** 0.6.0 added `commands/dashboard.md` to the
+  repository and the packager never listed it, so an install from the release zip had no
+  `/dashboard`. Every archive test compared the zip with the packager's own list, which was the
+  thing that was wrong. Two tests now start from the repository instead: every file under a
+  plugin component directory must come out of the extracted archive byte for byte, and every
+  tracked top-level entry must be either shipped or named as deliberately left out;
+- known and not fixed here: `commands/dashboard.md` invokes the bundle by a path relative to the
+  repository root, so `/dashboard` is expected to fail outside this repository. Shipping the file
+  does not change that; it is the next format increment.
 
 Spec under `docs/specs/2026-11-19-suites-off-the-clock.md`. Tests and maintainer tooling only:
-nothing either archive ships changes, so no version pin moves.
+nothing either archive ships changes.
 
 - fixes the three suites failing on the calendar. Since 2026-10-29 one dashboard test and two
   packaging tests failed with no code change, because they ran `scan` against a bundled adapter

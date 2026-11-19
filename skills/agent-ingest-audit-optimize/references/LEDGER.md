@@ -556,6 +556,12 @@ record that it looked. A file that will not parse is `present`, with its digest 
 use `user`, `project`, and `system` — and `scan` computes no precedence winner from it; Declared
 resolution below states what `drift` may later make of it.
 
+No text a parsed document holds reaches a baseline. Every string value is replaced by
+`{"redacted": true, "digest": "sha256:…"}`, whatever key it sits under, so an item's
+`attributes.value` carries the document's shape (key names, nesting, array lengths, and its
+numbers, booleans and nulls) and one digest per string. That is enough to say which leaf changed
+between two baselines and never enough to say what it held.
+
 `sensitive_key_patterns` are `fnmatch` patterns matched case-insensitively against key names in a
 parsed document, so `*key*` and the literal `env` both work, and `env` matches the key `env` without
 matching `environment`. A matching key keeps its name; its value is replaced by
@@ -840,30 +846,31 @@ Because a baseline therefore covers different anchors on different platforms, ea
 the `sys.platform` that produced it in `platform`. The field is optional: entries captured before
 0.5.0 stay valid.
 
-**Redaction matches names and never values.** A secret is protected by the key it sits under, not by
-what it looks like, so a secret sitting under a key no pattern names is copied whole. Two shapes
-where that was found to happen are closed in the shipped client adapters — `args`, which is where an
-MCP server conventionally receives `--api-key` as a positional argument, and `*url*`, which is where
-a query-string token hides — and closing them costs baseline detail, deliberately. A redacted
-argument list still carries the file's digest, so `drift` can say that a server's arguments changed;
-the baseline no longer records what they were, and the same now goes for every `base_url` a Codex
-model provider declares. That trade is the point: an argument list a reader can recover from a
-baseline is worth less than one that cannot leak out of it. `*url*` is a substring match and will
-also redact a key that merely contains those three letters, `curl` among them, which costs a server
-named that way its whole entry. What stays open is everything neither pattern names: a secret
-under a key name nobody has seen yet is still copied, and the only remedy is a user adapter
-declaring that name.
+**Text is withheld; key names and numbers are not.** Until 0.6.1 a secret was protected only by the
+key it sat under, so one under a key no pattern named was copied whole: a credential in a hook's
+`command` and one in a permission rule were both reproduced reaching a baseline and, through
+`update`, the ledger. Every string a parsed document holds is now replaced by a digest, which closes
+that for text without anyone having to guess a key name. `sensitive_key_patterns` still matter for
+what a digest per string does not cover: a matching key withholds its whole subtree, key names
+included, which is why `env` hides the variable names of an MCP `env` block and not only their
+values. `*url*` is a substring match and will also withhold a key that merely contains those three
+letters, `curl` among them, which costs a server named that way its whole entry. What stays open: a
+secret used as a key name outside a withheld subtree is copied, a numeric secret is copied, and the
+digests are unsalted, so a short or common value can be confirmed by hashing a guess. A baseline
+captured by 0.6.0 or earlier keeps the text it copied; the remedy is to capture a new one and stop
+sharing the old.
 
 **A `parse` probe over an empty `sensitive_key_patterns` is a finding, not a refusal.** An adapter
 may legitimately declare no patterns — `generic.json` does, and it probes nothing — so refusing the
 empty list outright would refuse the one file that needs it. But an adapter that parses a document
-while redacting nothing writes every value it reads straight into the baseline, and a user adapter
+while redacting nothing writes every key name and every number it reads straight into the baseline,
+and a user adapter
 overriding a bundled client by name is exactly how that arrives: the override is honoured whole, the
-bundled patterns are not merged into it, and a scan that used to redact would then dump a parsed
-settings file verbatim while exiting `0`. `scan` therefore raises a finding for the combination,
+bundled patterns are not merged into it, and a scan that used to withhold an `env` block whole would
+then enumerate every variable name inside it while exiting `0`. `scan` therefore raises a finding for the combination,
 which moves the exit code without withholding the baseline. It is recorded here as a gap rather than
 as a fix because the finding reaches stderr beside the baseline it warns about: an operator who
-redirects stdout and ignores the exit code has the values anyway.
+redirects stdout and ignores the exit code has the key names anyway.
 
 ## Language
 

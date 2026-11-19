@@ -29,6 +29,21 @@ EXPIRY_FINDING = re.compile(
     r"adapter for client '[^']+' expired on '\d{4}-\d{2}-\d{2}' and this scan ran on "
 )
 SELECTION_NOTES = ("user adapters were not read:", "selected adapter ")
+# Directories a plugin root may carry besides `skills/`. Listed here, not read
+# from the packager, so the test does not inherit the packager's omissions.
+PLUGIN_COMPONENT_DIRECTORIES = ("commands", "agents", "hooks")
+# Tracked top-level entries the plugin archive leaves out on purpose.
+NOT_SHIPPED = {
+    ".agents",  # the Codex marketplace file describes the repository, not the plugin
+    ".gitattributes",
+    ".github",
+    ".gitignore",
+    "CLAUDE.md",
+    "dashboard",  # the bundle's tests; the bundle itself ships under skills/
+    "docs",
+    "evals",
+    "packaging",
+}
 
 # Files whose bytes are line-ending sensitive. Derived from the extension, not
 # sniffed from content: a guess that reads bytes would let a new text format in
@@ -130,6 +145,60 @@ class PackagePluginTests(unittest.TestCase):
             self.assertIn("assets/logo.png", names)
             self.assertIn("PRIVACY.md", names)
             self.assertFalse(any(name.startswith(("evals/", "packaging/", ".git/")) for name in names))
+
+    def test_plugin_archive_ships_every_plugin_component(self) -> None:
+        """Whatever the repository offers as a plugin component is in the archive.
+
+        0.6.0 added `commands/dashboard.md` and the archive never carried it:
+        an install from the repository had `/dashboard` and an install from the
+        release zip did not. Nothing noticed, because every archive test
+        compared the zip with the packager's own list, and the list was what
+        was wrong. This one starts from the repository instead: each component
+        directory a plugin root may carry is read from disk, and every file in
+        it must come out of the extracted archive byte for byte.
+        """
+        with tempfile.TemporaryDirectory() as temp:
+            plugin_archive, _, _ = package_plugin.build(Path(temp))
+            with zipfile.ZipFile(plugin_archive) as archive:
+                shipped = {name: archive.read(name) for name in archive.namelist()}
+
+        offered = [
+            path
+            for directory in PLUGIN_COMPONENT_DIRECTORIES
+            for path in sorted((REPO_ROOT / directory).rglob("*"))
+            if path.is_file() and "__pycache__" not in path.parts
+        ]
+        self.assertTrue(offered, "no plugin component found on disk; this test would pass on nothing")
+        for path in offered:
+            name = path.relative_to(REPO_ROOT).as_posix()
+            with self.subTest(name=name):
+                self.assertIn(name, shipped)
+                self.assertEqual(shipped[name], path.read_bytes())
+
+    def test_every_top_level_entry_is_shipped_or_deliberately_left_out(self) -> None:
+        """A new top-level entry must be classified before it can merge.
+
+        The omission above was a silent default: nobody decided `commands/`
+        should stay out. Every tracked top-level name is therefore either in
+        the plugin archive or named in `NOT_SHIPPED`, and an entry in neither
+        fails here with its name.
+        """
+        try:
+            tracked = subprocess.run(
+                ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+            ).stdout.splitlines()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            self.skipTest(f"git is not available to list tracked files: {exc}")
+        top_level = {name.split("/", 1)[0] for name in tracked}
+        self.assertIn("skills", top_level)
+
+        with tempfile.TemporaryDirectory() as temp:
+            plugin_archive, _, _ = package_plugin.build(Path(temp))
+            with zipfile.ZipFile(plugin_archive) as archive:
+                shipped = {name.split("/", 1)[0] for name in archive.namelist()}
+
+        self.assertEqual(sorted(top_level - shipped - NOT_SHIPPED), [])
+        self.assertEqual(sorted(shipped & NOT_SHIPPED), [])
 
     def test_skill_archive_has_one_canonical_top_level_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

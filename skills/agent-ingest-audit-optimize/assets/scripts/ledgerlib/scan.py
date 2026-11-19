@@ -190,6 +190,45 @@ def redact(value: object, patterns: Sequence[str]) -> object:
     return value
 
 
+def withhold_text(value: object) -> object:
+    """Copy `value`, replacing every string leaf with a marker.
+
+    `redact` protects what an adapter's patterns name, and a pattern can only
+    name a key. A credential under a key nobody would call sensitive -- a hook's
+    `command`, an entry of a permission rule's `allow` array, a connection
+    string under `dsn` -- matched nothing and was copied into the baseline as
+    written, and from there into the ledger `update` appends it to. This is the
+    rule that does not depend on guessing key names: no text a file held is
+    copied at all.
+
+    What survives is the shape -- key names, nesting, array lengths -- and the
+    non-string leaves: numbers, booleans, and `null`. Each string becomes
+    `{"redacted": True, "digest": "sha256:..."}`, the same marker `redact`
+    writes, so one leaf changing between two baselines is still visible as a
+    changed digest without either baseline having held the text.
+
+    Runs after `redact`, never instead of it. `redact` withholds a whole
+    subtree including its key names, which this does not; and its markers are
+    left exactly as they are, because a marker's `digest` is itself a string
+    and walking into it would replace it with a digest of a digest.
+
+    Three limits, stated rather than papered over. A key name is not a value
+    and is kept, so a secret used as a key is copied. A number is kept, so a
+    numeric secret is copied. And the digest is unsalted: it reveals nothing
+    about a long random token, but anyone holding the baseline can confirm a
+    guess at a short or common string by hashing it.
+    """
+    if isinstance(value, str):
+        return {"redacted": True, "digest": _value_digest(value)}
+    if isinstance(value, dict):
+        if _is_marker(value):
+            return value
+        return {key: withhold_text(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [withhold_text(item) for item in value]
+    return value
+
+
 def run_probe(
     probe: dict, roots: dict[str, Path], patterns: Sequence[str],
     excluded: frozenset[str] = frozenset(),
@@ -531,7 +570,10 @@ def _parse_items(
                       digest=digest, portable=portable,
                       parse_error=_MALFORMED[fmt])]
 
-    document = redact(document, patterns)
+    # Two passes, in this order. `redact` withholds whole subtrees under the
+    # keys the adapter names; `withhold_text` then replaces every string that
+    # is left, so nothing below this line holds text the file contained.
+    document = withhold_text(redact(document, patterns))
 
     pointer = probe.get("pointer") if isinstance(probe, dict) else None
     if not isinstance(pointer, str) or not pointer:
@@ -721,7 +763,7 @@ def _item(
 
     `value` is the only route by which file content reaches an item, it is
     reached only from `_parse_items`, and what arrives has already been through
-    `redact`. It is defaulted to a sentinel rather than to `None` because
+    `redact` and `withhold_text`. It is defaulted to a sentinel rather than to `None` because
     `null` is a value a configuration file can legitimately hold, and an item
     whose parsed value is `null` must be distinguishable from an item that was
     never parsed at all.
@@ -940,11 +982,13 @@ def _coverage_findings(
     The fourth is the odd one out: it is about safety rather than coverage, and
     it is here because it has the same shape -- a run that looks fine and is
     not. An adapter whose `sensitive_key_patterns` is empty makes `redact` the
-    identity function, so if any of its probes carries `parse`, every value
-    read out of those documents is copied into the baseline exactly as written.
+    identity function. `withhold_text` still keeps every string out, but a
+    key-name match is what withholds a whole subtree, so if any probe carries
+    `parse`, every key name in those documents is enumerated -- the variable
+    names inside an MCP `env` block among them -- and every number is copied.
     A user `local.json` overriding a bundled adapter by client name is enough
     to arrange that, and before this the run printed nothing and exited `0`
-    while dumping the parsed file verbatim. It is deliberately conditional on a
+    while doing it. It is deliberately conditional on a
     `parse` probe existing: an adapter that parses nothing reads no values at
     all, so empty patterns are the correct configuration for it -- which is
     what `generic.json` ships, and it must stay clean.
@@ -1011,10 +1055,11 @@ def _coverage_findings(
     if parsing and not document["sensitive_key_patterns"]:
         findings.append(
             f"adapter for client {client!r} has {parsing} probe(s) with parse "
-            "but an empty sensitive_key_patterns: redaction matches key names, "
-            "so an empty list redacts nothing and every value read out of "
-            "those documents is copied into this baseline exactly as the file "
-            "wrote it -- API tokens and MCP env blocks included. Add the key "
+            "but an empty sensitive_key_patterns: text is withheld regardless, "
+            "but a key-name match is what withholds a whole subtree, so with an "
+            "empty list every key name in those documents is enumerated into "
+            "this baseline -- the variable names inside an MCP env block "
+            "included -- and every number is copied. Add the key "
             "names that carry secrets for this client, for example "
             '["*token*", "*key*", "*secret*", "*password*", "*credential*", '
             '"*auth*", "env", "headers"], or drop parse from those probes to '
