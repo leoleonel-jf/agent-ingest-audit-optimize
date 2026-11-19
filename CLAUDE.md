@@ -3,6 +3,8 @@
 Plugin for Claude Code and Codex around one canonical Skill in `skills/agent-ingest-audit-optimize/`.
 Python 3.10+, standard library only. Machine-specific notes go in `CLAUDE.local.md` (gitignored).
 
+**Retomada:** ao abrir uma sessão aqui, leia primeiro [.agent-audit/HANDOFF.md](.agent-audit/HANDOFF.md).
+
 ## Commands
 
 - `python -m unittest discover -s dashboard/tests` - ledger, validator and dashboard suite (the large one, about 30 s)
@@ -16,7 +18,7 @@ Python 3.10+, standard library only. Machine-specific notes go in `CLAUDE.local.
 
 - CI (`.github/workflows/tests.yml`) runs the three suites and the eval validator on every PR and push to `main`, on Ubuntu and Windows, Python 3.10 and 3.13. Run them locally first; wait for green before merging.
 - `evidence-freshness.yml` runs weekly and fails on bundled evidence near `expires_on`. A red run is fixed by re-verifying the content against its source (`docs/research/`), never by moving the date.
-- `.agent-audit/` (ledger, dashboard, handoffs) is gitignored and exists only in the main checkout. From a worktree, read it by absolute path. Start from the newest `HANDOFF-*.md` there.
+- `.agent-audit/` (ledger, dashboard, handoffs) is gitignored and exists only in the main checkout. From a worktree, read it by absolute path. `HANDOFF.md` there is the single current handoff; the dated `HANDOFF-*.md` files are history.
 - A version bump has pins outside `packaging/tests/test_version_consistency.py`: `docs/releases/vX.Y.Z.md` and the eval case count written in prose in `docs/SUBMISSION.md`.
 - After any source change, a rebuilt `dist/` has new checksums: update `docs/releases/vX.Y.Z.md` to match.
 - `verify --lock` does not exist. The lockfile check is `lock <ledger> --check <lockfile>`; `verify` takes `--chain` and `--expect-head`.
