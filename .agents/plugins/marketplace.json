@@ -1,15 +1,15 @@
 {
-  "name": "agent-ingest-audit-optimize",
+  "name": "plugin-reviewer",
   "interface": {
-    "displayName": "Agent Ingest, Audit & Optimize"
+    "displayName": "Plugin Reviewer"
   },
   "plugins": [
     {
-      "name": "agent-ingest-audit-optimize",
+      "name": "plugin-reviewer",
       "source": {
         "source": "url",
-        "url": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize.git",
-        "ref": "v0.10.0"
+        "url": "https://github.com/leoleonel-jf/plugin-reviewer.git",
+        "ref": "v0.11.0"
       },
       "policy": {
         "installation": "AVAILABLE",

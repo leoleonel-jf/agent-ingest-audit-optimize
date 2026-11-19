@@ -36,13 +36,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = (
     REPO_ROOT
     / "skills"
-    / "agent-ingest-audit-optimize"
+    / "plugin-reviewer"
     / "assets"
     / "scripts"
     / "dashboard.py"
 )
 ADAPTERS_DIR = (
-    REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "assets" / "adapters"
+    REPO_ROOT / "skills" / "plugin-reviewer" / "assets" / "adapters"
 )
 # What a scan of a bundled adapter may print on stderr and still be the scan
 # the test meant to run: the two selection notes, and the adapter's own expiry.

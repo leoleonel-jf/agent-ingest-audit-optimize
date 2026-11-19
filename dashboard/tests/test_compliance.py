@@ -26,7 +26,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BUNDLE = REPO_ROOT / "skills" / "agent-ingest-audit-optimize"
+BUNDLE = REPO_ROOT / "skills" / "plugin-reviewer"
 SCRIPT = BUNDLE / "assets" / "scripts" / "dashboard.py"
 
 SPEC = importlib.util.spec_from_file_location("dashboard", SCRIPT)

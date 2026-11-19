@@ -2,7 +2,7 @@
 
 Effective date: July 28, 2026
 
-By using Agent Ingest, Audit & Optimize, you agree to these terms.
+By using Plugin Reviewer, you agree to these terms.
 
 ## License
 
@@ -36,4 +36,4 @@ Material changes to these terms will be documented in the repository history and
 
 ## Contact
 
-Questions may be submitted through the project's [GitHub issue tracker](https://github.com/leoleonel-jf/agent-ingest-audit-optimize/issues).
+Questions may be submitted through the project's [GitHub issue tracker](https://github.com/leoleonel-jf/plugin-reviewer/issues).

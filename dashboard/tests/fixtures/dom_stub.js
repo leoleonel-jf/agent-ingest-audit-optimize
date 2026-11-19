@@ -1,7 +1,7 @@
 "use strict";
 
 /* A DOM small enough to read in one sitting, and just large enough to boot
-   the shell in `skills/agent-ingest-audit-optimize/assets/templates/
+   the shell in `skills/plugin-reviewer/assets/templates/
    dashboard.html` under plain `node`.
 
    It exists so the shell's runtime gates -- `safeHref`, `attrAllowed`,

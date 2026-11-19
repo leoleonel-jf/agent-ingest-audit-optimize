@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Agent Ingest Audit Optimize Evaluation Result",
+  "title": "Plugin Reviewer Evaluation Result",
   "type": "object",
   "additionalProperties": false,
   "required": [

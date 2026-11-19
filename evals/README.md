@@ -1,6 +1,6 @@
 # Evaluation Suite
 
-This directory contains the regression suite for `agent-ingest-audit-optimize`. It is intentionally outside the Skill bundle so test expectations do not enter the model context during normal use.
+This directory contains the regression suite for `plugin-reviewer`. It is intentionally outside the Skill bundle so test expectations do not enter the model context during normal use.
 
 ## Coverage
 

@@ -63,7 +63,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = (
     REPO_ROOT
     / "skills"
-    / "agent-ingest-audit-optimize"
+    / "plugin-reviewer"
     / "assets"
     / "scripts"
     / "dashboard.py"
@@ -2477,7 +2477,7 @@ class ShellStructureTests(ShellTemplateTestCase):
         expected = (
             REPO_ROOT
             / "skills"
-            / "agent-ingest-audit-optimize"
+            / "plugin-reviewer"
             / "assets"
             / "templates"
             / "dashboard.html"
@@ -5887,7 +5887,7 @@ class RuntimePaletteExactMatchTests(ShellTemplateTestCase):
 DASHBOARD_REFERENCE = (
     REPO_ROOT
     / "skills"
-    / "agent-ingest-audit-optimize"
+    / "plugin-reviewer"
     / "references"
     / "DASHBOARD.md"
 )

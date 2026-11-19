@@ -1,6 +1,6 @@
 # Support
 
-Use the project's [GitHub issue tracker](https://github.com/leoleonel-jf/agent-ingest-audit-optimize/issues) for:
+Use the project's [GitHub issue tracker](https://github.com/leoleonel-jf/plugin-reviewer/issues) for:
 
 - installation and packaging problems;
 - reproducible behavior defects;

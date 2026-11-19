@@ -20,7 +20,7 @@ package_plugin = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(package_plugin)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SKILL_NAME = "agent-ingest-audit-optimize"
+SKILL_NAME = "plugin-reviewer"
 SKILL_DIR = REPO_ROOT / "skills" / SKILL_NAME
 SCRIPTS_DIR = SKILL_DIR / "assets" / "scripts"
 # What a scan of a shipped adapter may print on stderr and still be the scan
@@ -140,7 +140,7 @@ class PackagePluginTests(unittest.TestCase):
 
             self.assertIn(".codex-plugin/plugin.json", names)
             self.assertIn(".claude-plugin/plugin.json", names)
-            self.assertIn("skills/agent-ingest-audit-optimize/SKILL.md", names)
+            self.assertIn("skills/plugin-reviewer/SKILL.md", names)
             self.assertIn("LICENSE", names)
             self.assertIn("assets/logo.png", names)
             self.assertIn("PRIVACY.md", names)
@@ -212,10 +212,10 @@ class PackagePluginTests(unittest.TestCase):
             self.assertTrue(names)
             self.assertEqual(
                 {Path(name).parts[0] for name in names},
-                {"agent-ingest-audit-optimize"},
+                {"plugin-reviewer"},
             )
-            self.assertIn("agent-ingest-audit-optimize/SKILL.md", names)
-            self.assertIn("agent-ingest-audit-optimize/LICENSE", names)
+            self.assertIn("plugin-reviewer/SKILL.md", names)
+            self.assertIn("plugin-reviewer/LICENSE", names)
             self.assertFalse(any("/evals/" in name or "/packaging/" in name for name in names))
 
     def test_archives_include_the_ledger_assets(self) -> None:
@@ -232,8 +232,8 @@ class PackagePluginTests(unittest.TestCase):
                 "assets/schemas/ledger.schema.json",
                 "assets/scripts/dashboard.py",
             ):
-                self.assertIn(f"skills/agent-ingest-audit-optimize/{suffix}", plugin_names)
-                self.assertIn(f"agent-ingest-audit-optimize/{suffix}", skill_names)
+                self.assertIn(f"skills/plugin-reviewer/{suffix}", plugin_names)
+                self.assertIn(f"plugin-reviewer/{suffix}", skill_names)
 
             self.assertFalse(any("dashboard/tests" in name for name in plugin_names))
             self.assertFalse(any("dashboard/tests" in name for name in skill_names))
@@ -264,8 +264,8 @@ class PackagePluginTests(unittest.TestCase):
                 "assets/templates/DASHBOARD.md",
                 "references/DASHBOARD.md",
             ):
-                self.assertIn(f"skills/agent-ingest-audit-optimize/{suffix}", plugin_names)
-                self.assertIn(f"agent-ingest-audit-optimize/{suffix}", skill_names)
+                self.assertIn(f"skills/plugin-reviewer/{suffix}", plugin_names)
+                self.assertIn(f"plugin-reviewer/{suffix}", skill_names)
 
     def test_archives_exclude_compiled_bytecode(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -327,9 +327,9 @@ class PackagePluginTests(unittest.TestCase):
             for relative in linked:
                 with self.subTest(file=relative):
                     self.assertIn(
-                        f"skills/agent-ingest-audit-optimize/{relative}", plugin_names
+                        f"skills/plugin-reviewer/{relative}", plugin_names
                     )
-                    self.assertIn(f"agent-ingest-audit-optimize/{relative}", skill_names)
+                    self.assertIn(f"plugin-reviewer/{relative}", skill_names)
 
     def test_archives_ship_every_script_module_in_the_source_tree(self) -> None:
         relative_paths = source_script_relative_paths()

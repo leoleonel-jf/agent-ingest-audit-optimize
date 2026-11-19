@@ -258,16 +258,24 @@ covered nothing while looking clean, so it is a finding that names the clients w
 `--client`. The two are told apart by structured data carried out of selection, never by matching on
 the wording of a note.
 
-A client no bundled adapter covers is served by a user adapter, at:
+A client no bundled adapter covers is served by a user adapter, `adapters/local.json` in the data
+directory in use (the Layout section of [LEDGER.md](LEDGER.md) says which that is). On a machine
+without the former directory:
 
 ```text
-<user-config>/agent-ingest-audit-optimize/adapters/local.json
+<user-config>/plugin-reviewer/adapters/local.json
 ```
 
 `<user-config>` is what `--user-config` names, and without it that directory is never opened — not
 defaulted to the home directory. The tool cannot know which client's configuration root is meant on a
 machine that may have several, and reading a directory the user did not name is the thing the whole
 path boundary exists to prevent.
+
+The directory's name before 0.11.0, `<user-config>/agent-ingest-audit-optimize/adapters/`, is still
+read, and a note says so. An adapter there is a user adapter like any other. One client declared
+under both names is refused, naming both files, for the reason two adapters in one directory are.
+The former name left as a link to the renamed directory is one directory and is read once. The
+message for an unknown client names the directory in use.
 
 A user adapter is keyed by its `client` value like every other adapter, and a user adapter beats a
 bundled one declaring the same client, with a note recording the override and naming both files. Two

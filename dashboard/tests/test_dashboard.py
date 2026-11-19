@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = (
     REPO_ROOT
     / "skills"
-    / "agent-ingest-audit-optimize"
+    / "plugin-reviewer"
     / "assets"
     / "scripts"
     / "dashboard.py"
@@ -27,7 +27,7 @@ SCRIPT = (
 SCHEMA = (
     REPO_ROOT
     / "skills"
-    / "agent-ingest-audit-optimize"
+    / "plugin-reviewer"
     / "assets"
     / "schemas"
     / "ledger.schema.json"
@@ -2408,7 +2408,7 @@ class ProvisionalIdSchemaAlignmentTests(unittest.TestCase):
         )
 
 
-REFERENCES = REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "references"
+REFERENCES = REPO_ROOT / "skills" / "plugin-reviewer" / "references"
 
 # 0.10.0 split the ledger reference by subject. Which `## ` section lives in
 # which file is pinned here and held by `LedgerReferenceSplitTests`; the
@@ -2671,7 +2671,7 @@ class ReferenceTests(unittest.TestCase):
         self.assertIn("none of which ever carried it", text)
 
 
-SKILL = REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "SKILL.md"
+SKILL = REPO_ROOT / "skills" / "plugin-reviewer" / "SKILL.md"
 
 
 class SkillDocumentTests(unittest.TestCase):
@@ -2697,7 +2697,7 @@ class SkillDocumentTests(unittest.TestCase):
 PLATFORM = (
     REPO_ROOT
     / "skills"
-    / "agent-ingest-audit-optimize"
+    / "plugin-reviewer"
     / "references"
     / "PLATFORM_ADAPTATION.md"
 )
@@ -3611,7 +3611,7 @@ class UnknownClientDocumentationTests(unittest.TestCase):
     def test_reference_documents_the_user_adapter_path(self) -> None:
         text = _collapsed(REFERENCE)
         self.assertIn(
-            "<user-config>/agent-ingest-audit-optimize/adapters/local.json", text
+            "<user-config>/plugin-reviewer/adapters/local.json", text
         )
         self.assertIn("not defaulted to the home directory", text)
 
@@ -3621,6 +3621,113 @@ class UnknownClientDocumentationTests(unittest.TestCase):
             "a user adapter beats a bundled one declaring the same client", text
         )
         self.assertIn("validated exactly as a bundled one is, and refused the same way", text)
+
+    def test_reference_documents_the_former_user_adapter_directory(self) -> None:
+        text = _collapsed(REFERENCE)
+        self.assertIn(
+            "`<user-config>/agent-ingest-audit-optimize/adapters/`", text
+        )
+        self.assertIn("is still read, and a note says so", text)
+        self.assertIn("One client declared under both names is refused", text)
+
+
+class DataDirectoryRuleTests(unittest.TestCase):
+    """0.11.0 renamed the plugin and, with it, the data directory's name.
+
+    `docs/specs/2026-11-19-rename-plugin-reviewer.md` section 6. The name
+    changed; no directory on a user's machine does. An agent that reads only
+    the new name would start a second ledger beside the first, and both would
+    claim to be the ID authority.
+    """
+
+    RULE = (
+        "keeps using it where it is",
+        "Never move it, copy it, or create the new directory beside it",
+        "When both exist, stop, name both, and ask which one is the ledger",
+    )
+
+    def ledger_section(self) -> str:
+        return _skill_section("## Keep the ledger")
+
+    def test_the_skill_names_the_directory_and_its_former_name(self) -> None:
+        self.assertIn("`<user-config>/plugin-reviewer/`", self.ledger_section())
+        self.assertIn(
+            "`<user-config>/agent-ingest-audit-optimize/`", self.ledger_section()
+        )
+
+    def test_the_skill_states_the_rule(self) -> None:
+        for phrase in self.RULE:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.ledger_section())
+
+    def test_the_skill_leaves_the_move_to_the_user_and_says_when_it_is_safe(
+        self,
+    ) -> None:
+        """An independent read found the first wording calling the move "the
+        whole migration". It is not, for a run whose backup is inside."""
+        self.assertIn(
+            "Renaming it is the user's to ask for, and safe only when no recorded "
+            "run keeps its backup there",
+            self.ledger_section(),
+        )
+        self.assertNotIn("the whole migration", self.ledger_section())
+
+    def test_the_skill_says_what_follows_the_answer(self) -> None:
+        self.assertIn(
+            "then use that one and leave the other untouched", self.ledger_section()
+        )
+
+    def layout(self) -> str:
+        """The `## Layout` section of `LEDGER.md` itself, not the five
+        reference files read as one: the rule belongs beside the tree."""
+        lines = (REFERENCES / "LEDGER.md").read_text(encoding="utf-8").splitlines()
+        start = lines.index("## Layout")
+        end = next(
+            index
+            for index in range(start + 1, len(lines))
+            if lines[index].startswith("## ")
+        )
+        return " ".join(" ".join(lines[start:end]).split())
+
+    def test_the_reference_layout_carries_the_current_name(self) -> None:
+        raw = (REFERENCES / "LEDGER.md").read_text(encoding="utf-8")
+        self.assertIn("```text\nplugin-reviewer/\n├── ledger.json", raw)
+
+    def test_the_reference_states_the_rule(self) -> None:
+        self.assertIn("`agent-ingest-audit-optimize/`", self.layout())
+        for phrase in self.RULE:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.layout())
+
+    def test_the_reference_says_what_a_move_breaks(self) -> None:
+        """`test_rollback.MovedDataDirectoryTests` is the behaviour; this is
+        the sentence that warns of it."""
+        for phrase in (
+            "A `RUN` whose `backup.path` points into the directory does not",
+            "`rollback-preview` reports that run `BROKEN`",
+            "in a sealed ledger, breaks the chain",
+            "Before a move, read every `backup.path`",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.layout())
+
+    def test_the_reference_says_what_follows_the_answer(self) -> None:
+        self.assertIn(
+            "Use the one the user names, leave the other untouched", self.layout()
+        )
+
+    def test_the_user_adapter_goes_into_the_directory_in_use(self) -> None:
+        self.assertIn("in the data directory in use", _collapsed(SKILL))
+        self.assertIn(
+            "`adapters/local.json` in the data directory in use",
+            _collapsed(REFERENCES / "LEDGER_BASELINES.md"),
+        )
+
+    def test_the_reference_says_a_linked_former_name_is_one_directory(self) -> None:
+        self.assertIn(
+            "is one directory and is read once",
+            _collapsed(REFERENCES / "LEDGER_BASELINES.md"),
+        )
 
 
 class KnownGapDocumentationTests(unittest.TestCase):
@@ -3867,7 +3974,7 @@ class UnknownClientWorkflowTests(unittest.TestCase):
     def test_skill_requires_confirmation_before_writing_local_json(self) -> None:
         text = _collapsed(SKILL)
         self.assertIn(
-            "<user-config>/agent-ingest-audit-optimize/adapters/local.json", text
+            "<user-config>/plugin-reviewer/adapters/local.json", text
         )
         self.assertIn("only after the user confirms it", text)
 

@@ -1,18 +1,21 @@
 {
-  "name": "agent-ingest-audit-optimize",
-  "description": "A marketplace for the Agent Ingest, Audit & Optimize plugin.",
+  "name": "plugin-reviewer",
+  "description": "A marketplace for the Plugin Reviewer plugin.",
   "owner": {
     "name": "Leonardo Leonel Sobral"
   },
+  "renames": {
+    "agent-ingest-audit-optimize": "plugin-reviewer"
+  },
   "plugins": [
     {
-      "name": "agent-ingest-audit-optimize",
+      "name": "plugin-reviewer",
       "source": "./",
       "description": "Review a plugin, a skill, or an MCP server before you adopt it, and audit advice about agent setup against current evidence.",
-      "version": "0.10.0",
+      "version": "0.11.0",
       "author": { "name": "Leonardo Leonel Sobral" },
-      "homepage": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
-      "repository": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
+      "homepage": "https://github.com/leoleonel-jf/plugin-reviewer",
+      "repository": "https://github.com/leoleonel-jf/plugin-reviewer",
       "license": "MIT"
     }
   ]

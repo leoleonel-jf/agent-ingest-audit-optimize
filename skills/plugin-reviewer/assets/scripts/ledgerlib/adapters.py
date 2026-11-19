@@ -80,10 +80,18 @@ GENERIC_CLIENT = "generic"
 USER_CONFIG_ANCHOR = "USER_CONFIG"
 
 # Where a user adapter lives beneath the directory `--user-config` names.
-# Design spec section 9 fixes this path and `SKILL.md` writes `local.json`
-# into it; the tuple is joined rather than written as a string so it is one
-# path on every platform.
-USER_ADAPTER_DIRECTORY = ("agent-ingest-audit-optimize", "adapters")
+# Design spec section 9 fixes this path; `SKILL.md` writes `local.json` into
+# the data directory in use, which is this one unless the machine already has
+# the former one below. The tuple is joined rather than written as a string so
+# it is one path on every platform.
+USER_ADAPTER_DIRECTORY = ("plugin-reviewer", "adapters")
+
+# The same directory under the name the plugin had before 0.11.0. A machine
+# that already has it keeps its data there, so an adapter written before the
+# rename is still read. It is a user adapter like any other: it overrides a
+# bundled one, and it may not declare a client the current directory also
+# declares. `docs/specs/2026-11-19-rename-plugin-reviewer.md` section 6.
+FORMER_USER_ADAPTER_DIRECTORY = ("agent-ingest-audit-optimize", "adapters")
 
 USER_ADAPTERS_SKIPPED_NOTE = (
     "user adapters were not read: no --user-config was given"
@@ -721,7 +729,7 @@ def select_adapter_detail(
                 f"unknown client {client!r}: the clients available are "
                 f"{sorted(index)}; a client that is not one of them needs a "
                 "user adapter at <user-config>/"
-                + "/".join(USER_ADAPTER_DIRECTORY)
+                + "/".join(_user_adapter_directory_in_use(user_config))
                 + "/local.json"
             )
         notes.append(_selected(chosen.path, chosen.client, "named by --client"))
@@ -849,7 +857,60 @@ def _index_adapters(
     # directory yields nothing rather than raising.
     for path in _adapter_files(user_config.joinpath(*USER_ADAPTER_DIRECTORY)):
         _add_candidate(index, _read_candidate(path, origin="user"), notes=notes)
+
+    current = user_config.joinpath(*USER_ADAPTER_DIRECTORY)
+    former = user_config.joinpath(*FORMER_USER_ADAPTER_DIRECTORY)
+    # The former name left as a link to the renamed directory is one
+    # directory, not two. Read twice, every adapter in it would declare its
+    # client twice and be refused below.
+    former_files = [] if _same_directory(current, former) else _adapter_files(former)
+    if former_files and _adapter_files(current):
+        notes.append(
+            f"user adapters were read from both {current} and {former}, the "
+            "former name of this directory: a machine should hold its data "
+            "under one of the two names"
+        )
+    elif former_files:
+        notes.append(
+            f"user adapters were read from {former}, the former name of this "
+            "directory; "
+            + "/".join(USER_ADAPTER_DIRECTORY)
+            + " is its name since 0.11.0"
+        )
+    for path in former_files:
+        # The same origin as the directory above, on purpose: one client
+        # declared under both names is two user adapters for one client, and
+        # `_add_candidate` refuses that instead of letting either one win.
+        _add_candidate(index, _read_candidate(path, origin="user"), notes=notes)
     return index
+
+
+def _same_directory(first: Path, second: Path) -> bool:
+    """Whether two paths name one existing directory, through any link."""
+    try:
+        return first.is_dir() and second.is_dir() and first.samefile(second)
+    except OSError:
+        return False
+
+
+def _user_adapter_directory_in_use(user_config: Path | None) -> tuple[str, ...]:
+    """The directory an error message should send a user adapter to.
+
+    The current name, unless `--user-config` holds the data directory under
+    its former name and not under the current one: naming the current
+    directory there would have the reader create it beside the former one.
+    """
+    if user_config is not None:
+        try:
+            has_current = user_config.joinpath(USER_ADAPTER_DIRECTORY[0]).is_dir()
+            has_former = user_config.joinpath(
+                FORMER_USER_ADAPTER_DIRECTORY[0]
+            ).is_dir()
+        except OSError:
+            return USER_ADAPTER_DIRECTORY
+        if has_former and not has_current:
+            return FORMER_USER_ADAPTER_DIRECTORY
+    return USER_ADAPTER_DIRECTORY
 
 
 def _add_candidate(
