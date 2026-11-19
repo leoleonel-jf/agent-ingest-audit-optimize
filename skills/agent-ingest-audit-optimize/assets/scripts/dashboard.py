@@ -111,18 +111,7 @@ from ledgerlib.chain import (  # noqa: E402
     seal_ledger,
     verify_chain,
 )
-from ledgerlib.compliance import (  # noqa: E402
-    CAVEAT,
-    EVIDENCE_ABSENT,
-    EVIDENCE_PARTIAL,
-    EVIDENCE_PRESENT,
-    EVIDENCE_REASONS,
-    EVIDENCE_STATES,
-    compliance_command,
-    compliance_report,
-    evaluate_control,
-    load_mapping,
-)
+from ledgerlib.compliance import compliance_command  # noqa: E402
 from ledgerlib.lock import (  # noqa: E402
     LOCK_DIFFERENCES,
     LOCK_VERSION,
@@ -347,26 +336,24 @@ def main(argv: list[str] | None = None) -> int:
 
     compliance_parser = subparsers.add_parser(
         "compliance",
-        help="inventory a ledger's evidence against one framework's controls "
-        "(read-only unless --out is given)",
+        help="withdrawn in 0.8.0: prints a notice and exits 2, reading and writing nothing",
     )
-    compliance_parser.add_argument("ledger", type=Path, help="the ledger to inventory")
+    compliance_parser.add_argument("ledger", type=Path, help="ignored; kept so old invocations parse")
     compliance_parser.add_argument(
         "--framework",
         required=True,
-        help="the framework mapping to evaluate against, by bare name",
+        help="ignored; kept so old invocations parse",
     )
     compliance_parser.add_argument(
         "--out",
         type=Path,
         default=None,
-        help="write an evidence pack here: the report, a copy of each cited "
-        "record, and a digest for each file",
+        help="ignored; nothing is written here",
     )
     compliance_parser.add_argument(
         "--force",
         action="store_true",
-        help="write the evidence pack into a directory that is not empty",
+        help="ignored; kept so old invocations parse",
     )
 
     build_parser = subparsers.add_parser(

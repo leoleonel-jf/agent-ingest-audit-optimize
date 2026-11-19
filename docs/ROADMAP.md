@@ -1,11 +1,53 @@
 # Roadmap — de 0.4.0 a 1.0 e além
 
 - Data: 2026-07-31 (atualizado no mesmo dia, após execução)
-- Status: PARCIALMENTE EXECUTADO — ver §7
+- Status: ENCERRADO em 2026-11-19, ver §0. O que saiu até 2026-07-31 está no §7
 - Base: 0.4.0 + os quatro incrementos de 2026-07-31 (PRs #13, #15, #16, #17)
 
 > Este documento é levantamento e proposta. Ele **não** autoriza implementação. Cada tema vira
 > spec + plano próprios, como todo incremento até aqui.
+
+## 0. Encerramento (2026-11-19)
+
+Este roadmap deixou de ser plano. A revisão de novembro de 2026
+(`docs/reviews/2026-11-18-revisao-do-plugin.md`) concluiu que o plugin cresceu mais rápido do que
+foi usado, e a decisão foi cortar. O texto dos parágrafos 1 a 7 fica abaixo como registro do que
+se pensava em julho; nada nele é promessa.
+
+**Abandonado, por nome.** Nenhum destes itens foi construído e nenhum será, salvo decisão nova
+com spec própria:
+
+- assinatura opcional de snapshots do ledger (Sigstore ou Ed25519);
+- time-travel, `dashboard.py at <data>`;
+- detecção de auto-update com diff;
+- sinais de proveniência e nível de confiança por artefato;
+- varredura de injeção de prompt como item deste roadmap;
+- export ASBOM/AI-BOM em CycloneDX;
+- export de eventos para OTel/SIEM;
+- gate de CI como GitHub Action e `drift --fail-on`;
+- `dashboard.py due`;
+- mapeamento para NIST AI RMF e OWASP Agentic Top 10;
+- pacote de evidência por framework e política de retenção;
+- federação read-only de ledgers;
+- `rollback --execute`;
+- `serve`;
+- policy-as-code, daemon de monitoramento e marketplace de adapters;
+- o kind `credential-store`.
+
+**Retirado depois de construído.** O mapeamento control-level (EU AI Act e ISO 42001) saiu na
+0.5.0 como o comando `compliance` e foi retirado na 0.8.0: identificava artigos e controles
+errados. O registro dos erros está no `CHANGELOG.md`, na entrada da 0.8.0.
+
+**Construído e mantido, fora do caminho padrão da Skill desde a 0.8.0.** Encadeamento por hash
+(`chain`), `agent.lock` (`lock`), o dashboard (`build`, `update`) e `scan`. Continuam funcionando e
+testados; rodam quando o usuário pede.
+
+**Candidatos, sem compromisso.** Digest de scripts de hook; mais clientes além de Claude Code e
+Codex; mais idiomas no dashboard, só sob pedido. `AGENTS.md` é sondado como arquivo de instrução
+desde a 0.7.0, sem virar kind próprio.
+
+O que o plugin faz daqui em diante não é definido por este arquivo: o foco passa a ser revisar
+plugin, skill e servidor MCP antes de adotar, e cada passo tem spec em `docs/specs/`.
 
 ## 1. Onde estamos
 
