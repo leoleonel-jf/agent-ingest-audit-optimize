@@ -1,0 +1,8 @@
+interface:
+  display_name: "Plugin Reviewer"
+  short_description: "Reviews plugins, skills and MCP servers before adoption"
+  brand_color: "#0B1B4D"
+  default_prompt: "Use $plugin-reviewer to review this before I install it and tell me whether to adopt it."
+
+policy:
+  allow_implicit_invocation: true

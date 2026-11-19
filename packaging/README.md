@@ -4,10 +4,10 @@ This repository produces two distribution artifacts from one canonical Skill:
 
 | Artifact | Contents | Intended use |
 | --- | --- | --- |
-| `agent-ingest-audit-optimize-<version>-plugin.zip` | Plugin manifests, shared `skills/` tree, logo, license, and public documentation | Plugin installation or local plugin validation |
-| `agent-ingest-audit-optimize-<version>-skill.zip` | One top-level `agent-ingest-audit-optimize/` Skill directory, including the MIT license | Agent Skills clients and Claude API Skill upload |
+| `plugin-reviewer-<version>-plugin.zip` | Plugin manifests, shared `skills/` tree, logo, license, and public documentation | Plugin installation or local plugin validation |
+| `plugin-reviewer-<version>-skill.zip` | One top-level `plugin-reviewer/` Skill directory, including the MIT license | Agent Skills clients and Claude API Skill upload |
 
-The plugin manifests are thin platform adapters. They do not duplicate or override the behavior in `skills/agent-ingest-audit-optimize/SKILL.md`.
+The plugin manifests are thin platform adapters. They do not duplicate or override the behavior in `skills/plugin-reviewer/SKILL.md`.
 
 ## Build
 
@@ -53,7 +53,7 @@ plugin archive to a directory that is not a checkout and run the clients against
 claude plugin validate --strict <extracted>
 claude --plugin-dir <extracted>
 CODEX_HOME=<empty temporary directory> codex plugin marketplace add <a marketplace root whose entry points at <extracted>>
-CODEX_HOME=<the same directory> codex plugin add agent-ingest-audit-optimize@<that marketplace>
+CODEX_HOME=<the same directory> codex plugin add plugin-reviewer@<that marketplace>
 ```
 
 Pointing `CODEX_HOME` at an empty directory keeps the trial out of the real Codex configuration.

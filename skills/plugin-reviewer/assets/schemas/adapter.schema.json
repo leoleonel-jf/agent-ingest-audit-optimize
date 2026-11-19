@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize/adapter.schema.json",
-  "title": "Agent Ingest, Audit and Optimize client adapter",
+  "$id": "https://github.com/leoleonel-jf/plugin-reviewer/adapter.schema.json",
+  "title": "Plugin Reviewer client adapter",
   "description": "Documentation for humans and external tools. The bundle carries no JSON Schema library and never grows one: `ledgerlib.adapters.validate_adapter` is what actually runs at load time. `SchemaAgreementTests` in dashboard/tests/test_adapters.py compares this file against that validator in both directions, because the two drift the moment nothing compares them.",
   "type": "object",
   "additionalProperties": false,

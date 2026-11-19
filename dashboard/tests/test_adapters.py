@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -22,19 +23,19 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = (
-    REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "assets" / "scripts"
+    REPO_ROOT / "skills" / "plugin-reviewer" / "assets" / "scripts"
 )
 SCRIPT = SCRIPTS / "dashboard.py"
 ADAPTER_SCHEMA = (
     REPO_ROOT
     / "skills"
-    / "agent-ingest-audit-optimize"
+    / "plugin-reviewer"
     / "assets"
     / "schemas"
     / "adapter.schema.json"
 )
 ADAPTERS_DIR = (
-    REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "assets" / "adapters"
+    REPO_ROOT / "skills" / "plugin-reviewer" / "assets" / "adapters"
 )
 RESEARCH = (
     REPO_ROOT / "docs" / "research" / "2026-11-19-client-configuration-paths.md"
@@ -1186,7 +1187,9 @@ class SelectAdapterTests(unittest.TestCase):
         self.bundled = self.root / "bundled"
         self.bundled.mkdir()
         self.user_config = self.root / "user-config"
-        self.user_adapters = (
+        self.user_adapters = self.user_config / "plugin-reviewer" / "adapters"
+        # The directory's name before 0.11.0. A machine that has it keeps it.
+        self.former_user_adapters = (
             self.user_config / "agent-ingest-audit-optimize" / "adapters"
         )
         self.project = self.root / "project"
@@ -1376,6 +1379,236 @@ class SelectAdapterTests(unittest.TestCase):
         self.assertEqual(data["client"], "zeta")
         self.assertTrue(any(str(path) in note for note in notes), notes)
         self.assertFalse([note for note in notes if "override" in note], notes)
+
+    # -- the directory's former name ---------------------------------------
+    #
+    # docs/specs/2026-11-19-rename-plugin-reviewer.md section 6. The plugin was
+    # renamed in 0.11.0 and the directory under `--user-config` with it. A
+    # machine that already has the former directory keeps using it, so an
+    # adapter written there before the rename has to go on being read.
+
+    def former_notes(self, notes: list[str]) -> list[str]:
+        return [note for note in notes if "former name" in note]
+
+    def test_the_user_adapter_directory_carries_the_current_name(self) -> None:
+        self.assertEqual(
+            adapters.USER_ADAPTER_DIRECTORY, ("plugin-reviewer", "adapters")
+        )
+        self.assertEqual(
+            adapters.FORMER_USER_ADAPTER_DIRECTORY,
+            ("agent-ingest-audit-optimize", "adapters"),
+        )
+
+    def test_a_user_adapter_under_the_former_directory_name_is_still_read(
+        self,
+    ) -> None:
+        path = self.write_adapter(
+            self.former_user_adapters, "local.json", self.document("zeta")
+        )
+        data, notes = self.select(client="zeta", user_config=self.user_config)
+        self.assertEqual(data["client"], "zeta")
+        self.assertTrue(any(str(path) in note for note in notes), notes)
+
+    def test_a_former_directory_adapter_overrides_a_bundled_one(self) -> None:
+        self.write_adapter(self.bundled, "alpha.json", self.document("alpha"))
+        override = self.document("alpha")
+        override["sensitive_key_patterns"] = ["*token*"]
+        path = self.write_adapter(self.former_user_adapters, "local.json", override)
+        data, notes = self.select(client="alpha", user_config=self.user_config)
+        self.assertEqual(data["sensitive_key_patterns"], ["*token*"])
+        self.assertTrue(
+            any(str(path) in note and "override" in note for note in notes), notes
+        )
+
+    def test_reading_the_former_directory_is_recorded_as_one_note(self) -> None:
+        self.write_adapter(
+            self.former_user_adapters, "local.json", self.document("zeta")
+        )
+        self.write_adapter(
+            self.former_user_adapters, "other.json", self.document("eta")
+        )
+        _, notes = self.select(client="zeta", user_config=self.user_config)
+        former = self.former_notes(notes)
+        self.assertEqual(len(former), 1, notes)
+        self.assertIn(str(self.former_user_adapters), former[0])
+        self.assertIn("plugin-reviewer", former[0])
+
+    def test_the_current_directory_alone_adds_no_note_about_the_former_one(
+        self,
+    ) -> None:
+        self.write_adapter(self.user_adapters, "local.json", self.document("zeta"))
+        _, notes = self.select(client="zeta", user_config=self.user_config)
+        self.assertEqual(self.former_notes(notes), [], notes)
+
+    def test_an_empty_former_directory_adds_no_note(self) -> None:
+        self.former_user_adapters.mkdir(parents=True)
+        self.write_adapter(self.user_adapters, "local.json", self.document("zeta"))
+        _, notes = self.select(client="zeta", user_config=self.user_config)
+        self.assertEqual(self.former_notes(notes), [], notes)
+
+    def test_one_client_under_both_directory_names_is_refused(self) -> None:
+        """Both are user adapters, so neither may silently shadow the other."""
+        current = self.write_adapter(
+            self.user_adapters, "local.json", self.document("zeta")
+        )
+        former = self.write_adapter(
+            self.former_user_adapters, "local.json", self.document("zeta")
+        )
+        with self.assertRaises(LedgerError) as caught:
+            self.select(client="zeta", user_config=self.user_config)
+        message = str(caught.exception)
+        self.assertIn(repr("zeta"), message)
+        self.assertIn(str(current), message)
+        self.assertIn(str(former), message)
+
+    def test_different_clients_under_the_two_directory_names_are_both_available(
+        self,
+    ) -> None:
+        self.write_adapter(self.user_adapters, "local.json", self.document("zeta"))
+        self.write_adapter(
+            self.former_user_adapters, "local.json", self.document("eta")
+        )
+        for client in ("zeta", "eta"):
+            with self.subTest(client=client):
+                data, _ = self.select(client=client, user_config=self.user_config)
+                self.assertEqual(data["client"], client)
+
+    def test_an_invalid_adapter_under_the_former_directory_name_is_refused(
+        self,
+    ) -> None:
+        broken = self.document("zeta")
+        del broken["expires_on"]
+        path = self.write_adapter(self.former_user_adapters, "local.json", broken)
+        with self.assertRaises(LedgerError) as caught:
+            self.select(client="generic", user_config=self.user_config)
+        self.assertIn(str(path), str(caught.exception))
+
+    def test_the_unknown_client_message_names_the_current_directory(self) -> None:
+        with self.assertRaises(LedgerError) as caught:
+            self.select(client="nope")
+        message = str(caught.exception)
+        self.assertIn("<user-config>/plugin-reviewer/adapters/local.json", message)
+        self.assertNotIn("agent-ingest-audit-optimize", message)
+
+    def test_user_config_none_reads_neither_directory_name(self) -> None:
+        self.write_adapter(self.user_adapters, "local.json", self.document("zeta"))
+        self.write_adapter(
+            self.former_user_adapters, "local.json", self.document("eta")
+        )
+        calls = self.globbed_directories()
+        self.select(client="generic")
+        self.assertEqual(calls, [self.bundled])
+
+    def test_the_unknown_client_message_names_the_directory_in_use(self) -> None:
+        """An independent read of 0.11.0 found the message sending a machine
+        that has the former directory to create the new one beside it, which
+        is the state the Skill's rule forbids."""
+        self.former_user_adapters.parent.mkdir(parents=True)
+        with self.assertRaises(LedgerError) as caught:
+            self.select(client="nope", user_config=self.user_config)
+        message = str(caught.exception)
+        self.assertIn(
+            "<user-config>/agent-ingest-audit-optimize/adapters/local.json", message
+        )
+        self.assertNotIn("plugin-reviewer", message)
+
+    def test_the_unknown_client_message_prefers_the_current_directory_when_both_exist(
+        self,
+    ) -> None:
+        self.former_user_adapters.parent.mkdir(parents=True)
+        self.user_adapters.parent.mkdir(parents=True)
+        with self.assertRaises(LedgerError) as caught:
+            self.select(client="nope", user_config=self.user_config)
+        self.assertIn(
+            "<user-config>/plugin-reviewer/adapters/local.json", str(caught.exception)
+        )
+
+    def test_detection_selects_an_adapter_from_the_former_directory(self) -> None:
+        present = self.existing_root("zeta-home")
+        self.write_adapter(
+            self.former_user_adapters,
+            "local.json",
+            self.document("zeta", user_config=[str(present)]),
+        )
+        data, notes = self.select(user_config=self.user_config)
+        self.assertEqual(data["client"], "zeta")
+        self.assertEqual(len(self.former_notes(notes)), 1, notes)
+
+    def test_adapters_under_both_names_are_noted_as_two_directories(self) -> None:
+        self.write_adapter(self.user_adapters, "local.json", self.document("zeta"))
+        self.write_adapter(
+            self.former_user_adapters, "local.json", self.document("eta")
+        )
+        _, notes = self.select(client="zeta", user_config=self.user_config)
+        former = self.former_notes(notes)
+        self.assertEqual(len(former), 1, notes)
+        self.assertIn("both", former[0])
+        self.assertIn(str(self.user_adapters), former[0])
+        self.assertIn(str(self.former_user_adapters), former[0])
+
+    def link_former_name_to_current(self) -> None:
+        """Make the former directory name a link to the current directory.
+
+        What someone does who renames the directory and leaves the old name
+        working. A symlink where the platform allows one, a junction on
+        Windows, and a skip where neither can be made.
+        """
+        target = self.user_adapters.parent
+        link = self.former_user_adapters.parent
+        try:
+            os.symlink(target, link, target_is_directory=True)
+            return
+        except (OSError, NotImplementedError):
+            pass
+        try:
+            import _winapi
+
+            _winapi.CreateJunction(str(target), str(link))
+        except (ImportError, OSError, AttributeError) as error:
+            self.skipTest(f"no directory link can be made here: {error}")
+
+    def test_the_former_name_linked_to_the_current_directory_is_one_directory(
+        self,
+    ) -> None:
+        """Without this, every adapter is seen twice, declares its client
+        twice, and `scan`, `drift`, `build` and `update` all refuse to run."""
+        path = self.write_adapter(
+            self.user_adapters, "local.json", self.document("zeta")
+        )
+        self.link_former_name_to_current()
+        data, notes = self.select(client="zeta", user_config=self.user_config)
+        self.assertEqual(data["client"], "zeta")
+        self.assertTrue(any(str(path) in note for note in notes), notes)
+        self.assertEqual(self.former_notes(notes), [], notes)
+
+    def test_the_note_about_the_former_directory_reaches_stderr(self) -> None:
+        self.write_adapter(
+            self.former_user_adapters, "local.json", self.document("zeta")
+        )
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "scan",
+                "--id",
+                "BASE-2026-000",
+                "--client",
+                "zeta",
+                "--user-config",
+                str(self.user_config),
+                "--project",
+                str(self.project),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        # Not `0`: the fixture's `expires_on` is a fixed date, and whether it
+        # has passed is the calendar's business, not this test's. `2` would
+        # be the tool refusing to run.
+        self.assertNotEqual(completed.returncode, 2, completed.stderr)
+        self.assertIn("former name", completed.stderr)
+        self.assertIn(str(self.former_user_adapters), completed.stderr)
 
     # -- rule 3: detection -------------------------------------------------
 

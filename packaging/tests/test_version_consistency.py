@@ -24,7 +24,7 @@ RELEASES_DIR = REPO_ROOT / "docs" / "releases"
 LEDGERLIB_CONSTANTS = (
     REPO_ROOT
     / "skills"
-    / "agent-ingest-audit-optimize"
+    / "plugin-reviewer"
     / "assets"
     / "scripts"
     / "ledgerlib"
@@ -103,7 +103,7 @@ class VersionConsistencyTests(unittest.TestCase):
 
     def test_readme_skill_asset_name_matches(self) -> None:
         found = single_match(
-            rf"agent-ingest-audit-optimize-({SEMVER})-skill\.zip",
+            rf"plugin-reviewer-({SEMVER})-skill\.zip",
             read_text(README),
             README,
         )

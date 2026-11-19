@@ -1,13 +1,13 @@
 {
-  "name": "agent-ingest-audit-optimize",
-  "version": "0.10.0",
+  "name": "plugin-reviewer",
+  "version": "0.11.0",
   "description": "Review a plugin, a skill, or an MCP server before you adopt it, and audit advice about agent setup against current evidence.",
   "author": {
     "name": "Leonardo Leonel Sobral",
     "url": "https://github.com/leoleonel-jf"
   },
-  "homepage": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
-  "repository": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
+  "homepage": "https://github.com/leoleonel-jf/plugin-reviewer",
+  "repository": "https://github.com/leoleonel-jf/plugin-reviewer",
   "license": "MIT",
   "keywords": [
     "agent-skills",
@@ -18,7 +18,7 @@
   ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "Agent Ingest, Audit & Optimize",
+    "displayName": "Plugin Reviewer",
     "shortDescription": "Review before you install",
     "longDescription": "Reviews a plugin, a skill, or an MCP server before it is adopted: reads what it ships, checks its claims against current primary sources, compares it with the real setup, and gives a verdict with the risks and the way back. Also audits videos, articles, and repositories about agent setup and turns supported findings into scoped, reversible changes.",
     "developerName": "Leonardo Leonel Sobral",
@@ -27,10 +27,10 @@
       "Read",
       "Write"
     ],
-    "websiteURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
-    "supportURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/SUPPORT.md",
-    "privacyPolicyURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/PRIVACY.md",
-    "termsOfServiceURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/TERMS.md",
+    "websiteURL": "https://github.com/leoleonel-jf/plugin-reviewer",
+    "supportURL": "https://github.com/leoleonel-jf/plugin-reviewer/blob/main/SUPPORT.md",
+    "privacyPolicyURL": "https://github.com/leoleonel-jf/plugin-reviewer/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/leoleonel-jf/plugin-reviewer/blob/main/TERMS.md",
     "brandColor": "#0B1B4D",
     "composerIcon": "./assets/logo.png",
     "logo": "./assets/logo.png",

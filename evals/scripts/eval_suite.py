@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and summarize the agent-ingest-audit-optimize evaluation suite."""
+"""Validate and summarize the plugin-reviewer evaluation suite."""
 
 from __future__ import annotations
 

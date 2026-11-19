@@ -88,12 +88,31 @@ detail behind these fields.
 Global scope, at the client's user configuration root:
 
 ```text
-agent-ingest-audit-optimize/
+plugin-reviewer/
 ├── ledger.json
 ├── baseline/
 ├── records/
 └── backups/
 ```
+
+Before 0.11.0 this directory was named `agent-ingest-audit-optimize/`. A machine that already has
+it keeps using it where it is: read and write that directory, for everything in the layout above
+and for a user adapter. Never move it, copy it, or create the new directory beside it.
+
+Renaming the directory to its new name is the user's to ask for, and it is not always harmless.
+`verify`, `verify --chain`, and `chain --head` read the ledger document only, and answer the same
+before and after. A `RUN` whose `backup.path` points into the directory does not: the path is
+anchored, it names the directory, and after the move it resolves to nothing, so
+`rollback-preview` reports that run `BROKEN`. Rewriting the path repairs the preview and, in a
+sealed ledger, breaks the chain. Before a move, read every `backup.path`. When one names the
+directory, say so, and let the user choose between keeping the former name and losing the preview
+of those runs. After a move, run `rollback-preview` on each run and compare with before.
+
+When both exist, stop, name both, and ask which one is the ledger. Use the one the user names,
+leave the other untouched, and offer to settle it, so that the next session does not stop on the
+same question. Two directories would each hold a ledger claiming to be the ID authority, which is
+the conflict the Identifiers section exists to prevent, and merging them is a decision, never a
+default.
 
 Project scope, at the project root:
 

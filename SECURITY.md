@@ -12,7 +12,7 @@ Security fixes are applied to the latest published version.
 
 Do not include secrets, personal data, private source material, or working exploit details in a public issue.
 
-Use [GitHub private vulnerability reporting](https://github.com/leoleonel-jf/agent-ingest-audit-optimize/security/advisories/new) when it is available. If private reporting is unavailable, open a minimal public issue requesting a private contact channel without disclosing the vulnerability.
+Use [GitHub private vulnerability reporting](https://github.com/leoleonel-jf/plugin-reviewer/security/advisories/new) when it is available. If private reporting is unavailable, open a minimal public issue requesting a private contact channel without disclosing the vulnerability.
 
 Include:
 

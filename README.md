@@ -1,6 +1,6 @@
-# Agent Ingest, Audit, and Optimize
+# Plugin Reviewer
 
-<img src="assets/logo.png" alt="Agent Ingest, Audit, and Optimize logo" width="160">
+<img src="assets/logo.png" alt="Plugin Reviewer logo" width="160">
 
 A portable Agent Skill that reviews a plugin, a skill, or an MCP server before you adopt it: it reads what the package actually ships, checks its claims against current primary sources, compares it with your real setup, and answers with a verdict, the risks, and the way back. It also audits videos, articles, and repositories about agent setup and turns supported findings into scoped, reversible changes.
 
@@ -27,7 +27,7 @@ Record IDs (`MAT-`, `PROP-`, `RUN-`, `ADR-`) are local to each installation. A f
 
 ```text
 skills/
-└── agent-ingest-audit-optimize/
+└── plugin-reviewer/
     ├── SKILL.md
     ├── agents/
     │   └── openai.yaml
@@ -46,11 +46,11 @@ The repository is also a plugin, described by three manifests:
 plugin.json                  Agent Plugins 1.0.0, the portable entry point
 .claude-plugin/plugin.json   Claude Code
 .codex-plugin/plugin.json    Codex compatibility overlay
-skills/agent-ingest-audit-optimize/
+skills/plugin-reviewer/
 skills/dashboard/
 ```
 
-All three manifests name the same canonical Skill. No platform-specific copy of its behavior is maintained. `skills/dashboard/` is a second, user-invoked skill: it renders the ledger's dashboard when you type `/agent-ingest-audit-optimize:dashboard`, and the model cannot start it on its own.
+All three manifests name the same canonical Skill. No platform-specific copy of its behavior is maintained. `skills/dashboard/` is a second, user-invoked skill: it renders the ledger's dashboard when you type `/plugin-reviewer:dashboard`, and the model cannot start it on its own.
 
 Build and verify the distributable plugin and portable Skill archives with:
 
@@ -68,8 +68,8 @@ See [packaging/README.md](packaging/README.md) for the package contract, support
 Add this repository as a marketplace and install the plugin:
 
 ```text
-codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.10.0
-codex plugin add agent-ingest-audit-optimize@agent-ingest-audit-optimize
+codex plugin marketplace add leoleonel-jf/plugin-reviewer --ref v0.11.0
+codex plugin add plugin-reviewer@plugin-reviewer
 ```
 
 Start a new Codex task after installation so the Skill can be discovered.
@@ -79,26 +79,58 @@ Start a new Codex task after installation so the Skill can be discovered.
 Add this repository as a marketplace, then install the plugin:
 
 ```text
-/plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize
-/plugin install agent-ingest-audit-optimize@agent-ingest-audit-optimize
+/plugin marketplace add leoleonel-jf/plugin-reviewer
+/plugin install plugin-reviewer@plugin-reviewer
 ```
 
 For development or testing without installing, clone the repository and load the plugin directory for a single session:
 
 ```text
-claude --plugin-dir <path-to-agent-ingest-audit-optimize>
+claude --plugin-dir <path-to-plugin-reviewer>
 ```
+
+### If you installed it as `agent-ingest-audit-optimize`
+
+That was this plugin's name until 0.11.0. The plugin, its marketplace, and its repository were renamed together; the Skill, the commands, and the ledger are the same.
+
+Claude Code, with the marketplace under its new name:
+
+```text
+/plugin marketplace remove agent-ingest-audit-optimize
+/plugin marketplace add leoleonel-jf/plugin-reviewer
+/plugin install plugin-reviewer@plugin-reviewer
+```
+
+Or keep the marketplace you already registered. Its `renames` map carries the installation over; after the update the plugin is no longer listed as installed, and one install brings it back:
+
+```text
+/plugin marketplace update agent-ingest-audit-optimize
+/plugin install plugin-reviewer@agent-ingest-audit-optimize
+```
+
+The marketplace then keeps the name it was registered under, and the plugin answers as `plugin-reviewer@agent-ingest-audit-optimize`.
+
+Codex has no rename mechanism, and `codex plugin marketplace upgrade` refuses a marketplace whose name changed, so an existing installation stays at 0.10.0. Remove both, then add the marketplace and the plugin again as shown above:
+
+```text
+codex plugin remove agent-ingest-audit-optimize@agent-ingest-audit-optimize
+codex plugin marketplace remove agent-ingest-audit-optimize
+```
+
+What you type changes with the name: `/plugin-reviewer:dashboard` in Claude Code and `$plugin-reviewer` in Codex.
+
+Your ledger does not move. A machine that already has `<user-config>/agent-ingest-audit-optimize/` (for Claude Code, `~/.claude/agent-ingest-audit-optimize/`) keeps using it where it is, and none of the commands above touches it. Renaming that directory to `plugin-reviewer` is optional, and safe when no recorded run keeps a backup inside it; [references/LEDGER.md](skills/plugin-reviewer/references/LEDGER.md) says what to check first.
 
 ### Other Agent Skills clients
 
-Download the `agent-ingest-audit-optimize-0.10.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
+Download the `plugin-reviewer-0.11.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
 
 ## Use
 
 Install or load the directory:
 
 ```text
-skills/agent-ingest-audit-optimize/
+skills/plugin-reviewer/
 ```
 
 in an Agent Skills-compatible client using that client's documented personal, project, workspace, or API installation method.
@@ -110,7 +142,7 @@ I found this plugin on GitHub and I am thinking of installing it. Review it firs
 ```
 
 ```text
-Use agent-ingest-audit-optimize to audit this article about agent configuration.
+Use plugin-reviewer to audit this article about agent configuration.
 ```
 
 ```text
@@ -134,7 +166,7 @@ at the client's user configuration root, and a git-versionable one per project a
 Validate every reachable ledger in one invocation so cross-ledger checks run:
 
 ```text
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify <path-to-ledger.json> [more...]
+python skills/plugin-reviewer/assets/scripts/dashboard.py verify <path-to-ledger.json> [more...]
 ```
 
 Exit codes: `0` clean, `1` findings, `2` the ledger could not be read. The tool requires
@@ -145,7 +177,7 @@ configuration and prints one baseline entry on standard output for the agent to 
 ledger:
 
 ```text
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py scan --id BASE-YYYY-NNN [--client NAME]
+python skills/plugin-reviewer/assets/scripts/dashboard.py scan --id BASE-YYYY-NNN [--client NAME]
 ```
 
 `scan` is read-only: it writes no file and runs nothing a configuration file names. Exit codes:
@@ -156,8 +188,8 @@ Check a captured baseline against the environment as it stands with `drift`, and
 rollback of a recorded run would and would not restore with `rollback-preview`:
 
 ```text
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py drift <path-to-ledger.json>
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py rollback-preview <path-to-ledger.json> RUN-YYYY-NNN
+python skills/plugin-reviewer/assets/scripts/dashboard.py drift <path-to-ledger.json>
+python skills/plugin-reviewer/assets/scripts/dashboard.py rollback-preview <path-to-ledger.json> RUN-YYYY-NNN
 ```
 
 Both are read-only like `scan` and print one JSON report on standard output. Exit codes: `0`
@@ -167,8 +199,8 @@ findings, `2` a tool error.
 Pin which installable artifacts should be present, and check the pin in CI:
 
 ```text
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py lock <path-to-ledger.json> --from BASE-YYYY-NNN --out agent.lock
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py lock <path-to-ledger.json> --check agent.lock
+python skills/plugin-reviewer/assets/scripts/dashboard.py lock <path-to-ledger.json> --from BASE-YYYY-NNN --out agent.lock
+python skills/plugin-reviewer/assets/scripts/dashboard.py lock <path-to-ledger.json> --check agent.lock
 ```
 
 `agent.lock` is deterministic and meant to be committed: a baseline says what *was* there, a
@@ -178,14 +210,14 @@ against the disk as it is now is `drift`'s job, and one question must not have t
 Make tampering with the ledger evident by hash-chaining its records:
 
 ```text
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py chain <path-to-ledger.json> --seal
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify <path-to-ledger.json> --chain [--expect-head DIGEST]
+python skills/plugin-reviewer/assets/scripts/dashboard.py chain <path-to-ledger.json> --seal
+python skills/plugin-reviewer/assets/scripts/dashboard.py verify <path-to-ledger.json> --chain [--expect-head DIGEST]
 ```
 
 The chain is tamper-**evident**, not tamper-proof: it detects edits, deletions and reordering,
 and a wholly recomputed chain is caught only by comparing `chain --head` against a digest you
 recorded outside the ledger. What the chain does and does not detect is in
-[references/LEDGER_INTEGRITY.md](skills/agent-ingest-audit-optimize/references/LEDGER_INTEGRITY.md).
+[references/LEDGER_INTEGRITY.md](skills/plugin-reviewer/references/LEDGER_INTEGRITY.md).
 
 The `compliance` command was withdrawn in 0.8.0: its control mapping misnamed the articles and
 controls it cited, and this plugin does not assess regulatory compliance. The subcommand remains
@@ -195,7 +227,7 @@ Render a ledger into a single offline HTML dashboard with `build` — vanilla JS
 no network request, and it never writes back to the ledger:
 
 ```text
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py build <path-to-ledger.json> [--out PATH] [--lang CODE] [--open]
+python skills/plugin-reviewer/assets/scripts/dashboard.py build <path-to-ledger.json> [--out PATH] [--lang CODE] [--open]
 ```
 
 Exit codes: `0` written, `1` I/O error or overwrite refusal, `2` a ledger `verify` would reject.
@@ -207,7 +239,7 @@ stderr and still exits `0`, because the dashboard is on disk and that was the co
 Bring things up to date with `update`, which names the three things "refresh" can mean:
 
 ```text
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py update <path-to-ledger.json> [all|ledger|anchors] [--open] [--id BASE-YYYY-NNN]
+python skills/plugin-reviewer/assets/scripts/dashboard.py update <path-to-ledger.json> [all|ledger|anchors] [--open] [--id BASE-YYYY-NNN]
 ```
 
 `anchors` is the default and re-renders the dashboard, writing no ledger. `ledger` captures the
@@ -218,11 +250,11 @@ record, so `verify --expect-head` keeps passing against a head recorded beforeha
 in which case nothing is written at all.
 
 Omitting `--id` mints the next baseline identifier from the ledger's own sequence and says so on
-stderr. See [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md) for
+stderr. See [references/LEDGER.md](skills/plugin-reviewer/references/LEDGER.md) for
 why that is a stated exception to the ID-authority rule rather than a silent one.
 
-See [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md) for the
-record model, and [assets/schemas/ledger.schema.json](skills/agent-ingest-audit-optimize/assets/schemas/ledger.schema.json)
+See [references/LEDGER.md](skills/plugin-reviewer/references/LEDGER.md) for the
+record model, and [assets/schemas/ledger.schema.json](skills/plugin-reviewer/assets/schemas/ledger.schema.json)
 for the contract the validator enforces.
 
 Run the validator's own test suite with:

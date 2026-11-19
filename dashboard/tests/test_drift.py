@@ -39,7 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = (
     REPO_ROOT
     / "skills"
-    / "agent-ingest-audit-optimize"
+    / "plugin-reviewer"
     / "assets"
     / "scripts"
     / "dashboard.py"
@@ -1132,7 +1132,7 @@ class DriftCliTests(DriftCliTestCase):
         # bundled directory, which holds no `testclient`.
         local = (
             self.user_config
-            / "agent-ingest-audit-optimize"
+            / "plugin-reviewer"
             / "adapters"
             / "local.json"
         )

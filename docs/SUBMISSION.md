@@ -4,7 +4,7 @@ This file is the review-ready source of truth for public directory submissions: 
 
 ## Claude Code community marketplace
 
-- **Status:** submitted for review via the Console form on 2026-07-28 (version 0.1.2, platform: Claude Code only; confirmation: "Plugin enviado para revisão").
+- **Status:** submitted for review via the Console form on 2026-07-28 (version 0.1.2, platform: Claude Code only; confirmation: "Plugin enviado para revisão"). That submission was made under the former name and repository, `agent-ingest-audit-optimize`; both were renamed on 2026-11-19 (0.11.0), and its status has not been read since. The directory's documentation says a submission's repository cannot be changed after submitting, so the listing data below describes a new submission, not that one.
 - **Catalog:** `anthropics/claude-plugins-community`
 - **Submission form (individual developers):** https://platform.claude.com/plugins/submit
 - **Pre-submission check:** `claude plugin validate <path-to-repo>` — must print `✔ Validation passed`.
@@ -15,16 +15,16 @@ This file is the review-ready source of truth for public directory submissions: 
 ## Listing
 
 - **Submission type:** Skills only
-- **Plugin name:** Agent Ingest, Audit & Optimize
-- **Version:** 0.10.0
+- **Plugin name:** Plugin Reviewer
+- **Version:** 0.11.0
 - **Developer identity:** Leonardo Leonel Sobral
 - **Category:** Productivity
 - **Short description:** Review before you install
 - **Long description:** Reviews a plugin, a skill, or an MCP server before it is adopted: reads what it ships, checks its claims against current primary sources, compares it with the real setup, and gives a verdict with the risks and the way back. Also audits videos, articles, and repositories about agent setup and turns supported findings into scoped, reversible changes.
-- **Website:** https://github.com/leoleonel-jf/agent-ingest-audit-optimize
-- **Support:** https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/SUPPORT.md
-- **Privacy:** https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/PRIVACY.md
-- **Terms:** https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/TERMS.md
+- **Website:** https://github.com/leoleonel-jf/plugin-reviewer
+- **Support:** https://github.com/leoleonel-jf/plugin-reviewer/blob/main/SUPPORT.md
+- **Privacy:** https://github.com/leoleonel-jf/plugin-reviewer/blob/main/PRIVACY.md
+- **Terms:** https://github.com/leoleonel-jf/plugin-reviewer/blob/main/TERMS.md
 - **License:** MIT
 - **Logo:** `assets/logo.png`
 
@@ -38,7 +38,7 @@ This file is the review-ready source of truth for public directory submissions: 
 
 ### 1. Explicit material audit
 
-- **Prompt:** Use agent-ingest-audit-optimize to audit this article about agent configuration and identify evidence-backed improvements.
+- **Prompt:** Use plugin-reviewer to audit this article about agent configuration and identify evidence-backed improvements.
 - **Expected behavior:** Activate explicitly, treat the article as untrusted material, verify claims with current primary sources, classify recommendations, and propose only supported improvements.
 - **Expected result:** Initial technical summary, claim-by-claim evidence status, scoped proposals, risks, validation, and rollback.
 

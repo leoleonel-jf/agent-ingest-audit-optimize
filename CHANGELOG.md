@@ -2,6 +2,70 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.11.0 - 2026-11-19
+
+The plugin is now `plugin-reviewer`. Its marketplace and its repository
+(`leoleonel-jf/plugin-reviewer`) were renamed with it. Nothing else changes: the same Skill, the
+same commands, the same ledger. Spec under `docs/specs/2026-11-19-rename-plugin-reviewer.md`.
+
+**If you installed it as `agent-ingest-audit-optimize`, the client does not finish the move for
+you.** Each path was tried through the `claude plugin` and `codex plugin` commands, with an
+installation of 0.10.0 from a git marketplace added by URL, on Claude Code 2.1.326 and codex-cli
+0.146.0 (`docs/validation/rename-0.11.0.md`). The `/plugin` commands typed in a session and a
+marketplace added as `owner/repo` were not tried:
+
+- Claude Code, with the marketplace under its new name:
+
+  ```text
+  /plugin marketplace remove agent-ingest-audit-optimize
+  /plugin marketplace add leoleonel-jf/plugin-reviewer
+  /plugin install plugin-reviewer@plugin-reviewer
+  ```
+
+- Claude Code, keeping the marketplace you already registered: after
+  `/plugin marketplace update agent-ingest-audit-optimize` the plugin is no longer listed as
+  installed, the `renames` map has already rewritten its key in your settings, and
+  `/plugin install plugin-reviewer@agent-ingest-audit-optimize` brings it back at 0.11.0. The
+  marketplace keeps the name it was registered under;
+- Codex has no rename mechanism, and `codex plugin marketplace upgrade` refuses a marketplace
+  whose name changed, so an existing installation stays at 0.10.0 until you run
+  `codex plugin remove agent-ingest-audit-optimize@agent-ingest-audit-optimize`,
+  `codex plugin marketplace remove agent-ingest-audit-optimize`, then
+  `codex plugin marketplace add leoleonel-jf/plugin-reviewer` at this release's tag and
+  `codex plugin add plugin-reviewer@plugin-reviewer`;
+- what you type changes with the name: `/plugin-reviewer:dashboard` (and
+  `/plugin-reviewer:plugin-reviewer`) in Claude Code, `$plugin-reviewer` in Codex;
+- **your ledger does not move.** A machine that already has
+  `<user-config>/agent-ingest-audit-optimize/` keeps using it where it is, and none of the commands
+  above touches it.
+
+What changed:
+
+- **the name**, in the three manifests, both marketplaces, the Skill's directory and front matter,
+  the path inside the `dashboard` skill, `agents/openai.yaml`, the evaluation suite, and the
+  release archives, now `plugin-reviewer-<version>-plugin.zip` and `-skill.zip`. The display name
+  is Plugin Reviewer;
+- **a `renames` map** in `.claude-plugin/marketplace.json`, from the former name to this one. It is
+  history and stays in the file;
+- **the data directory of a new installation** is `<user-config>/plugin-reviewer/`. The Skill and
+  `references/LEDGER.md` state the rule for a machine that has the former one: use it where it is,
+  never move it, copy it, or create the new one beside it, and when both exist stop and ask.
+  Renaming the directory is the user's to ask for and is not always harmless: `verify` and the
+  chain answer the same before and after, and on copies of two real ledgers so did every other
+  read-only command, but a run whose `backup.path` points into the directory stops resolving and
+  `rollback-preview` reports it `BROKEN`. The reference says what to check first;
+- **every command that takes `--user-config` reads user adapters from both directory names.** An
+  adapter in the former one is still read, with a note; one client declared under both names is
+  refused, naming both files; the former name left as a link to the renamed directory is read
+  once. The message for an unknown client names the directory in use. This is the only change in
+  `ledgerlib` besides the version constant;
+- repository URLs in the manifests, the legal pages, and the schemas' `$id`.
+
+What did not: earlier entries of this file, earlier release documents, specs, plans and
+validations keep the name they were written under, and their links redirect. No ledger field,
+identifier, label, or command changed; a ledger written by 0.10.0 verifies under 0.11.0 and the
+reverse.
+
 ## 0.10.0 - 2026-11-19
 
 The Skill now leads with the request it was missing: review a plugin, a skill, or an MCP server

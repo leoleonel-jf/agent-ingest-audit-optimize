@@ -41,7 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = (
     REPO_ROOT
     / "skills"
-    / "agent-ingest-audit-optimize"
+    / "plugin-reviewer"
     / "assets"
     / "scripts"
     / "dashboard.py"
@@ -49,7 +49,7 @@ SCRIPT = (
 TEMPLATE_PATH = (
     REPO_ROOT
     / "skills"
-    / "agent-ingest-audit-optimize"
+    / "plugin-reviewer"
     / "assets"
     / "templates"
     / "dashboard.html"
@@ -271,7 +271,7 @@ class PreviewSetContractTests(RollbackTestCase):
 
     `dashboard.html` declares `var PREVIEW_SETS = [...]`, the literal list
     its Rollback renderer loops over to pull each set out of a live preview
-    (`skills/agent-ingest-audit-optimize/assets/templates/dashboard.html`,
+    (`skills/plugin-reviewer/assets/templates/dashboard.html`,
     `rollbackBlock`). This test extracts that array by regex, straight out
     of the shipped template source, and compares it against the actual keys
     a real `rollback_preview()` call returns -- not against a second
@@ -568,6 +568,55 @@ class IndicatorTests(RollbackTestCase):
             + len(report["cannot_be_restored"])
         )
         self.assertEqual(counted, 4)
+
+
+class MovedDataDirectoryTests(RollbackTestCase):
+    """0.11.0: what renaming the data directory does to a recorded backup.
+
+    `references/LEDGER.md` says a run whose backup is inside the directory
+    stops previewing after the move. This is that sentence as behaviour, so
+    the reference cannot go back to calling the move harmless while the tool
+    still does this.
+    """
+
+    FORMER = "agent-ingest-audit-optimize"
+    CURRENT = "plugin-reviewer"
+
+    def backup_inside(self, directory: str) -> dict:
+        backup_file = self.write(
+            self.user_config / directory / "backups" / f"{RUN_ID}.bak",
+            "backup bytes\n",
+        )
+        return {
+            "path": f"$USER_CONFIG/{directory}/backups/{RUN_ID}.bak",
+            "digest": self.digest_of(backup_file),
+            "verified": True,
+        }
+
+    def test_a_backup_inside_the_directory_stops_resolving_after_the_move(
+        self,
+    ) -> None:
+        records = [
+            self.run_record(
+                [self.in_place_target()], self.backup_inside(self.FORMER)
+            )
+        ]
+        before, _, _ = self.preview(records)
+        self.assertEqual(before["indicator"], "HEALTHY")
+
+        (self.user_config / self.FORMER).rename(self.user_config / self.CURRENT)
+
+        after, _, code = self.preview(records)
+        self.assertEqual(after["indicator"], "BROKEN")
+        self.assertEqual(after["backup"]["reason"], "missing")
+        self.assertEqual(code, 1)
+
+    def test_a_backup_outside_the_directory_survives_the_move(self) -> None:
+        self.write(self.user_config / self.FORMER / "ledger.json", "{}\n")
+        records = [self.run_record([self.in_place_target()], self.verified_backup())]
+        (self.user_config / self.FORMER).rename(self.user_config / self.CURRENT)
+        after, _, _ = self.preview(records)
+        self.assertEqual(after["indicator"], "HEALTHY")
 
 
 class ToolErrorTests(RollbackTestCase):

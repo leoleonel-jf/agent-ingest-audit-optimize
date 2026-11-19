@@ -2,7 +2,7 @@
 
 Effective date: July 28, 2026
 
-Agent Ingest, Audit & Optimize is a Skill plugin. The publisher does not operate a backend service for the plugin and does not independently collect, transmit, sell, or retain user data.
+Plugin Reviewer is a Skill plugin. The publisher does not operate a backend service for the plugin and does not independently collect, transmit, sell, or retain user data.
 
 ## Information processed
 
@@ -32,7 +32,7 @@ Their reports carry digests, classification states, and data the ledger already 
 
 `build` reads one ledger and writes exactly one local HTML file — `dashboard.html` next to the ledger by default, or the path given with `--out` — and nothing else. It makes no network request and transmits nothing; the file is meant to be opened directly in a browser from disk. It also reads the same configuration files `drift` and `rollback-preview` read, to compute the drift and rollback-preview data the dashboard embeds.
 
-The generated dashboard contains ledger data verbatim — record titles, evidence sources, backlog reasons, file anchors, and everything else `ledger.json` holds — rendered as inert text, never as executable content. Treat it exactly as you would treat the ledger itself: at project scope, it belongs in `.gitignore` alongside the rest of what a project ledger excludes. `.agent-audit/.gitignore` is written to cover `dashboard.html` specifically (see [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md)), because unlike the ledger's records, a generated dashboard is disposable: it can always be regenerated from the ledger and carries no information the ledger itself lacks.
+The generated dashboard contains ledger data verbatim — record titles, evidence sources, backlog reasons, file anchors, and everything else `ledger.json` holds — rendered as inert text, never as executable content. Treat it exactly as you would treat the ledger itself: at project scope, it belongs in `.gitignore` alongside the rest of what a project ledger excludes. `.agent-audit/.gitignore` is written to cover `dashboard.html` specifically (see [references/LEDGER.md](skills/plugin-reviewer/references/LEDGER.md)), because unlike the ledger's records, a generated dashboard is disposable: it can always be regenerated from the ledger and carries no information the ledger itself lacks.
 
 ## External material and tools
 
@@ -59,4 +59,4 @@ Material changes to this policy will be documented in the repository history and
 
 ## Contact
 
-Questions about this policy may be submitted through the project's [GitHub issue tracker](https://github.com/leoleonel-jf/agent-ingest-audit-optimize/issues).
+Questions about this policy may be submitted through the project's [GitHub issue tracker](https://github.com/leoleonel-jf/plugin-reviewer/issues).

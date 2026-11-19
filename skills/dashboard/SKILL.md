@@ -31,12 +31,12 @@ is the instruction — proceed without asking again.
 ## Run it
 
 ```
-python "${CLAUDE_PLUGIN_ROOT}/skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py" update <ledger> <what> [--open] [passthrough flags]
+python "${CLAUDE_PLUGIN_ROOT}/skills/plugin-reviewer/assets/scripts/dashboard.py" update <ledger> <what> [--open] [passthrough flags]
 ```
 
 The script ships with the plugin, not with the project: never look for it under the working
 directory. A client that does not expand `${CLAUDE_PLUGIN_ROOT}` finds the same file at
-`../agent-ingest-audit-optimize/assets/scripts/dashboard.py`, relative to the directory holding
+`../plugin-reviewer/assets/scripts/dashboard.py`, relative to the directory holding
 this file.
 
 Pass `--open` through when the user asked to see the dashboard. Forward `--id`, `--client`,

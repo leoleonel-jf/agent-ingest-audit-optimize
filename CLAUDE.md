@@ -1,6 +1,6 @@
-# agent-ingest-audit-optimize
+# plugin-reviewer
 
-Plugin for Claude Code and Codex around one canonical Skill in `skills/agent-ingest-audit-optimize/`.
+Plugin for Claude Code and Codex around one canonical Skill in `skills/plugin-reviewer/`.
 Python 3.10+, standard library only. Machine-specific notes go in `CLAUDE.local.md` (gitignored).
 
 **Retomada:** ao abrir uma sessão aqui, leia primeiro [.agent-audit/HANDOFF.md](.agent-audit/HANDOFF.md).
@@ -12,7 +12,7 @@ Python 3.10+, standard library only. Machine-specific notes go in `CLAUDE.local.
 - `python -m unittest discover -s evals/tests` - eval suite structure
 - `python evals/scripts/eval_suite.py validate` - prints the eval case count
 - `python packaging/scripts/package_plugin.py build` / `verify` - deterministic archives into `dist/` (gitignored); `verify` fails without a prior `build`
-- `python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py` - the ledger CLI (`verify`, `lock`, `build`, `update`, ...)
+- `python skills/plugin-reviewer/assets/scripts/dashboard.py` - the ledger CLI (`verify`, `lock`, `build`, `update`, ...)
 
 ## Gotchas
 

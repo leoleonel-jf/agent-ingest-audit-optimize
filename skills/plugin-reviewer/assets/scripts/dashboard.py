@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the agent-ingest-audit-optimize governance ledger.
+"""Validate the plugin-reviewer governance ledger.
 
 `verify` validates one or more ledgers. `scan` reads one client's
 configuration and emits a single `baselines[]` entry on stdout. `drift`
