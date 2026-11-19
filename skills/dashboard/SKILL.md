@@ -1,9 +1,12 @@
 ---
+name: dashboard
 description: Render the governance ledger's dashboard, optionally recapturing the environment first.
 argument-hint: "[all|ledger|anchors] [--open] [--id BASE-YYYY-NNN]"
+disable-model-invocation: true
 ---
 
-Run the bundle's `update` command against this project's ledger. This is a thin wrapper around
+Run the bundle's `update` command against this project's ledger, and only when the user asked for
+it by invoking this skill. This is a thin wrapper around
 `dashboard.py`, not a second implementation: everything it decides is which ledger to point at.
 
 ## Resolve the ledger
@@ -19,7 +22,7 @@ Use, in order, the first that exists:
 `$ARGUMENTS` may begin with `all`, `ledger`, or `anchors`. When it names none of them, use
 `anchors`.
 
-**`anchors` is the only word this command may choose on its own.** It writes the dashboard and
+**`anchors` is the only word this skill may choose on its own.** It writes the dashboard and
 never the ledger. `ledger` and `all` append a new baseline to the ledger, which is a persistent
 change, and the README's line holds here: analysis is read-only, and a persistent change needs an
 unambiguous instruction. A bare `/dashboard` is not one. If the user typed `ledger` or `all`, that
@@ -28,8 +31,13 @@ is the instruction — proceed without asking again.
 ## Run it
 
 ```
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py update <ledger> <what> [--open] [passthrough flags]
+python "${CLAUDE_PLUGIN_ROOT}/skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py" update <ledger> <what> [--open] [passthrough flags]
 ```
+
+The script ships with the plugin, not with the project: never look for it under the working
+directory. A client that does not expand `${CLAUDE_PLUGIN_ROOT}` finds the same file at
+`../agent-ingest-audit-optimize/assets/scripts/dashboard.py`, relative to the directory holding
+this file.
 
 Pass `--open` through when the user asked to see the dashboard. Forward `--id`, `--client`,
 `--out`, `--lang`, `--force`, `--project`, `--adapter`, `--user-config` and `--strict` verbatim

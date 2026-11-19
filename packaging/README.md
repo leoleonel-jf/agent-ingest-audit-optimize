@@ -33,7 +33,7 @@ Verification checks:
 - the canonical Skill name matches its directory;
 - required files are present;
 - symlinks and unsafe archive paths are rejected;
-- plugin archives contain only the manifests, public documentation, logo, license, and shared Skill;
+- plugin archives contain only the manifests, public documentation, logo, license, and the `skills/` tree;
 - Skill archives contain exactly one top-level Skill directory;
 - generated SHA-256 checksums match.
 
@@ -46,14 +46,27 @@ claude plugin validate --strict .
 
 The first path is a local Codex development-tool path and may differ on another machine.
 
+Validating the checkout says little about what a user installs. Before a release, extract the
+plugin archive to a directory that is not a checkout and run the clients against that:
+
+```text
+claude plugin validate --strict <extracted>
+claude --plugin-dir <extracted>
+CODEX_HOME=<empty temporary directory> codex plugin marketplace add <a marketplace root whose entry points at <extracted>>
+CODEX_HOME=<the same directory> codex plugin add agent-ingest-audit-optimize@<that marketplace>
+```
+
+Pointing `CODEX_HOME` at an empty directory keeps the trial out of the real Codex configuration.
+
 ## Version pins
 
 `.claude-plugin/plugin.json` → `version` is the single source of truth for the plugin version.
-Eight other places restate it, and `packaging/tests/test_version_consistency.py` is the
+Nine other places restate it, and `packaging/tests/test_version_consistency.py` is the
 authoritative list — it fails when any of them drifts, naming the file that did:
 
 | Pin | Form |
 | --- | --- |
+| `plugin.json` → `version` | the version |
 | `.codex-plugin/plugin.json` → `version` | the version |
 | `.claude-plugin/marketplace.json` → `plugins[0].version` | the version |
 | `.agents/plugins/marketplace.json` → `plugins[0].source.ref` | `v` + the version |

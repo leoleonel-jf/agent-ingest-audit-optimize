@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.9.0 - 2026-11-19
+
+Packaging brought up to the formats as they stand today. Spec under
+`docs/specs/2026-11-19-plugin-formats.md`. Nothing about what an audit does changes.
+
+- **`/dashboard` now works outside this repository.** It ran `python skills/...`, a path relative
+  to this repository's root, so from any other project the script was not found. 0.6.1 shipped
+  the command in the plugin archive with that same path. It is now a plugin skill,
+  `skills/dashboard/SKILL.md`, that reaches the script through `${CLAUDE_PLUGIN_ROOT}`. The name
+  you type is unchanged: `/agent-ingest-audit-optimize:dashboard`;
+- the dashboard skill cannot be started by the model: `disable-model-invocation: true` for Claude
+  Code and `allow_implicit_invocation: false` for Codex. Two of its three words append to a ledger,
+  and as a command it only ever ran when typed;
+- `commands/` is gone. Claude Code's documentation calls it the older format; nothing else lived
+  there;
+- **a root `plugin.json`**, the manifest the Agent Plugins 1.0.0 specification requires, with the
+  OpenAI interface fields under `extensions.com.openai`. `.claude-plugin/plugin.json` and
+  `.codex-plugin/plugin.json` stay, because each client still reads its own. The packager refuses
+  to build unless all three name one plugin at one version, and a test holds the two copies of the
+  OpenAI interface identical, since OpenAI reads the inline one instead of the overlay and never
+  merges them;
+- **the Codex `shortDescription` fits the directory's limit**: 27 characters, down from 49 against
+  a limit of 30. `supportURL` is added. Tests hold the stated limits;
+- `SKILL.md` says where `dashboard.py` is. It named the script eight times and never its path;
+- `.claude-plugin/plugin.json` gains `displayName` and `keywords`;
+- checked and left alone: `codex plugin add` in the README. The hosted documentation does not list
+  it; `codex plugin --help` on 0.146.0 does, and it installed the extracted archive;
+- validated on the extracted archive, outside any checkout: `claude plugin validate --strict` on
+  Claude Code 2.1.326, and `codex plugin marketplace add`, `list` and `add` on codex-cli 0.146.0
+  with an empty `CODEX_HOME`. `packaging/README.md` records how.
+
 ## 0.8.0 - 2026-11-19
 
 The cut the 2026-11 review decided: one command withdrawn, the roadmap closed in writing, and four

@@ -198,7 +198,8 @@ Every finding classified `REJECT`, `NEEDS MORE EVIDENCE`, `RISK EXCEEDS BENEFIT`
 `OBSOLETE`, `NOT APPLICABLE`, and `ALREADY IMPLEMENTED` are terminal and never enter the
 backlog.
 
-After writing the ledger, run `dashboard.py verify` on it. Read
+`dashboard.py` is `assets/scripts/dashboard.py` inside this Skill's directory; run it with Python
+3.10 or later. After writing the ledger, run `dashboard.py verify` on it. Read
 [references/LEDGER.md](references/LEDGER.md) for storage layout, scope routing, identifiers,
 evidence expiry, and `verify`.
 

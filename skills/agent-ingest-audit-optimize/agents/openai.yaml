@@ -1,6 +1,7 @@
 interface:
   display_name: "Agent Ingest, Audit & Optimize"
   short_description: "Audits materials and optimizes agent systems"
+  brand_color: "#0B1B4D"
   default_prompt: "Use $agent-ingest-audit-optimize to audit this material and propose evidence-based improvements."
 
 policy:
