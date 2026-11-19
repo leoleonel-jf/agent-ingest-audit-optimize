@@ -5,7 +5,8 @@
 - Pedido: `docs/prompts/2026-11-18-revisao-do-plugin.md`
 - Autor: Odin (Claude Code). Só leitura: nenhum arquivo do plugin foi alterado, nenhum ledger real
   foi tocado.
-- Status: parecer fechado. Nome, escopo e corte ainda não foram decididos pelo Leo.
+- Status: parecer fechado, avaliado pela Eve e decidido pelo Leo em 2026-11-18 (ver "Decisões" no
+  fim).
 
 ## Resumo
 
@@ -292,3 +293,51 @@ Sai do plugin: `compliance`, e o que resta dos pilares II e III do roadmap.
 - Status da submissão de julho no Console e nos diretórios dentro dos apps: exigem login.
 - Ativação com outro modelo, sem o `superpowers` e no Codex.
 - Validação em runtime no Codex atual.
+
+## Avaliação da Eve (2026-11-18)
+
+A Eve leu o parecer no SHA `6a8c1e2` e gravou a avaliação dela fora do repositório (em
+`.agent-audit/`, pasta ignorada pelo git). Ela concorda com a direção. O que muda neste parecer:
+
+- **Segurança sobe para o começo.** Ela reproduziu em memória, com dados fictícios, que valores
+  sob chaves não previstas passam pela redação: um comando de hook com `--password` e uma regra de
+  permissão com cabeçalho `Authorization` saíram intactos, e `update.py:_append_baseline` grava a
+  saída do `scan` no ledger. A correção entra antes do rename, com minimização e digest de campos
+  opacos em vez de confiar em regex.
+- **Defeito novo: o ZIP do plugin não inclui `commands/dashboard.md`.**
+  `packaging/scripts/package_plugin.py` não cita `commands/` (conferido). O teste de pacote deve
+  checar os componentes prometidos no arquivo extraído, não a própria lista do empacotador.
+- **Correções ao achado 4.** `Implement proposal PROP-…` é exemplo ("such as"), não a única forma
+  de autorizar. O teto de três propostas tem exceção a pedido do usuário. `TEST IN ISOLATION` é
+  aceito pelo schema; o atrito está na instrução, não no validador.
+- **Correção ao achado 7.** "Ninguém registra" é um universal que a busca não demonstra. Leia-se:
+  não encontramos equivalente nas fontes consultadas.
+- **Achado 1.** Ela abriu o PDF oficial do Regulamento (UE) 2026/1744: o art. 1(40) altera o
+  art. 113 com as datas de 02/12/2027 e 02/08/2028 para os grupos de alto risco indicados. Nem
+  toda a aplicação do regulamento saiu de 02/08/2026. Os títulos da ISO seguem sem fonte primária.
+- **Achado 2.** Nem todo código de saída 1 deve virar sucesso: há quem precise recusar baseline
+  desatualizado. Proposta dela: avisos estruturados e um modo estrito para CI.
+- **Achado 5.** CI sem checks obrigatórios e política de branch não impede push direto. Handoffs
+  só entram no git depois de retirados os dados privados.
+- **Achado 3.** `extensions.com.openai`, quando presente, substitui o overlay inteiro, sem merge.
+
+## Decisões do Leo (2026-11-18)
+
+1. **Nome:** `plugin-reviewer`.
+2. **Escopo:** o carro-chefe passa a ser revisar plugin, skill e servidor MCP antes de adotar. A
+   auditoria de vídeo, artigo, repositório e ideia continua, em segundo plano.
+3. **Corte:** o recomendado. Sai o comando `compliance`, com aviso de depreciação e histórico
+   preservado. O resto dos pilares II e III do roadmap é abandonado por escrito. `scan`, dashboard,
+   `lock` e o selo da cadeia continuam existindo, fora do caminho padrão da Skill. O registro
+   passa a ser um por revisão.
+
+Ordem de execução, um incremento por PR, já com os pontos da Eve:
+
+1. Suítes sem depender do relógio.
+2. CI mínimo.
+3. Redação de valores e ZIP completo.
+4. Adapters reverificados.
+5. Corte.
+6. Formatos de plugin.
+7. Skill enxuta, com o novo foco.
+8. Rename para `plugin-reviewer`, isolado, com release própria.
