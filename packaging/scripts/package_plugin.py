@@ -31,6 +31,10 @@ PUBLIC_FILES = tuple(
     )
 )
 ASSETS_ROOT = REPO_ROOT / "assets"
+# Directories a plugin root may carry besides `skills/`. Each one that exists
+# ships whole. 0.6.0 added `commands/` to the repository and not to this list,
+# so the release archive installed a plugin without its `/dashboard` command.
+COMPONENT_ROOTS = tuple(REPO_ROOT / name for name in ("commands", "agents", "hooks"))
 DEFAULT_OUTPUT = REPO_ROOT / "dist"
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 FRONTMATTER_NAME = re.compile(r"(?m)^name:\s*([A-Za-z0-9_-]+)\s*$")
@@ -98,6 +102,7 @@ def validate_sources() -> tuple[str, str, Path]:
         *PUBLIC_FILES,
         *ASSETS_ROOT.rglob("*"),
         *skill_dir.rglob("*"),
+        *(path for root in COMPONENT_ROOTS for path in root.rglob("*")),
     ):
         if path.is_symlink():
             raise PackagingError(f"Symlinks are not permitted in packages: {path}")
@@ -155,6 +160,12 @@ def expected_entries(name: str, skill_dir: Path) -> tuple[list[tuple[Path, str]]
     plugin_entries.extend(
         (path, path.relative_to(REPO_ROOT).as_posix())
         for path in iter_files(ASSETS_ROOT)
+    )
+    plugin_entries.extend(
+        (path, path.relative_to(REPO_ROOT).as_posix())
+        for root in COMPONENT_ROOTS
+        if root.is_dir()
+        for path in iter_files(root)
     )
     plugin_entries.extend(
         (path, path.relative_to(REPO_ROOT).as_posix()) for path in skill_files
