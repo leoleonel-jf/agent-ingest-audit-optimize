@@ -13,7 +13,7 @@ Record IDs (`MAT-`, `PROP-`, `RUN-`, `ADR-`) are local to each installation. A f
 ## What it does
 
 - reviews something installable before it is adopted, without installing or running it, and leads with one of five verdicts: adopt, adopt with changes, try in isolation first, not yet, do not adopt;
-- writes one record per review;
+- offers one record per review, and writes it only when you say yes;
 - audits videos, articles, documentation, repositories, transcripts, files, and ideas;
 - treats external material as untrusted evidence rather than executable instruction;
 - checks claims against current official and primary sources;
@@ -68,7 +68,7 @@ See [packaging/README.md](packaging/README.md) for the package contract, support
 Add this repository as a marketplace and install the plugin:
 
 ```text
-codex plugin marketplace add leoleonel-jf/plugin-reviewer --ref v0.11.0
+codex plugin marketplace add leoleonel-jf/plugin-reviewer --ref v0.12.0
 codex plugin add plugin-reviewer@plugin-reviewer
 ```
 
@@ -123,7 +123,7 @@ Your ledger does not move. A machine that already has `<user-config>/agent-inges
 
 ### Other Agent Skills clients
 
-Download the `plugin-reviewer-0.11.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
+Download the `plugin-reviewer-0.12.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
 
 ## Use
 
@@ -155,11 +155,11 @@ Implement proposal PROP-YYYY-NNN.
 
 ## Safety model
 
-Analysis and deliberation are read-only. Nothing under review is installed, enabled, or run in order to review it. Persistent changes require an instruction that names what to implement; the proposal identifier is one way to name it. Authorization covers only that proposal, and implementation stops if it encounters material data-loss risk, irreversible scope, failed backups, critical validation failure, unapproved cost, public exposure, or required scope expansion.
+Analysis and deliberation are read-only. Nothing under review is installed, enabled, or run in order to review it. Persistent changes require an instruction that names what to implement; the proposal identifier is one way to name it. A review's record is the one exception: it is written on your yes to the offer that closes the review. Authorization covers only that proposal, and implementation stops if it encounters material data-loss risk, irreversible scope, failed backups, critical validation failure, unapproved cost, public exposure, or required scope expansion.
 
 ## Ledger
 
-Every review writes one record, and every proposal, run, and decision of an authorized change is recorded, in a local ledger: a global one
+A review is recorded only when you say yes to the offer that closes it: the offer names the ledger the record would go to, a request made before it is not a yes, and a run with no one to answer (`claude -p`, `codex exec`, CI) records nothing. Every proposal, run, and decision of an authorized change is recorded. Both go in a local ledger: a global one
 at the client's user configuration root, and a git-versionable one per project at
 `.agent-audit/`. The ledger is local and is never transmitted.
 

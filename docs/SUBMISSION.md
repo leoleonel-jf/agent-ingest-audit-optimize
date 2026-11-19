@@ -17,7 +17,7 @@ This file is the review-ready source of truth for public directory submissions: 
 
 - **Submission type:** Skills only
 - **Plugin name:** Plugin Reviewer
-- **Version:** 0.11.0
+- **Version:** 0.12.0
 - **Developer identity:** Leonardo Leonel Sobral
 - **Category:** Productivity
 - **Short description:** Review before you install
@@ -93,4 +93,4 @@ The publisher must select countries or regions in the submission portal after co
 
 ## Release notes
 
-Skills-only submission. The plugin reviews a plugin, a skill, or an MCP server before it is adopted, audits external material about agent setup against current primary evidence, creates scoped proposals, and applies only explicitly authorized improvements. It includes security boundaries, rollback procedures, portability guidance, deterministic packaging, a local governance ledger with a standard-library validator, and a 39-case evaluation suite.
+Skills-only submission. The plugin reviews a plugin, a skill, or an MCP server before it is adopted, audits external material about agent setup against current primary evidence, creates scoped proposals, and applies only explicitly authorized improvements. It includes security boundaries, rollback procedures, portability guidance, deterministic packaging, a local governance ledger with a standard-library validator, and a 43-case evaluation suite.

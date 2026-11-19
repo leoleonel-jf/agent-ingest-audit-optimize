@@ -3,13 +3,18 @@
 The ledger is this plugin's own audit record: a local JSON file set the plugin reads and
 writes. It is never transmitted.
 
-## Bookkeeping is not implementation
+## A record needs a yes
 
-Writing to the ledger and to its records is audit bookkeeping, not a change to the user's
-environment. It is permitted in ANALYSIS, DELIBERATION, and IMPLEMENTATION, it never requires
-authorization, and it never constitutes implementing a proposal. Never present a ledger write
-as an implemented change. Creating a backup is not bookkeeping: it belongs to IMPLEMENTATION,
-which already requires a recoverable backup before the first change.
+Nothing is written to the ledger or to its records until the user says yes, in the conversation,
+to the offer that closes a review. `SKILL.md` states the rule, for every operating state and for
+both ledgers. One yes writes what one record needs, in the ledgers the offer named: the record,
+its file under `records/`, and a backlog entry when there is one; `sequences` and `updated` in the
+ledger that receives the record; for a record routed to a project ledger, the global ledger as
+well (its `sequences` and `known_projects`); and, on first use, the directory itself, with a
+project's `.gitignore`. No identifier is taken before the yes, and the sequence does not move.
+Reading a ledger is never a write and needs no yes. The instruction that authorizes a change is
+the yes for the records of that implementation, and for no other record. A ledger write never
+constitutes implementing a proposal, and creating a backup belongs to IMPLEMENTATION.
 
 ## Where the rest is
 
@@ -24,8 +29,8 @@ This file holds what writing a record needs. Open another only for its subject:
 
 ## One review, one record
 
-A review of a plugin, a skill, or an MCP server writes one `MATERIAL` record and one file under
-`records/`. This is a complete ledger holding the first review of an installation, and `verify`
+A review of a plugin, a skill, or an MCP server, once the user has said yes to its record, writes
+one `MATERIAL` record and one file under `records/`. This is a complete ledger holding the first review of an installation, and `verify`
 accepts it as written:
 
 ```json
@@ -77,11 +82,11 @@ accepts it as written:
 }
 ```
 
-For the next review, append one record to the ledger its scope routes to (Scope routing), take
-its number from the ID authority (Identifiers), raise `sequences.MAT` to one past the highest
-number used, and set `updated`. The backlog entry is there only because this verdict names what
-would change it; a verdict that names no such condition writes none. Everything below is the
-detail behind these fields.
+For the next review the user says yes to, append one record to the ledger its scope routes to
+(Scope routing), take its number from the ID authority (Identifiers), raise `sequences.MAT` to one
+past the highest number used, and set `updated`. The backlog entry is there only because this
+verdict names what would change it; a verdict that names no such condition writes none. Everything
+below is the detail behind these fields.
 
 ## Layout
 
@@ -187,10 +192,10 @@ The global ledger is the only ID authority (`id_authority: true`). When more tha
 in a verified set claims authority, that is a finding.
 
 Request the next ID from the global ledger. When it is unreachable, mint a provisional ID with
-a `-P` suffix, set `pending_id_reconciliation` to `true` on the record, and reconcile on the
-next successful global write, rewriting every reference. `verify` checks only the flag: a
-`-P` id without `pending_id_reconciliation: true` is a finding. It does not check that
-references were actually rewritten.
+a `-P` suffix, set `pending_id_reconciliation` to `true` on the record, and reconcile on the next
+global write the user says yes to, in an offer that names the reconciliation and every ledger it
+rewrites. `verify` checks only the flag: a `-P` id without `pending_id_reconciliation: true` is a
+finding. It does not check that references were actually rewritten.
 
 **`update` is a stated exception to the paragraph above, for baselines only.** When `--id` is
 omitted, `dashboard.py update ledger` mints the next `BASE` identifier from the ledger's own
@@ -303,7 +308,7 @@ Each entry in the global ledger's `known_projects` requires `project_root`, `led
 | `last_digest` | `sha256:<64 hex>` |
 | `status` | `OK`, `UNREACHABLE`, `CHANGED_EXTERNALLY` |
 
-Mark a project `UNREACHABLE` rather than removing its entry.
+Mark a project `UNREACHABLE` rather than removing its entry, and only in a write the user said yes to.
 
 `last_digest` is the sha256 of the referenced ledger's **final on-disk bytes**, taken after every
 other edit to that ledger is complete. Hash the file, not the JSON text in an editor: a trailing
@@ -329,8 +334,8 @@ labels, and record identifiers stay in canonical English.
 ## Validation
 
 Run `verify` after every ledger write, passing every reachable ledger in the same invocation so
-the cross-ledger checks run. Running `verify` is bookkeeping too: it is read-only and permitted
-in any operating state.
+the cross-ledger checks run. Running `verify` writes nothing: it needs no yes and is permitted in
+any operating state.
 
 ```text
 python assets/scripts/dashboard.py verify <path-to-ledger.json> [more...]
