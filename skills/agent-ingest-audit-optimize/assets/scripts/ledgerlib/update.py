@@ -33,7 +33,7 @@ from ledgerlib.chain import _detect_format, _write_atomically
 from ledgerlib.constants import RECORD_ID
 from ledgerlib.errors import LedgerError
 from ledgerlib.paths import _path_key, file_digest, load_json
-from ledgerlib.scan import scan
+from ledgerlib.scan import scan_detail
 from ledgerlib.validate import _prefix_and_number, validate_collection, validate_ledger
 
 WHAT_CHOICES = ("all", "ledger", "anchors")
@@ -143,8 +143,15 @@ def _append_baseline(
     user_config: Path | None,
     project: Path | None,
     captured_on: str,
-) -> tuple[str, str, int]:
-    """Scan, append, raise the floor, write. Returns `(id, minted, code)`.
+    strict: bool = False,
+) -> tuple[str | None, str | None, int, list[dict[str, str]], bool]:
+    """Scan, append, raise the floor, write.
+
+    Returns `(id, minted, code, findings, refused)`. With `strict` and at
+    least one finding nothing is written: `id` and `minted` are `None`,
+    `refused` is true and `code` is `1`. The scan runs once either way, and
+    always before the write, so a refusal costs no second capture and leaves
+    the ledger file exactly as it was.
 
     `minted` is `"given"` when the caller supplied `--id` and `"local"` when
     this function minted one, and it reaches stdout so that a locally minted
@@ -180,7 +187,7 @@ def _append_baseline(
     except (OSError, UnicodeDecodeError) as exc:
         raise LedgerError(f"Unreadable ledger: {ledger}: {exc}") from exc
 
-    entry, messages, code = scan(
+    entry, notes, findings, code = scan_detail(
         identifier=identifier,
         client=client,
         adapter=adapter,
@@ -188,8 +195,12 @@ def _append_baseline(
         project=project,
         captured_on=captured_on,
     )
-    for message in messages:
+    # Notes first and findings after, the order `scan` itself returns them in.
+    for message in [*notes, *(finding["message"] for finding in findings)]:
         print(message, file=sys.stderr)
+
+    if strict and findings:
+        return None, None, 1, findings, True
 
     baselines = document.get("baselines")
     if not isinstance(baselines, list):
@@ -204,7 +215,7 @@ def _append_baseline(
     if trailing:
         text += "\n"
     _write_atomically(ledger, text, newline)
-    return identifier, minted, code
+    return identifier, minted, code, findings, False
 
 
 def update_command(
@@ -221,6 +232,7 @@ def update_command(
     project: Path | None = None,
     open_after: bool = False,
     today: str | None = None,
+    strict: bool = False,
 ) -> int:
     """`update` as a command: one JSON object on stdout, notes on stderr.
 
@@ -232,6 +244,14 @@ def update_command(
     environment that was captured, not a defect in the capture, and refusing
     to write would leave the ledger asserting that an older, cleaner state is
     still current. The exit code carries the finding instead.
+
+    `strict` is for the caller who would rather have no baseline than one
+    taken with paths nobody has re-verified: with it, `ledger` and `all` write
+    nothing at all when the scan finds anything, the summary says
+    `"refused": "strict"`, and the exit code is `1`. It has no effect on
+    `anchors`, which never scans. The summary always carries `findings`, as
+    `{"code", "message"}` pairs, so a caller reads the reason from data rather
+    than from stderr prose.
     """
     captured_on = today or datetime.date.today().isoformat()
 
@@ -255,12 +275,14 @@ def update_command(
         "baseline_id": None,
         "minted": None,
         "dashboard": None,
+        "findings": [],
+        "refused": None,
     }
     code = 0
 
     if what in ("ledger", "all"):
         try:
-            identifier, minted, scan_code = _append_baseline(
+            identifier, minted, scan_code, scan_findings, refused = _append_baseline(
                 ledger,
                 document,
                 identifier=identifier,
@@ -269,12 +291,24 @@ def update_command(
                 user_config=user_config,
                 project=project,
                 captured_on=captured_on,
+                strict=strict,
             )
         except LedgerError as exc:
             print(exc, file=sys.stderr)
             return 2
         except OSError as exc:
             print(f"cannot write {str(ledger)!r}: {exc}", file=sys.stderr)
+            return 1
+        summary["findings"] = scan_findings
+        if refused:
+            summary["refused"] = "strict"
+            print(
+                f"{ledger}: refused under --strict: the scan reported "
+                f"{len(scan_findings)} finding(s), so no baseline was appended "
+                "and nothing was rendered",
+                file=sys.stderr,
+            )
+            print(json.dumps(summary, indent=2, ensure_ascii=False))
             return 1
         summary["baseline_id"] = identifier
         summary["minted"] = minted

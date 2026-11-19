@@ -1,5 +1,7 @@
 # Client Configuration Paths — Research for the 0.2.5 Adapters
 
+Superseded: 2026-11-19, by `2026-11-19-client-configuration-paths.md`. Kept as the record of what
+0.2.5 to 0.6.1 were built against; several findings below no longer hold.
 Verified: 2026-07-30
 Expires: 2026-10-28 (90-day house convention for time-sensitive evidence)
 Purpose: the input `adapter.schema.json` and the three client adapters are written against in 0.2.5.

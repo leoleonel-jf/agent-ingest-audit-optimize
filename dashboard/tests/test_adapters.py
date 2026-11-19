@@ -37,7 +37,7 @@ ADAPTERS_DIR = (
     REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "assets" / "adapters"
 )
 RESEARCH = (
-    REPO_ROOT / "docs" / "research" / "2026-07-30-client-configuration-paths.md"
+    REPO_ROOT / "docs" / "research" / "2026-11-19-client-configuration-paths.md"
 )
 SPEC = importlib.util.spec_from_file_location("dashboard", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -910,15 +910,109 @@ class BundledAdapterTests(unittest.TestCase):
         """Design spec section 9: the generic adapter's whole point."""
         self.assertEqual(self.read_adapter("generic.json")["probes"], [])
 
-    def test_claude_code_never_probes_agents_md(self) -> None:
-        """Research finding 1: Claude Code reads CLAUDE.md, not AGENTS.md.
+    def patterns(self, name: str) -> list[str]:
+        return [
+            self.probe_pattern(probe) for probe in self.read_adapter(name)["probes"]
+        ]
 
-        A probe here would record an inert file as live configuration.
+    def test_claude_code_probes_agents_md_as_an_instruction_file(self) -> None:
+        """The 2026-11 research reverses finding 1 of the July research.
+
+        Claude Code reads `AGENTS.md` and `.claude/AGENTS.md` since v2.1.277,
+        by default when no `CLAUDE.md` sits in the working directory or above
+        it. Without these probes a repository that carries only an
+        `AGENTS.md` baselines as having no project instructions at all. The
+        probe records that the file exists; `scan` computes no winner, so it
+        claims nothing about whether this session loaded it.
         """
-        for probe in self.read_adapter("claude-code.json")["probes"]:
-            pattern = self.probe_pattern(probe)
-            final = pattern.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
-            self.assertNotEqual(final.casefold(), "agents.md", pattern)
+        probes = {
+            self.probe_pattern(probe): probe
+            for probe in self.read_adapter("claude-code.json")["probes"]
+        }
+        for pattern in ("$PROJECT/AGENTS.md", "$PROJECT/.claude/AGENTS.md"):
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, probes)
+                self.assertEqual(probes[pattern]["kind"], "instruction-file")
+                self.assertEqual(probes[pattern]["scope"], "project")
+
+    def test_claude_code_reads_no_agents_md_outside_the_project(self) -> None:
+        """Only the project locations are documented. A user-level or managed
+        `AGENTS.md` is read by nothing, and a probe there would record an
+        inert file as live configuration."""
+        for pattern in self.patterns("claude-code.json"):
+            final = pattern.rstrip("/").rsplit("/", 1)[-1]
+            if final.casefold() == "agents.md":
+                self.assertTrue(pattern.startswith("$PROJECT/"), pattern)
+
+    def test_claude_code_state_file_follows_the_config_directory(self) -> None:
+        """`.claude.json` moves under `CLAUDE_CONFIG_DIR` when that is set.
+
+        Probing `~/.claude.json` unconditionally reads, on a relocated
+        installation, a state file the client does not: the MCP servers in
+        the baseline would belong to another configuration.
+        """
+        adapter = self.read_adapter("claude-code.json")
+        self.assertEqual(
+            adapter["anchors"]["$APP_STATE"], ["$env:CLAUDE_CONFIG_DIR", "~"]
+        )
+        state = [
+            pattern
+            for pattern in self.patterns("claude-code.json")
+            if pattern.endswith(".claude.json")
+        ]
+        self.assertEqual(state, ["$APP_STATE/.claude.json"])
+
+    def test_claude_code_probes_the_documented_managed_files(self) -> None:
+        """Managed instructions, MCP servers, skills and subagents each have a
+        documented place in the managed settings directory."""
+        patterns = self.patterns("claude-code.json")
+        for pattern in (
+            "$MANAGED_CONFIG/CLAUDE.md",
+            "$MANAGED_CONFIG/managed-mcp.json",
+            "$MANAGED_CONFIG/.claude/skills/*/SKILL.md",
+            "$MANAGED_CONFIG/.claude/agents/*",
+        ):
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, patterns)
+
+    def test_claude_code_probes_project_agents_and_commands(self) -> None:
+        """Both directories are documented at project scope as well as user
+        scope; the adapter used to look only under the user root."""
+        patterns = self.patterns("claude-code.json")
+        for pattern in ("$PROJECT/.claude/agents/*", "$PROJECT/.claude/commands/*"):
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, patterns)
+
+    def test_codex_covers_mcp_servers_hooks_plugins_rules_and_agents(self) -> None:
+        """Before the 2026-11 research the Codex adapter probed none of these,
+        although MCP servers and plugins live in the `config.toml` it already
+        opened. A review of what a machine can run has to see them."""
+        kinds = {
+            (probe["kind"], probe["scope"])
+            for probe in self.read_adapter("codex.json")["probes"]
+        }
+        for expected in (
+            ("mcp-server", "user"),
+            ("mcp-server", "project"),
+            ("plugin", "user"),
+            ("plugin", "project"),
+            ("hook", "user"),
+            ("hook", "project"),
+            ("hook", "system"),
+            ("permission-rule", "user"),
+            ("permission-rule", "project"),
+            ("permission-rule", "managed"),
+            ("agent", "user"),
+            ("agent", "project"),
+        ):
+            with self.subTest(kind=expected):
+                self.assertIn(expected, kinds)
+
+    def test_codex_system_config_has_a_windows_candidate(self) -> None:
+        """Without one, the whole system layer is skipped on Windows as a
+        concept the platform does not have, while the client reads it there."""
+        candidates = self.read_adapter("codex.json")["anchors"]["$SYSTEM_CONFIG"]
+        self.assertIn("$platform:win32:C:/ProgramData/OpenAI/Codex", candidates)
 
     def test_claude_code_user_config_begins_with_the_environment_variable(self) -> None:
         anchors = self.read_adapter("claude-code.json")["anchors"]
@@ -979,15 +1073,26 @@ class ShippedResolutionTests(unittest.TestCase):
         self.assertEqual(
             self.adapter("claude-code.json")["resolution"],
             {
-                "mcp-server": {"mode": "override", "order": ["project", "user"]},
-                "skill": {"mode": "override", "order": ["user", "project"]},
+                # 0.7.0: `managed-mcp.json` is documented and probed. When it
+                # is deployed the client loads only its servers, so `managed`
+                # leading the order holds whether or not anything else exists.
+                "mcp-server": {
+                    "mode": "override",
+                    "order": ["managed", "project", "user"],
+                },
+                "skill": {
+                    "mode": "override",
+                    "order": ["managed", "user", "project"],
+                },
+                # 0.7.0: the documented priority table, restricted to the
+                # scopes probed. Project outranks user here, the opposite of
+                # skills.
+                "agent": {
+                    "mode": "override",
+                    "order": ["managed", "project", "user"],
+                },
                 "instruction-file": {"mode": "concatenate"},
                 "permission-rule": {"mode": "merge"},
-                # 0.5.0: `managed` leads the two kinds the adapter actually
-                # probes at that layer. `mcp-server` deliberately does NOT
-                # carry it -- no managed MCP probe ships, because no primary
-                # source documents a managed MCP location, and the validator
-                # refuses an order naming a scope no probe declares.
                 "model-setting": {
                     "mode": "key-override",
                     "order": ["managed", "project", "user"],
@@ -1015,27 +1120,41 @@ class ShippedResolutionTests(unittest.TestCase):
         produces exactly ["project", "user"] here.
         """
         skill = self.adapter("claude-code.json")["resolution"]["skill"]
-        self.assertEqual(skill, {"mode": "override", "order": ["user", "project"]})
+        self.assertEqual(
+            skill, {"mode": "override", "order": ["managed", "user", "project"]}
+        )
+
+    def test_claude_code_agent_order_is_project_before_user(self) -> None:
+        """Subagents resolve the other way round from skills: the documented
+        table puts `.claude/agents/` above `~/.claude/agents/`. Copying the
+        skill order here would name the wrong winner."""
+        agent = self.adapter("claude-code.json")["resolution"]["agent"]
+        self.assertEqual(
+            agent, {"mode": "override", "order": ["managed", "project", "user"]}
+        )
 
     def test_claude_code_declares_nothing_for_unverified_kinds(self) -> None:
         """Undeclared is the recorded state for unverified semantics.
 
         No primary source in the research states cross-scope behaviour for
-        these four kinds, and this project ships no ordering nobody verified.
+        these three kinds, and this project ships no ordering nobody verified.
         Whoever adds one must bring a source and delete its entry here.
         """
         resolution = self.adapter("claude-code.json")["resolution"]
-        for kind in ("hook", "agent", "command", "plugin"):
+        for kind in ("hook", "command", "plugin"):
             with self.subTest(kind=kind):
                 self.assertNotIn(kind, resolution)
 
     def test_codex_declares_exactly_the_researched_resolutions(self) -> None:
-        """The research's chains restricted to probed scopes: no admin probe,
-        so no admin scope in the skill order."""
+        """Skills do not override one another in Codex: two skills with one
+        name are not merged and both can appear, so no order exists to
+        declare. The kinds added in 0.7.0 (hook, permission-rule, agent,
+        mcp-server, plugin) stay undeclared: no source states how they
+        resolve across layers."""
         self.assertEqual(
             self.adapter("codex.json")["resolution"],
             {
-                "skill": {"mode": "override", "order": ["project", "user", "system"]},
+                "skill": {"mode": "merge"},
                 "instruction-file": {"mode": "concatenate"},
                 "model-setting": {
                     "mode": "key-override",
@@ -1677,28 +1796,26 @@ class DogfoodCorrectionTests(unittest.TestCase):
                     probe["path"],
                 )
 
-    def test_user_scope_settings_local_json_is_probed_like_settings_json(self) -> None:
-        """settings.local.json exists at user scope too, and carries permissions.
+    def test_settings_local_json_is_probed_only_where_it_is_documented(self) -> None:
+        """`settings.local.json` is a project file, and only that.
 
-        The research table lists it only under Project, so the first adapter
-        probed it only there. This machine has one at user scope; its permissions
-        were absent from the baseline entirely. A pointer probed against the
-        team file and not against the personal override reports the layer the
-        user did not write and misses the one they did.
+        The first real scan found one under the user root and 0.2.5 began
+        probing it there as user-scope settings. The vendor documents the
+        file as "Project only": the copy under the user root is the
+        project-local file of a session started in the home directory, where
+        the project probes already read it as `$PROJECT/.claude/...`. Probed
+        at user scope it was ranked as configuration for every project, which
+        it is not.
         """
-        probes = self.adapter("claude-code.json")["probes"]
-        user_settings = {
-            (probe["kind"], probe.get("pointer"))
-            for probe in probes
-            if probe.get("path") == "$USER_CONFIG/settings.json"
-        }
-        user_local = {
-            (probe["kind"], probe.get("pointer"))
-            for probe in probes
-            if probe.get("path") == "$USER_CONFIG/settings.local.json"
-        }
-        self.assertTrue(user_settings, "no user-scope settings.json probes")
-        self.assertEqual(user_settings, user_local)
+        local = [
+            probe.get("path", probe.get("glob", ""))
+            for probe in self.adapter("claude-code.json")["probes"]
+            if probe.get("path", probe.get("glob", "")).endswith("/settings.local.json")
+        ]
+        self.assertTrue(local, "claude-code.json probes no settings.local.json")
+        for target in local:
+            with self.subTest(target=target):
+                self.assertEqual(target, "$PROJECT/.claude/settings.local.json")
 
     def test_codex_redacts_the_keys_that_carry_injected_values(self) -> None:
         """Two Codex keys hold values no baseline should copy.

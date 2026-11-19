@@ -72,8 +72,11 @@ from ledgerlib.scan import (  # noqa: E402
     SCAN_REASONS,
     redact,
     run_probe,
+    FINDING_ADAPTER_EXPIRED,
+    FINDING_CODES,
     scan,
     scan_command,
+    scan_detail,
     withhold_text,
 )
 from ledgerlib.validate import validate_baseline  # noqa: E402
@@ -1887,6 +1890,62 @@ class ScanItemTests(ScanTestCase):
         hooks = [item for item in entry["items"] if item["kind"] == "hook"]
         self.assertEqual(len(hooks), 1)
         self.assertEqual(hooks[0]["anchor"], "$PROJECT/hooks/guard.js")
+
+
+class ScanFindingCodeTests(ScanTestCase):
+    """Every finding carries a stable code, and `scan` is its prose view."""
+
+    def detail_arguments(self) -> dict:
+        self.populate()
+        return {
+            "identifier": "BASE-2026-000",
+            "client": None,
+            "adapter": self.write_adapter(expires_on="2026-07-29"),
+            "project": self.project,
+            "bundled": self.bundled,
+            "environ": {},
+            "captured_on": "2026-07-30",
+        }
+
+    def test_the_expiry_finding_carries_its_code(self) -> None:
+        _, _, findings, code = scan_detail(**self.detail_arguments())
+        self.assertEqual(
+            [finding["code"] for finding in findings], [FINDING_ADAPTER_EXPIRED]
+        )
+        self.assertEqual(FINDING_ADAPTER_EXPIRED, "adapter_expired")
+        self.assertEqual(code, 1)
+
+    def test_every_code_is_from_the_exported_set(self) -> None:
+        _, _, findings, _ = scan_detail(**self.detail_arguments())
+        self.assertTrue(findings)
+        for finding in findings:
+            self.assertIn(finding["code"], FINDING_CODES)
+            self.assertEqual(set(finding), {"code", "message"})
+
+    def test_scan_messages_are_the_notes_then_the_findings_prose(self) -> None:
+        arguments = self.detail_arguments()
+        entry, messages, code = scan(**arguments)
+        detail_entry, notes, findings, detail_code = scan_detail(**arguments)
+        self.assertEqual(entry, detail_entry)
+        self.assertEqual(code, detail_code)
+        self.assertEqual(
+            messages, [*notes, *(finding["message"] for finding in findings)]
+        )
+
+    def test_a_clean_scan_has_no_finding_and_exits_zero(self) -> None:
+        self.populate()
+        arguments = {
+            "identifier": "BASE-2026-000",
+            "client": None,
+            "adapter": self.write_adapter(),
+            "project": self.project,
+            "bundled": self.bundled,
+            "environ": {},
+            "captured_on": "2026-07-30",
+        }
+        _, _, findings, code = scan_detail(**arguments)
+        self.assertEqual(findings, [])
+        self.assertEqual(code, 0)
 
 
 class ScanExpiryTests(ScanTestCase):

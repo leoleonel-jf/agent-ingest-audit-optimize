@@ -32,7 +32,8 @@ python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py update <le
 ```
 
 Pass `--open` through when the user asked to see the dashboard. Forward `--id`, `--client`,
-`--out`, `--lang`, `--force`, `--project`, `--adapter` and `--user-config` verbatim when given.
+`--out`, `--lang`, `--force`, `--project`, `--adapter`, `--user-config` and `--strict` verbatim
+when given.
 
 ## Report
 
@@ -42,7 +43,9 @@ stdout is one JSON object; stderr carries the notes. Report:
 - the `baseline_id` and whether `minted` was `local` or `given` — when it is `local`, say plainly
   that the identifier was minted locally and needs reconciling with the global ledger;
 - the dashboard path when one was written;
-- every stderr note, especially a scan finding.
+- every entry in `findings`, by its `code` and its message, and every other stderr note;
+- when `refused` is `strict`, that nothing was written, and why.
 
-Exit `1` means findings, not failure: the artifact was still written. Exit `2` means nothing was
+Exit `1` means findings, not failure: the artifact was still written, unless `--strict` was given,
+in which case `refused` says so and nothing was. Exit `2` means nothing was
 written — report what the validator said and stop.

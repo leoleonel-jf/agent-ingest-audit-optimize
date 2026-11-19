@@ -522,6 +522,133 @@ class UpdateLedgerTestCase(UpdateFixtureTestCase):
         self.assertEqual(code, 0)
 
 
+class UpdateFindingsTestCase(UpdateFixtureTestCase):
+    """`findings` as data in the summary, and `--strict` refusing on them."""
+
+    def test_the_summary_carries_the_expiry_finding_with_its_code(self) -> None:
+        ledger_path = self.write_ledger(self.bare_ledger())
+        code, out, err = self.run_update(
+            ledger_path, "ledger", adapter=self.expired_adapter(), today="2026-08-01"
+        )
+        self.assertEqual(code, 1)
+        summary = json.loads(out)
+        self.assertEqual(
+            [finding["code"] for finding in summary["findings"]], ["adapter_expired"]
+        )
+        # The message in the summary is the line stderr carried.
+        self.assertIn(summary["findings"][0]["message"], err)
+        self.assertIsNone(summary["refused"])
+
+    def test_findings_is_an_empty_list_on_a_clean_run(self) -> None:
+        ledger_path = self.write_ledger(self.bare_ledger())
+        code, out, _ = self.run_update(
+            ledger_path, "ledger", adapter=self.adapter_path, today="2026-08-01"
+        )
+        self.assertEqual(code, 0)
+        summary = json.loads(out)
+        self.assertEqual(summary["findings"], [])
+        self.assertIsNone(summary["refused"])
+
+    def test_findings_is_an_empty_list_for_anchors(self) -> None:
+        ledger_path = self.write_ledger(self.bare_ledger())
+        code, out, _ = self.run_update(ledger_path, "anchors")
+        self.assertEqual(code, 0)
+        summary = json.loads(out)
+        self.assertEqual(summary["findings"], [])
+        self.assertIsNone(summary["refused"])
+
+    def test_strict_with_findings_writes_nothing_to_the_ledger(self) -> None:
+        ledger_path = self.write_ledger(self.bare_ledger())
+        before = ledger_path.read_bytes()
+        code, out, err = self.run_update(
+            ledger_path,
+            "ledger",
+            adapter=self.expired_adapter(),
+            today="2026-08-01",
+            strict=True,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(ledger_path.read_bytes(), before)
+        summary = json.loads(out)
+        self.assertEqual(summary["refused"], "strict")
+        self.assertIsNone(summary["baseline_id"])
+        self.assertEqual(summary["findings"][0]["code"], "adapter_expired")
+        self.assertIn("expired", err)
+
+    def test_strict_with_findings_renders_no_dashboard_for_all(self) -> None:
+        ledger_path = self.write_ledger(self.bare_ledger())
+        before = ledger_path.read_bytes()
+        code, out, _ = self.run_update(
+            ledger_path,
+            "all",
+            adapter=self.expired_adapter(),
+            today="2026-08-01",
+            strict=True,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(ledger_path.read_bytes(), before)
+        self.assertFalse((ledger_path.parent / "dashboard.html").exists())
+        summary = json.loads(out)
+        self.assertEqual(summary["refused"], "strict")
+        self.assertIsNone(summary["dashboard"])
+
+    def test_strict_with_a_clean_scan_appends_like_non_strict(self) -> None:
+        strict_path = self.write_ledger(self.bare_ledger(), name="strict.json")
+        plain_path = self.write_ledger(self.bare_ledger(), name="plain.json")
+        strict_code, strict_out, _ = self.run_update(
+            strict_path,
+            "ledger",
+            adapter=self.adapter_path,
+            today="2026-08-01",
+            strict=True,
+        )
+        plain_code, plain_out, _ = self.run_update(
+            plain_path, "ledger", adapter=self.adapter_path, today="2026-08-01"
+        )
+        self.assertEqual((strict_code, plain_code), (0, 0))
+        self.assertEqual(strict_path.read_bytes(), plain_path.read_bytes())
+        self.assertEqual(json.loads(strict_out), json.loads(plain_out))
+        self.assertEqual(json.loads(strict_out)["baseline_id"], "BASE-2026-000")
+        self.assertIsNone(json.loads(strict_out)["refused"])
+
+    def test_strict_has_no_effect_on_anchors(self) -> None:
+        ledger_path = self.write_ledger(self.bare_ledger())
+        code, out, _ = self.run_update(ledger_path, "anchors", strict=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["updated"], "anchors")
+
+    def test_non_strict_still_appends_when_findings_exist(self) -> None:
+        ledger_path = self.write_ledger(self.bare_ledger())
+        code, out, _ = self.run_update(
+            ledger_path, "ledger", adapter=self.expired_adapter(), today="2026-08-01"
+        )
+        self.assertEqual(code, 1)
+        document = json.loads(ledger_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(document["baselines"]), 1)
+        self.assertEqual(json.loads(out)["baseline_id"], "BASE-2026-000")
+
+    def test_the_cli_accepts_strict(self) -> None:
+        ledger_path = self.write_ledger(self.bare_ledger())
+        before = ledger_path.read_bytes()
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = dashboard.main(
+                [
+                    "update",
+                    str(ledger_path),
+                    "ledger",
+                    "--adapter",
+                    str(self.expired_adapter()),
+                    "--strict",
+                ]
+            )
+        # The CLI reads the clock for `today`, and the adapter expired in 2020,
+        # so this does not depend on the date it runs.
+        self.assertEqual(code, 1)
+        self.assertEqual(ledger_path.read_bytes(), before)
+        self.assertEqual(json.loads(out.getvalue())["refused"], "strict")
+
+
 class UpdateAllTestCase(UpdateFixtureTestCase):
     """`all` appends before it renders, so the page shows the new baseline."""
 

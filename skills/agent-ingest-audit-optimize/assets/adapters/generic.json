@@ -1,7 +1,7 @@
 {
   "adapter_version": 2,
   "client": "generic",
-  "expires_on": "2026-10-28",
+  "expires_on": "2027-02-17",
   "anchors": {
     "$PROJECT": ["."]
   },

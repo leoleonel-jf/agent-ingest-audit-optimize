@@ -79,6 +79,24 @@ PARSE_ERRORS = frozenset({"malformed_json", "malformed_toml", "unreadable"})
 
 _MALFORMED = {"json": "malformed_json", "toml": "malformed_toml"}
 
+# The stable machine codes of the coverage findings, one per way a baseline can
+# look clean without being so. A caller that must decide on a finding (`update
+# --strict` reports them, a script may branch on them) cannot match on the
+# prose, which is written for an operator and may be reworded; the codes are
+# the contract and the messages are not.
+FINDING_GENERIC_FALLBACK = "generic_fallback"
+FINDING_ADAPTER_EXPIRED = "adapter_expired"
+FINDING_USER_CONFIG_UNRESOLVED = "user_config_unresolved"
+FINDING_UNREDACTED_PARSE = "unredacted_parse"
+FINDING_CODES = frozenset(
+    {
+        FINDING_GENERIC_FALLBACK,
+        FINDING_ADAPTER_EXPIRED,
+        FINDING_USER_CONFIG_UNRESOLVED,
+        FINDING_UNREDACTED_PARSE,
+    }
+)
+
 # The one identifier prefix a `baselines[]` entry may carry. `validate_baseline`
 # enforces the same thing on the other side of the boundary; this module checks
 # it before a single directory is walked, so a typo costs nothing.
@@ -820,7 +838,44 @@ def scan(
     captured_on: str | None = None,
     platform: str | None = None,
 ) -> tuple[dict, list[str], int]:
+    """Assemble one `baselines[]` entry; the three-value form of `scan_detail`.
+
+    Returns `(entry, messages, exit_code)`, where `messages` is the notes
+    followed by the findings' prose. It exists so that every caller written
+    before findings carried codes keeps its signature and its return shape;
+    a caller that needs the codes calls `scan_detail`.
+    """
+    entry, notes, findings, code = scan_detail(
+        identifier=identifier,
+        client=client,
+        adapter=adapter,
+        user_config=user_config,
+        project=project,
+        bundled=bundled,
+        environ=environ,
+        captured_on=captured_on,
+        platform=platform,
+    )
+    return entry, [*notes, *(finding["message"] for finding in findings)], code
+
+
+def scan_detail(
+    *,
+    identifier: str,
+    client: str | None = None,
+    adapter: Path | None = None,
+    user_config: Path | None = None,
+    project: Path | None = None,
+    bundled: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    captured_on: str | None = None,
+    platform: str | None = None,
+) -> tuple[dict, list[str], list[dict[str, str]], int]:
     """Assemble one `baselines[]` entry from one client's configuration.
+
+    Returns `(entry, notes, findings, exit_code)`. `findings` is a list of
+    `{"code": str, "message": str}` with `code` drawn from `FINDING_CODES`;
+    `scan` is this function with the findings flattened back into prose.
 
     Returns `(entry, messages, exit_code)`.
 
@@ -909,7 +964,7 @@ def scan(
     # notes are deliberately not among them: they describe how this scan was
     # configured, not what it found, and a note inside `items` would read as
     # configuration the machine does not have.
-    return entry, [*notes, *findings], 1 if findings else 0
+    return entry, notes, findings, 1 if findings else 0
 
 
 def _check_identifier(identifier: object) -> str:
@@ -948,13 +1003,27 @@ def _check_captured_on(captured_on: object) -> str:
     return captured_on
 
 
+def _add_finding(
+    findings: list[dict[str, str]], code: str, message: str
+) -> None:
+    """Append one finding, refusing a code that is not in `FINDING_CODES`.
+
+    The closed set is what lets a caller treat a code as a contract, so a new
+    finding that forgot to declare its constant fails the first scan that
+    produces it rather than shipping an undocumented code.
+    """
+    if code not in FINDING_CODES:
+        raise ValueError(f"unknown finding code {code!r}")
+    findings.append({"code": code, "message": message})
+
+
 def _coverage_findings(
     document: dict,
     *,
     unresolved: Sequence[str],
     captured_on: str,
     selection: Mapping[str, object],
-) -> list[str]:
+) -> list[dict[str, str]]:
     """The four ways a baseline can look clean, or safe, without being either.
 
     All are findings and none is an error: the scan runs, the entry is
@@ -994,12 +1063,14 @@ def _coverage_findings(
     what `generic.json` ships, and it must stay clean.
     """
     client = document["client"]
-    findings: list[str] = []
+    findings: list[dict[str, str]] = []
 
     reason = selection.get("reason")
     if reason in FALLBACK_SELECTION_REASONS:
         candidates = selection.get("candidates") or []
-        findings.append(
+        _add_finding(
+            findings,
+            FINDING_GENERIC_FALLBACK,
             f"no client was detected and this scan fell back to the {client!r} "
             f"adapter, which probes nothing: $USER_CONFIG was weighed for "
             f"{sorted(candidates)} and produced no single answer, so this "
@@ -1013,7 +1084,9 @@ def _coverage_findings(
     # each guarantee their side -- and that form sorts lexicographically in
     # date order, so no parsing is needed to compare them.
     if captured_on > expires_on:
-        findings.append(
+        _add_finding(
+            findings,
+            FINDING_ADAPTER_EXPIRED,
             f"adapter for client {client!r} expired on {expires_on!r} and this "
             f"scan ran on {captured_on!r}: its paths were verified against the "
             "vendor's documentation before that date and may no longer name "
@@ -1040,7 +1113,9 @@ def _coverage_findings(
     # operator can never clear teaches them to ignore the exit code, which
     # costs every other finding its meaning.
     if USER_CONFIG_ANCHOR in unresolved:
-        findings.append(
+        _add_finding(
+            findings,
+            FINDING_USER_CONFIG_UNRESOLVED,
             f"adapter for client {client!r} has an unresolved anchor "
             f"${USER_CONFIG_ANCHOR}: no candidate root for it exists on this "
             "machine, so every probe beneath it is recorded not_present rather "
@@ -1053,7 +1128,9 @@ def _coverage_findings(
         if isinstance(probe, dict) and _parse_format(probe) is not None
     )
     if parsing and not document["sensitive_key_patterns"]:
-        findings.append(
+        _add_finding(
+            findings,
+            FINDING_UNREDACTED_PARSE,
             f"adapter for client {client!r} has {parsing} probe(s) with parse "
             "but an empty sensitive_key_patterns: text is withheld regardless, "
             "but a key-name match is what withholds a whole subtree, so with an "

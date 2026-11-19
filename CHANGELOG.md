@@ -2,6 +2,51 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.7.0 - 2026-11-19
+
+The bundled adapters re-verified against the vendors' documentation, and a way for `update` to
+refuse a baseline taken with stale evidence. Spec under
+`docs/specs/2026-11-19-adapters-reverified.md`; the evidence, with a page and a quote per path, is
+`docs/research/2026-11-19-client-configuration-paths.md`.
+
+- **the three adapters are current again, until 2027-02-17.** They expired on 2026-10-28 and every
+  `scan` and `drift` since has said so. The date moved only after every declared path was reopened
+  in the documentation, and two declared things turned out to be wrong;
+- **`claude-code`: `.claude.json` is read where the client keeps it.** The state file moves under
+  `CLAUDE_CONFIG_DIR` when that is set, and the adapter read `~/.claude.json` regardless, which on
+  a relocated installation is another configuration's MCP servers. It is now probed under a new
+  anchor, `$APP_STATE`. **A baseline taken by 0.6.1 or earlier names those items
+  `$HOME/.claude.json`, so the first `drift` after upgrading reports them as removed and added
+  again under the new name**;
+- **`claude-code`: `~/.claude/settings.local.json` is no longer probed as user settings.** The
+  vendor documents `settings.local.json` as a project file only. The copy under the user root is
+  the project-local file of sessions started in the home directory; scan with the home directory
+  as the project to capture it, where it is `$PROJECT/.claude/settings.local.json`;
+- **`claude-code` now probes `AGENTS.md`.** The July research found the client did not read it.
+  Since v2.1.277 it does, by default when no `CLAUDE.md` is in the working directory or above it.
+  The probe records that the file exists and what it hashes to, and claims nothing about whether a
+  session loaded it;
+- `claude-code` also gains the documented managed files (`CLAUDE.md`, `managed-mcp.json`, managed
+  skills and subagents) and project-level `agents/` and `commands/`. Subagents get a declared
+  resolution, managed over project over user, which is the opposite of skills below the managed
+  layer;
+- **`codex`: skills no longer declare a winner.** Two Codex skills with one name are not merged and
+  both can appear, so the `override` order the adapter shipped named a winner that does not exist.
+  The kind is now `merge`;
+- **`codex` now sees MCP servers, plugins, hooks, rules and custom agents.** It probed none of
+  them, although the first two live in the `config.toml` it already opened. It also gains
+  `requirements.toml` and a Windows system directory, `C:/ProgramData/OpenAI/Codex`;
+- what both clients read and the adapters still do not probe is listed in the research document,
+  with the reason for each: registry and macOS-preference policy, local-scope MCP servers, nested
+  and synced skills, and others;
+- **`update` reports findings as data.** Its JSON summary always carries `findings`, a list of
+  `{"code", "message"}`, with four stable codes: `adapter_expired`, `generic_fallback`,
+  `user_config_unresolved` and `unredacted_parse`. Messages on stderr are unchanged;
+- **`update --strict` writes nothing when the scan reports a finding.** The ledger keeps its bytes,
+  no dashboard is rendered, the summary says `"refused": "strict"` and the exit code is `1`.
+  Without the flag `update` behaves as before: the baseline is appended and exit `1` carries the
+  finding. `scan` gains `scan_detail`, the structured form; `scan` itself is unchanged.
+
 ## 0.6.1 - 2026-11-19
 
 Two defects in what the archives ship, both found by the 2026-11 review
