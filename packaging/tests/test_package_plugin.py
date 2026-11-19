@@ -23,6 +23,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILL_NAME = "agent-ingest-audit-optimize"
 SKILL_DIR = REPO_ROOT / "skills" / SKILL_NAME
 SCRIPTS_DIR = SKILL_DIR / "assets" / "scripts"
+# What a scan of a shipped adapter may print on stderr and still be the scan
+# the test meant to run: the two selection notes, and the adapter's own expiry.
+EXPIRY_FINDING = re.compile(
+    r"adapter for client '[^']+' expired on '\d{4}-\d{2}-\d{2}' and this scan ran on "
+)
+SELECTION_NOTES = ("user adapters were not read:", "selected adapter ")
 
 # Files whose bytes are line-ending sensitive. Derived from the extension, not
 # sniffed from content: a guess that reads bytes would let a new text format in
@@ -265,9 +271,16 @@ class PackagePluginTests(unittest.TestCase):
 
         ``--client generic`` rather than a detected client: generic declares
         no probes and its only anchor is ``$PROJECT``, so the run depends on
-        nothing installed on the host and exits ``0`` on any machine. A
-        detected client would make this test pass or fail according to whose
-        laptop it ran on.
+        nothing installed on the host. A detected client would make this test
+        pass or fail according to whose laptop it ran on.
+
+        It must not depend on the day either. The shipped adapter carries a
+        real ``expires_on`` and the CLI takes no date, so past that day the
+        run reports the expiry and exits ``1`` -- the command working as
+        designed, and none of this test's business. The run must therefore be
+        clean apart from that one finding: every stderr line is a selection
+        note or the expiry, and the exit code follows from which. Stale
+        bundled evidence is ``check_evidence_freshness.py``'s question.
         """
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -299,11 +312,13 @@ class PackagePluginTests(unittest.TestCase):
                 text=True,
             )
 
-        self.assertEqual(
-            completed.returncode,
-            0,
-            f"extracted dashboard.py could not scan:\nstdout: {completed.stdout}\nstderr: {completed.stderr}",
-        )
+        detail = f"extracted dashboard.py could not scan:\nstdout: {completed.stdout}\nstderr: {completed.stderr}"
+        lines = completed.stderr.splitlines()
+        expiry = [line for line in lines if EXPIRY_FINDING.match(line)]
+        notes = [line for line in lines if line.startswith(SELECTION_NOTES)]
+        self.assertEqual(lines, [*notes, *expiry], detail)
+        self.assertLessEqual(len(expiry), 1, detail)
+        self.assertEqual(completed.returncode, 1 if expiry else 0, detail)
         entry = json.loads(completed.stdout)
         self.assertEqual(entry["id"], "BASE-2026-000")
         self.assertEqual(entry["client"], "generic")
