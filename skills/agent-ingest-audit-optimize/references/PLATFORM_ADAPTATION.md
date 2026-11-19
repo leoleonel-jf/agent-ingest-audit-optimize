@@ -40,9 +40,9 @@ Examples are conceptual. Verify actual names and paths before implementation.
 
 ## Delegate to subagents
 
-Auditing substantial material produces far more intermediate text than the conclusions it yields. Where the client supports subagents, that intermediate text belongs in a subagent's context rather than the main one.
+Delegation buys three things: independent units run at the same time, long output stays out of the main conversation, and a second reader has not seen the first one's reasoning. It costs tokens, and handing the same question to a subagent does not improve the answer.
 
-Delegate, one unit per subagent, each returning structured data rather than prose:
+Where the client supports subagents, delegate one unit per subagent, each returning structured data rather than prose:
 
 - material acquisition, one source per subagent;
 - claim verification, one claim or small batch per subagent;
@@ -55,7 +55,7 @@ Never delegate implementation. Backup, apply, validate, and record form a single
 
 Ledger writes follow the writer: a subagent returns data, and the main context records it.
 
-Detect subagent support; never assume it. Without support, run the same work sequentially in the main context. Delegation is an optimization of context budget, never a change to the workflow, the evidence standard, or the result.
+Detect subagent support; never assume it. Without support, run the same work sequentially in the main context. Delegation is a way to organize the work, never a change to the workflow, the evidence standard, or the result.
 
 ## Platform-guarded anchor candidates
 

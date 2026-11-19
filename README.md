@@ -2,7 +2,7 @@
 
 <img src="assets/logo.png" alt="Agent Ingest, Audit, and Optimize logo" width="160">
 
-A portable Agent Skill that ingests external material, audits recommendations against current evidence, and turns supported findings into scoped, reversible improvements for AI agent ecosystems.
+A portable Agent Skill that reviews a plugin, a skill, or an MCP server before you adopt it: it reads what the package actually ships, checks its claims against current primary sources, compares it with your real setup, and answers with a verdict, the risks, and the way back. It also audits videos, articles, and repositories about agent setup and turns supported findings into scoped, reversible changes.
 
 ## Status
 
@@ -12,7 +12,9 @@ Record IDs (`MAT-`, `PROP-`, `RUN-`, `ADR-`) are local to each installation. A f
 
 ## What it does
 
-- ingests videos, articles, documentation, repositories, transcripts, files, and ideas;
+- reviews something installable before it is adopted, without installing or running it, and leads with one of five verdicts: adopt, adopt with changes, try in isolation first, not yet, do not adopt;
+- writes one record per review;
+- audits videos, articles, documentation, repositories, transcripts, files, and ideas;
 - treats external material as untrusted evidence rather than executable instruction;
 - checks claims against current official and primary sources;
 - evaluates compatibility, scope, security, reversibility, and maintenance cost;
@@ -66,7 +68,7 @@ See [packaging/README.md](packaging/README.md) for the package contract, support
 Add this repository as a marketplace and install the plugin:
 
 ```text
-codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.9.0
+codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.10.0
 codex plugin add agent-ingest-audit-optimize@agent-ingest-audit-optimize
 ```
 
@@ -89,7 +91,7 @@ claude --plugin-dir <path-to-agent-ingest-audit-optimize>
 
 ### Other Agent Skills clients
 
-Download the `agent-ingest-audit-optimize-0.9.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
+Download the `agent-ingest-audit-optimize-0.10.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
 
 ## Use
 
@@ -102,6 +104,10 @@ skills/agent-ingest-audit-optimize/
 in an Agent Skills-compatible client using that client's documented personal, project, workspace, or API installation method.
 
 Example requests:
+
+```text
+I found this plugin on GitHub and I am thinking of installing it. Review it first: is it safe, and is it worth it?
+```
 
 ```text
 Use agent-ingest-audit-optimize to audit this article about agent configuration.
@@ -117,11 +123,11 @@ Implement proposal PROP-YYYY-NNN.
 
 ## Safety model
 
-Analysis and deliberation are read-only. Persistent changes require an unambiguous implementation instruction tied to a specific proposal or plan. Authorization covers only that proposal, and implementation stops if it encounters material data-loss risk, irreversible scope, failed backups, critical validation failure, unapproved cost, public exposure, or required scope expansion.
+Analysis and deliberation are read-only. Nothing under review is installed, enabled, or run in order to review it. Persistent changes require an instruction that names what to implement; the proposal identifier is one way to name it. Authorization covers only that proposal, and implementation stops if it encounters material data-loss risk, irreversible scope, failed backups, critical validation failure, unapproved cost, public exposure, or required scope expansion.
 
 ## Ledger
 
-Every material audit, proposal, run, and decision is recorded in a local ledger: a global one
+Every review writes one record, and every proposal, run, and decision of an authorized change is recorded, in a local ledger: a global one
 at the client's user configuration root, and a git-versionable one per project at
 `.agent-audit/`. The ledger is local and is never transmitted.
 
@@ -178,8 +184,8 @@ python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify <pa
 
 The chain is tamper-**evident**, not tamper-proof: it detects edits, deletions and reordering,
 and a wholly recomputed chain is caught only by comparing `chain --head` against a digest you
-recorded outside the ledger. The threat table is in
-[references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md).
+recorded outside the ledger. What the chain does and does not detect is in
+[references/LEDGER_INTEGRITY.md](skills/agent-ingest-audit-optimize/references/LEDGER_INTEGRITY.md).
 
 The `compliance` command was withdrawn in 0.8.0: its control mapping misnamed the articles and
 controls it cited, and this plugin does not assess regulatory compliance. The subcommand remains

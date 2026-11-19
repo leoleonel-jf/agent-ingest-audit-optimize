@@ -12,7 +12,7 @@ class PathSafetyError(RuntimeError):
 
     Every refusal carries a stable `reason` key in addition to its ordinary
     human-readable message, so a caller -- and this module's own alignment
-    test against `references/LEDGER.md` -- can enumerate every refusal the
+    test against `references/LEDGER_PATHS.md` -- can enumerate every refusal the
     path-safety layer can produce without parsing message text.
     `PATH_SAFETY_REASONS` is the definitive, exhaustive set of keys this
     exception can carry.
@@ -24,7 +24,7 @@ class PathSafetyError(RuntimeError):
 
 
 # The exhaustive set of reason keys any PathSafetyError raised anywhere in
-# this module can carry. `references/LEDGER.md` must document exactly this
+# this module can carry. `references/LEDGER_PATHS.md` must document exactly this
 # set -- no more, no fewer. `PathSafetyReasonAlignmentTests` in
 # dashboard/tests/test_dashboard.py checks both directions: every key here
 # must be documented there, and every key documented there must be one the

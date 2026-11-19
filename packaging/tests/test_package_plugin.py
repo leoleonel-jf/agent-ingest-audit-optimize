@@ -296,6 +296,41 @@ class PackagePluginTests(unittest.TestCase):
                 self.assertFalse(any("assets/compliance/" in name for name in names))
                 self.assertFalse(any("references/COMPLIANCE.md" in name for name in names))
 
+    def test_archives_ship_every_file_the_skill_links(self) -> None:
+        # 0.10.0 split the ledger reference into five files and added a
+        # review checklist, a model-and-effort reference and a review record
+        # template. `SKILL.md` sends the agent to each by relative link, so a
+        # link whose target is missing from an archive is a dead instruction
+        # for whoever installed it.
+        skill_root = SKILL_DIR
+        text = (skill_root / "SKILL.md").read_text(encoding="utf-8")
+        linked = sorted(set(re.findall(r"\]\(((?:references|assets)/[^)#]+)\)", text)))
+        for required in (
+            "references/REVIEW.md",
+            "references/MODEL_AND_EFFORT.md",
+            "references/LEDGER.md",
+            "references/LEDGER_PATHS.md",
+            "references/LEDGER_BASELINES.md",
+            "references/LEDGER_CHANGES.md",
+            "references/LEDGER_INTEGRITY.md",
+            "assets/templates/REVIEW.md",
+        ):
+            self.assertIn(required, linked)
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp)
+            plugin_archive, skill_archive, _ = package_plugin.build(output)
+            with zipfile.ZipFile(plugin_archive) as archive:
+                plugin_names = archive.namelist()
+            with zipfile.ZipFile(skill_archive) as archive:
+                skill_names = archive.namelist()
+
+            for relative in linked:
+                with self.subTest(file=relative):
+                    self.assertIn(
+                        f"skills/agent-ingest-audit-optimize/{relative}", plugin_names
+                    )
+                    self.assertIn(f"agent-ingest-audit-optimize/{relative}", skill_names)
+
     def test_archives_ship_every_script_module_in_the_source_tree(self) -> None:
         relative_paths = source_script_relative_paths()
         self.assertIn("assets/scripts/dashboard.py", relative_paths)

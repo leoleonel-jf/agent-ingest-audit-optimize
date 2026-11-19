@@ -1,8 +1,8 @@
 interface:
   display_name: "Agent Ingest, Audit & Optimize"
-  short_description: "Audits materials and optimizes agent systems"
+  short_description: "Reviews plugins, skills and MCP servers before adoption"
   brand_color: "#0B1B4D"
-  default_prompt: "Use $agent-ingest-audit-optimize to audit this material and propose evidence-based improvements."
+  default_prompt: "Use $agent-ingest-audit-optimize to review this before I install it and tell me whether to adopt it."
 
 policy:
   allow_implicit_invocation: true
