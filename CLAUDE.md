@@ -14,7 +14,8 @@ Python 3.10+, standard library only. Machine-specific notes go in `CLAUDE.local.
 
 ## Gotchas
 
-- No CI: there is no `.github/`. Run all three suites locally before a PR; "checked in CI" describes a command, not a pipeline.
+- CI (`.github/workflows/tests.yml`) runs the three suites and the eval validator on every PR and push to `main`, on Ubuntu and Windows, Python 3.10 and 3.13. Run them locally first; wait for green before merging.
+- `evidence-freshness.yml` runs weekly and fails on bundled evidence near `expires_on`. A red run is fixed by re-verifying the content against its source (`docs/research/`), never by moving the date.
 - `.agent-audit/` (ledger, dashboard, handoffs) is gitignored and exists only in the main checkout. From a worktree, read it by absolute path. Start from the newest `HANDOFF-*.md` there.
 - A version bump has pins outside `packaging/tests/test_version_consistency.py`: `docs/releases/vX.Y.Z.md` and the eval case count written in prose in `docs/SUBMISSION.md`.
 - After any source change, a rebuilt `dist/` has new checksums: update `docs/releases/vX.Y.Z.md` to match.
