@@ -20,6 +20,18 @@ nothing either archive ships changes, so no version pin moves.
 - does **not** renew any `expires_on`. The adapters are still expired and the new check says so.
   The 2026-11 review re-verified their paths and found two of the three need edits first.
 
+Spec under `docs/specs/2026-11-19-minimal-ci.md`. Repository tooling only.
+
+- adds `.github/workflows/tests.yml`: the three suites and the evaluation-suite validator on
+  every pull request and every push to `main`, on Ubuntu and Windows, Python 3.10 and 3.13.
+  Nothing ran on a push before, which is how `main` stayed red for three weeks unnoticed.
+- adds `.github/workflows/evidence-freshness.yml`, a weekly run of
+  `check_evidence_freshness.py`. It is red until the adapters are re-verified, which is correct.
+- adds `packaging/tests/test_ci_workflows.py`, which fails when a workflow loses a suite step, a
+  system, a trigger or its strictness, so the gate cannot quietly stop gating.
+- does **not** stop a direct push to `main`; that needs a branch protection rule, which is the
+  repository owner's setting to change.
+
 ## 0.6.0 - 2026-08-04
 
 Spec under `docs/specs/2026-08-01-dashboard-open-and-update.md`. Two commands and one slash

@@ -1,0 +1,44 @@
+name: tests
+
+# The three suites and the evaluation-suite validator, on every push to main and
+# every pull request. Nothing here reads the calendar: stale bundled evidence is
+# evidence-freshness.yml's question, so a red run here means the code is wrong.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suites:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both systems, because 0.2.4 fixed a POSIX-only defect the Windows-only
+        # runs could not see. 3.10 is the packager's stated minimum.
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.13"]
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: dashboard suite
+        run: python -m unittest discover -s dashboard/tests
+      - name: packaging suite (includes version consistency)
+        run: python -m unittest discover -s packaging/tests
+      - name: evals suite
+        run: python -m unittest discover -s evals/tests
+      - name: evaluation suite is valid
+        run: python evals/scripts/eval_suite.py validate
