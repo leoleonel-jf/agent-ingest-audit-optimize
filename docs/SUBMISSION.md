@@ -16,11 +16,11 @@ This file is the review-ready source of truth for public directory submissions: 
 
 - **Submission type:** Skills only
 - **Plugin name:** Agent Ingest, Audit & Optimize
-- **Version:** 0.9.0
+- **Version:** 0.10.0
 - **Developer identity:** Leonardo Leonel Sobral
 - **Category:** Productivity
-- **Short description:** Audit & optimize agent systems
-- **Long description:** Verifies recommendations from videos, articles, documentation, repositories, transcripts, and other external material. It separates claims from evidence, evaluates scope and risk, creates independently authorizable proposals, and applies only explicitly authorized improvements with validation and rollback.
+- **Short description:** Review before you install
+- **Long description:** Reviews a plugin, a skill, or an MCP server before it is adopted: reads what it ships, checks its claims against current primary sources, compares it with the real setup, and gives a verdict with the risks and the way back. Also audits videos, articles, and repositories about agent setup and turns supported findings into scoped, reversible changes.
 - **Website:** https://github.com/leoleonel-jf/agent-ingest-audit-optimize
 - **Support:** https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/SUPPORT.md
 - **Privacy:** https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/PRIVACY.md
@@ -30,9 +30,9 @@ This file is the review-ready source of truth for public directory submissions: 
 
 ## Starter prompts
 
-1. Audit this material and verify its recommendations.
-2. Which agent improvements are safe to adopt globally?
-3. Turn these findings into scoped, reversible proposals.
+1. Review this plugin before I install it.
+2. Is this MCP server safe to adopt in my setup?
+3. Audit this material and verify its recommendations.
 
 ## Positive review cases
 
@@ -92,4 +92,4 @@ The publisher must select countries or regions in the submission portal after co
 
 ## Release notes
 
-Skills-only submission. The plugin ingests external material, verifies recommendations against current primary evidence, creates scoped proposals, and applies only explicitly authorized improvements. It includes security boundaries, rollback procedures, portability guidance, deterministic packaging, a local governance ledger with a standard-library validator, and a 34-case evaluation suite.
+Skills-only submission. The plugin reviews a plugin, a skill, or an MCP server before it is adopted, audits external material about agent setup against current primary evidence, creates scoped proposals, and applies only explicitly authorized improvements. It includes security boundaries, rollback procedures, portability guidance, deterministic packaging, a local governance ledger with a standard-library validator, and a 39-case evaluation suite.

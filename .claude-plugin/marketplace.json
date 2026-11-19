@@ -8,8 +8,8 @@
     {
       "name": "agent-ingest-audit-optimize",
       "source": "./",
-      "description": "Audit external material and turn verified findings into safe, reversible agent improvements.",
-      "version": "0.9.0",
+      "description": "Review a plugin, a skill, or an MCP server before you adopt it, and audit advice about agent setup against current evidence.",
+      "version": "0.10.0",
       "author": { "name": "Leonardo Leonel Sobral" },
       "homepage": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
       "repository": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",

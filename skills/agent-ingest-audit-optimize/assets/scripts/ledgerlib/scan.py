@@ -326,7 +326,7 @@ def run_probe(
     if reference.group(1) in excluded:
         # Not `not_present`: this platform has no such anchor, so nothing was
         # looked at and no absence was verified. Recording one here would be
-        # the `$SYSTEM_CONFIG`-on-Windows claim `references/LEDGER.md` calls
+        # the `$SYSTEM_CONFIG`-on-Windows claim `references/LEDGER_BASELINES.md` calls
         # out -- a permanently "clean" layer nobody ever read.
         return []
 

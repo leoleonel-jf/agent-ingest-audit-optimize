@@ -67,7 +67,7 @@ Redact secrets and avoid commands that mutate state during analysis.
 
 ## 6. Classify and prioritize
 
-Classify every recommendation using the vocabulary in `SKILL.md`.
+Classify every recommendation with one of the five verdicts in `SKILL.md`. A finding that is already in place, does not apply, or is outdated takes its terminal label from `LEDGER.md`.
 
 Score when useful:
 
@@ -149,7 +149,7 @@ Distinguish:
 
 - **VALIDATED**: all critical criteria passed with direct evidence;
 - **VALIDATED WITH CAVEATS**: safe and useful, but a named environment or fresh-session check remains;
-- **NOT VALIDATED**: critical evidence is missing or a required test failed.
+- **NOT VALIDATED**: critical evidence is missing or a required test failed. This is a word for the report, not a record status: the statuses `verify` accepts are listed in `LEDGER.md`.
 
 ## 11. Close the run
 
