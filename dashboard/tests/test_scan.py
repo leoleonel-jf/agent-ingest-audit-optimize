@@ -44,7 +44,13 @@ SCRIPT = (
 ADAPTERS_DIR = (
     REPO_ROOT / "skills" / "agent-ingest-audit-optimize" / "assets" / "adapters"
 )
-SPEC = importlib.util.spec_from_file_location("dashboard", SCRIPT)
+# What a scan of a bundled adapter may print on stderr and still be the scan
+# the test meant to run: the two selection notes, and the adapter's own expiry.
+EXPIRY_FINDING = re.compile(
+    r"adapter for client '[^']+' expired on '\d{4}-\d{2}-\d{2}' and this scan ran on "
+)
+SELECTION_NOTES = ("user adapters were not read:", "selected adapter ")
+SPEC =importlib.util.spec_from_file_location("dashboard", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 dashboard = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(dashboard)
@@ -2178,6 +2184,14 @@ class ScanCliTests(ScanTestCase):
         `generic` is chosen deliberately -- it probes nothing, so this test
         exercises the selection path without reading the machine's real
         configuration into a unit test.
+
+        The bundled adapter is real, so its `expires_on` is real too, and the
+        CLI takes no date: once that day passes, this run carries the expiry
+        finding and exits `1`. That is the command working, not this test's
+        subject, so the assertion is "clean, apart from expiry" rather than
+        `0`. Whether bundled evidence has gone stale is asked in one place,
+        `packaging/scripts/check_evidence_freshness.py`, which takes the date
+        as an argument.
         """
         code, stdout, stderr = self.run_cli(
             "scan",
@@ -2188,9 +2202,34 @@ class ScanCliTests(ScanTestCase):
             "--project",
             str(self.project),
         )
-        self.assertEqual(code, 0, stderr)
+        self.assert_clean_apart_from_expiry(code, stderr)
         self.assertEqual(json.loads(stdout)["client"], "generic")
         self.assertEqual(json.loads(stdout)["items"], [])
+
+    def assert_clean_apart_from_expiry(self, code: int, stderr: str) -> None:
+        """Exit `0`, or exit `1` where the one finding is the adapter's expiry.
+
+        Every stderr line must be a selection note or that finding. A second
+        finding hiding behind an expired adapter fails here, so tolerating
+        expiry does not turn into tolerating anything.
+        """
+        lines = stderr.splitlines()
+        expiry = [line for line in lines if EXPIRY_FINDING.match(line)]
+        notes = [line for line in lines if line.startswith(SELECTION_NOTES)]
+        self.assertEqual(lines, [*notes, *expiry], stderr)
+        self.assertLessEqual(len(expiry), 1, stderr)
+        self.assertEqual(code, 1 if expiry else 0, stderr)
+
+    def test_a_second_finding_is_not_excused_by_expiry(self) -> None:
+        """The helper above, against the failure it must not swallow."""
+        expired = "adapter for client 'generic' expired on '2026-10-28' and this scan ran on '2026-11-19': x"
+        other = "no client was detected and this scan fell back to the 'generic' adapter"
+        self.assert_clean_apart_from_expiry(1, expired + "\n")
+        self.assert_clean_apart_from_expiry(0, "")
+        for code, stderr in ((1, other + "\n" + expired + "\n"), (0, expired + "\n"), (1, "")):
+            with self.subTest(code=code, stderr=stderr):
+                with self.assertRaises(AssertionError):
+                    self.assert_clean_apart_from_expiry(code, stderr)
 
     def test_verify_still_dispatches(self) -> None:
         ledger = minimal_ledger()

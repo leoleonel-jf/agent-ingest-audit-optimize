@@ -106,3 +106,16 @@ re-clone on every auto-upgrade pass.
 - **Other Agent Skills clients:** install the canonical directory under `skills/` or use the generated Skill archive according to the client's documentation.
 
 The repository marketplace and public release are maintained separately from generated archives. Building a package does not install or publish it.
+
+## Evidence freshness
+
+Adapters and control mappings carry `expires_on`. The three test suites pin every date and never
+ask whether one has passed; this script is the only check that meets the calendar:
+
+```bash
+python packaging/scripts/check_evidence_freshness.py --margin-days 14
+```
+
+It exits `1` when anything is expired or would be within the margin, and `2` when it found no
+dated evidence to judge. Run it before a release. Renewing a date is never the fix by itself:
+re-verify the content against its source first, as `docs/research/` records.

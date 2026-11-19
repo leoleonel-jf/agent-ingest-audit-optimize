@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+Spec under `docs/specs/2026-11-19-suites-off-the-clock.md`. Tests and maintainer tooling only:
+nothing either archive ships changes, so no version pin moves.
+
+- fixes the three suites failing on the calendar. Since 2026-10-29 one dashboard test and two
+  packaging tests failed with no code change, because they ran `scan` against a bundled adapter
+  whose `expires_on` had passed and asserted exit `0`. None of them is about freshness. They now
+  assert "clean apart from expiry": every stderr line is a selection note or the adapter's own
+  expiry finding, and the exit code follows from which. A second finding behind an expired
+  adapter still fails them.
+- adds `packaging/scripts/check_evidence_freshness.py`, the one place the repository's checks
+  meet the calendar. It lists every bundled document carrying `expires_on` as `expired`,
+  `expiring` or `fresh`, takes the date as `--today`, and exits `2` rather than `0` when it found
+  no dated evidence to judge. It is not shipped.
+- does **not** renew any `expires_on`. The adapters are still expired and the new check says so.
+  The 2026-11 review re-verified their paths and found two of the three need edits first.
+
 ## 0.6.0 - 2026-08-04
 
 Spec under `docs/specs/2026-08-01-dashboard-open-and-update.md`. Two commands and one slash
