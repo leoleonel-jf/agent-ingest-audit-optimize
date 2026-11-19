@@ -626,3 +626,89 @@ class UpdateCliTestCase(UpdateFixtureTestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class TextNeverReachesTheLedgerTestCase(UpdateFixtureTestCase):
+    """The whole path: a file, `scan`, the appended baseline, the rendered page.
+
+    `scan`'s own tests show an item carries no text. This shows the same of the
+    two things a user actually keeps -- `ledger.json` after `update` appends
+    the baseline to it, and the dashboard `update all` renders from it -- and
+    of both output streams. The credentials sit under `command` and inside a
+    permission rule, the two shapes a review reproduced reaching a baseline,
+    and the patterns are the shipped `claude-code` ones, which match neither.
+    """
+
+    HOOK_SECRET = "SYNTHETIC_ONLY_HOOK_3f9a"
+    RULE_SECRET = "SYNTHETIC_ONLY_RULE_71bd"
+
+    def setUp(self) -> None:
+        super().setUp()
+        shipped = json.loads(
+            (
+                REPO_ROOT
+                / "skills"
+                / "agent-ingest-audit-optimize"
+                / "assets"
+                / "adapters"
+                / "claude-code.json"
+            ).read_text(encoding="utf-8")
+        )
+        document = json.loads(self.adapter_path.read_text(encoding="utf-8"))
+        document["sensitive_key_patterns"] = shipped["sensitive_key_patterns"]
+        document["probes"] = [
+            {
+                "kind": kind,
+                "scope": "user",
+                "path": "$USER_CONFIG/settings.json",
+                "parse": "json",
+                "pointer": pointer,
+            }
+            for kind, pointer in (("hook", "/hooks"), ("permission-rule", "/permissions"))
+        ]
+        self.adapter_path.write_text(json.dumps(document), encoding="utf-8")
+        (self.user_config / "settings.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {"type": "command", "command": f"tool --password {self.HOOK_SECRET}"}
+                                ],
+                            }
+                        ]
+                    },
+                    "permissions": {"allow": [f"Bash(curl -H Authorization:{self.RULE_SECRET} *)"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def assert_no_secret(self, text: str, where: str) -> None:
+        for secret in (self.HOOK_SECRET, self.RULE_SECRET):
+            self.assertNotIn(secret, text, f"{secret} reached {where}")
+
+    def test_neither_credential_reaches_the_ledger_the_page_or_a_stream(self) -> None:
+        ledger_path = self.write_ledger(self.bare_ledger())
+        code, out, err = self.run_update(
+            ledger_path, "all", adapter=self.adapter_path, today="2026-08-01"
+        )
+        self.assertEqual(code, 0, err)
+        ledger_text = ledger_path.read_text(encoding="utf-8")
+        self.assert_no_secret(ledger_text, "ledger.json")
+        self.assert_no_secret((self.tmp / "dashboard.html").read_text(encoding="utf-8"), "dashboard.html")
+        self.assert_no_secret(out, "stdout")
+        self.assert_no_secret(err, "stderr")
+
+    def test_the_baseline_still_records_that_both_were_there(self) -> None:
+        """Withholding text must not turn into recording nothing."""
+        ledger_path = self.write_ledger(self.bare_ledger())
+        self.run_update(ledger_path, "ledger", adapter=self.adapter_path, today="2026-08-01")
+        items = json.loads(ledger_path.read_text(encoding="utf-8"))["baselines"][0]["items"]
+        by_name = {item["name"]: item for item in items}
+        self.assertEqual(set(by_name), {"PreToolUse", "allow"})
+        for item in items:
+            self.assertEqual(item["state"], "present")
+            self.assertRegex(json.dumps(item["attributes"]["value"]), r'"digest": "sha256:[0-9a-f]{64}"')

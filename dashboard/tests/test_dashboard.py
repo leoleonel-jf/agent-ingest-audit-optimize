@@ -3630,7 +3630,7 @@ class KnownGapDocumentationTests(unittest.TestCase):
         for phrase in (
             "an eleventh kind to record it under",
             "only their registrations",
-            "Redaction matches names and never values",
+            "Text is withheld; key names and numbers are not",
             "is a finding, not a refusal",
             # 0.5.0 replaced two closed gaps with the narrower truths that
             # survived them. They live in this section too, or the section
@@ -3643,20 +3643,25 @@ class KnownGapDocumentationTests(unittest.TestCase):
         self.assertNotIn("Per-subsystem precedence", section)
         self.assertNotIn("POSIX-only and cannot be declared optional", section)
 
-    def test_reference_records_the_key_name_only_redaction_gap(self) -> None:
-        # Both halves, because the paragraph makes two claims and either one
-        # alone would read as the whole story: redaction is blind to a secret
-        # whose key name matches nothing, and closing the two known shapes
-        # cost the baseline the detail it used to carry.
+    def test_reference_records_what_withholding_text_leaves_open(self) -> None:
+        # The rule and its limits together, because either alone misleads:
+        # "text is withheld" reads as "nothing leaks", and the three open
+        # limits read as the whole story without the rule they qualify.
+        # Until 0.6.1 this pinned the opposite claim, "Redaction matches
+        # names and never values", which was the gap rather than a limit.
         text = _collapsed(REFERENCE)
-        self.assertIn("Redaction matches names and never values", text)
-        self.assertIn("no longer records what they were", text)
+        self.assertIn("No text a parsed document holds reaches a baseline", text)
+        self.assertIn("Text is withheld; key names and numbers are not", text)
         self.assertIn("merely contains those three letters", text)
+        self.assertIn("a short or common value can be confirmed by hashing a guess", text)
+        self.assertIn("keeps the text it copied", text)
+        self.assertNotIn("Redaction matches names and never values", text)
 
     def test_reference_records_the_empty_pattern_list_gap(self) -> None:
         text = _collapsed(REFERENCE)
         self.assertIn("is a finding, not a refusal", text)
-        self.assertIn("dump a parsed settings file verbatim", text)
+        self.assertIn("enumerate every variable name inside it", text)
+        self.assertNotIn("dump a parsed settings file verbatim", text)
 
 
 class AdapterFieldAlignmentTests(unittest.TestCase):
@@ -3752,24 +3757,23 @@ class PrivacyDocumentTests(unittest.TestCase):
 
     def test_privacy_states_sensitive_values_are_kept_only_as_digests(self) -> None:
         text = _collapsed(PRIVACY)
-        self.assertIn("The key name is kept and the value is replaced by a digest", text)
+        self.assertIn("The key name is kept and everything under it is replaced by one digest", text)
 
-    def test_privacy_states_other_parsed_values_are_copied_verbatim(self) -> None:
-        # The point of the whole section, and the one thing a reader is most
-        # likely to assume the opposite of: anchoring protects the recorded
-        # location, never the parsed value.
+    def test_privacy_states_no_parsed_text_is_copied(self) -> None:
+        # The point of the whole section since 0.6.1, and the reverse of what
+        # it said before: a parsed value used to be "copied into the baseline
+        # verbatim". The old sentence must be gone, not merely outvoted.
         text = _collapsed(PRIVACY)
-        self.assertIn("is copied into the baseline verbatim", text)
-        self.assertIn("thirteen absolute local paths", text)
-        self.assertIn(
-            "apply to an item's recorded location, not to a parsed value", text
-        )
+        self.assertIn("No text a parsed file holds is copied", text)
+        self.assertIn("its shape: key names, nesting, array lengths", text)
+        self.assertNotIn("is copied into the baseline verbatim", text)
 
     def test_privacy_states_redaction_matches_names_rather_than_values(self) -> None:
         # The mechanism, stated so the limit below reads as a consequence of
         # it rather than as an exception to it.
         text = _collapsed(PRIVACY)
-        self.assertIn("Redaction matches on key names and never on values", text)
+        self.assertIn("That matching is by key name and never by value", text)
+        self.assertIn("is withheld whole", text)
 
     def test_privacy_admits_a_secret_under_an_unmatched_key_is_copied(self) -> None:
         # The claim this document used to get wrong. It said tokens, keys and
@@ -3778,8 +3782,11 @@ class PrivacyDocumentTests(unittest.TestCase):
         # document that overstates its protection is worse than one that
         # admits a limit, so the limit and the user's remedy are both pinned.
         text = _collapsed(PRIVACY)
-        self.assertIn("copied into the baseline in full", text)
-        self.assertIn("add a pattern for that key to their own adapter", text)
+        self.assertIn("Three things are still copied as written", text)
+        self.assertIn("a secret used as a key name is recorded", text)
+        self.assertIn("a numeric secret is recorded", text)
+        self.assertIn("confirm a guess at a short or common value", text)
+        self.assertIn("keeps whatever text it copied at the time", text)
         self.assertNotIn("are never copied", text)
 
 

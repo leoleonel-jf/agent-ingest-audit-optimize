@@ -74,6 +74,7 @@ from ledgerlib.scan import (  # noqa: E402
     run_probe,
     scan,
     scan_command,
+    withhold_text,
 )
 from ledgerlib.validate import validate_baseline  # noqa: E402
 from ledgerlib.verify import verify  # noqa: E402
@@ -86,6 +87,21 @@ def canonical_digest(value: object) -> str:
     """Recompute the documented digest independently of the implementation."""
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def text_withheld(value: object) -> object:
+    """What an item should hold for `value`: its shape, with every string a marker.
+
+    Computed here rather than by calling `withhold_text`, so an expectation
+    never agrees with the implementation merely by being the implementation.
+    """
+    if isinstance(value, str):
+        return {"redacted": True, "digest": canonical_digest(value)}
+    if isinstance(value, dict):
+        return {key: text_withheld(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [text_withheld(item) for item in value]
+    return value
 
 
 def markers(value: object) -> list[dict]:
@@ -873,7 +889,7 @@ class ParseJsonTests(ProbeTestCase):
         items = run_probe(self.probe(pointer="/mcpServers"), self.roots, [])
         by_name = {item["name"]: item for item in items}
         self.assertEqual(
-            by_name["alpha"]["attributes"]["value"], {"command": "uvx"}
+            by_name["alpha"]["attributes"]["value"], text_withheld({"command": "uvx"})
         )
 
     def test_the_probes_scope_survives_parsing(self) -> None:
@@ -931,7 +947,8 @@ class ParseJsonTests(ProbeTestCase):
         self.assertEqual(items[0]["state"], "present")
         self.assertEqual(items[0]["digest"], self.digest_of(target))
         self.assertEqual(
-            items[0]["attributes"]["value"], json.loads(self.THREE_SERVERS)
+            items[0]["attributes"]["value"],
+            text_withheld(json.loads(self.THREE_SERVERS)),
         )
 
     def test_a_pointer_may_index_an_array(self) -> None:
@@ -954,7 +971,7 @@ class ParseJsonTests(ProbeTestCase):
         items = run_probe(self.probe(pointer="/servers"), self.roots, [])
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["state"], "present")
-        self.assertEqual(items[0]["attributes"]["value"], ["a", "b"])
+        self.assertEqual(items[0]["attributes"]["value"], text_withheld(["a", "b"]))
 
     def test_an_empty_key_falls_back_to_the_files_name(self) -> None:
         self.write(self.user_config / "settings.json", '{"mcpServers": {"": {}}}')
@@ -1140,10 +1157,161 @@ class RedactionThroughParseTests(ProbeTestCase):
         self.assertNotIn(self.PLAINTEXT, json.dumps(items))
         self.assertNotIn("API_TOKEN", json.dumps(items))
 
-    def test_no_patterns_means_no_redaction(self) -> None:
-        self.write_document({"mcpServers": {"one": {"command": "npx"}}})
+    def test_no_patterns_still_copies_no_text(self) -> None:
+        """Patterns hide key names; they are no longer what keeps text out.
+
+        Until 0.6.0 this asserted the opposite -- no patterns, the value copied
+        as written -- which made every secret under a key no pattern named the
+        adapter author's problem. The shape survives; the text does not.
+        """
+        self.write_document({"mcpServers": {"one": {"command": "npx", "retries": 3}}})
         items = run_probe(self.probe(pointer="/mcpServers"), self.roots, [])
-        self.assertEqual(items[0]["attributes"]["value"], {"command": "npx"})
+        value = items[0]["attributes"]["value"]
+        self.assertEqual(set(value), {"command", "retries"})
+        self.assertEqual(value["retries"], 3)
+        self.assertEqual(value["command"], {"redacted": True, "digest": canonical_digest("npx")})
+
+
+class WithheldTextTests(unittest.TestCase):
+    """`withhold_text`: no string a file held is copied, whatever key it sat under.
+
+    `redact` protects what an adapter's patterns name. A review reproduced the
+    gap that leaves: a hook command and a permission rule, each carrying a
+    credential under a key no pattern could reasonably name, both copied
+    verbatim into the baseline. This is the rule that does not depend on
+    guessing key names.
+    """
+
+    def test_a_string_leaf_becomes_a_marker(self) -> None:
+        self.assertEqual(
+            withhold_text({"command": "tool --password hunter2"}),
+            {"command": {"redacted": True, "digest": canonical_digest("tool --password hunter2")}},
+        )
+
+    def test_strings_inside_arrays_become_markers(self) -> None:
+        result = withhold_text({"allow": ["Bash(curl -H Authorization:abc *)", "Read"]})
+        self.assertEqual(len(markers(result)), 2)
+        self.assertNotIn("Authorization", json.dumps(result))
+
+    def test_a_bare_string_document_becomes_a_marker(self) -> None:
+        self.assertEqual(
+            withhold_text("postgres://u:p@h/db"),
+            {"redacted": True, "digest": canonical_digest("postgres://u:p@h/db")},
+        )
+
+    def test_the_shape_survives(self) -> None:
+        """Keys, nesting, and array lengths are what a later diff needs."""
+        result = withhold_text(
+            {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "x"}]}]}}
+        )
+        self.assertEqual(set(result), {"hooks"})
+        self.assertEqual(set(result["hooks"]), {"PreToolUse"})
+        self.assertEqual(len(result["hooks"]["PreToolUse"]), 1)
+        self.assertEqual(set(result["hooks"]["PreToolUse"][0]), {"matcher", "hooks"})
+
+    def test_numbers_booleans_and_null_pass_through(self) -> None:
+        document = {"timeout": 30, "ratio": 0.5, "enabled": True, "off": False, "nothing": None}
+        self.assertEqual(withhold_text(document), document)
+
+    def test_an_existing_marker_is_left_exactly_as_it_is(self) -> None:
+        """Otherwise the digest inside a marker would itself be digested.
+
+        A marker's `digest` is a string, and `redact` runs first. Walking into
+        it would replace the one thing a later comparison needs with a digest
+        of a digest.
+        """
+        marker = {"redacted": True, "digest": canonical_digest("s3cr3t")}
+        self.assertEqual(withhold_text({"token": marker}), {"token": marker})
+
+    def test_equal_text_has_an_equal_digest_and_different_text_does_not(self) -> None:
+        one = withhold_text({"a": "same", "b": "same", "c": "other"})
+        self.assertEqual(one["a"], one["b"])
+        self.assertNotEqual(one["a"], one["c"])
+
+    def test_the_callers_document_is_not_mutated(self) -> None:
+        document = {"command": "x", "list": ["y"]}
+        withhold_text(document)
+        self.assertEqual(document, {"command": "x", "list": ["y"]})
+
+    def test_a_non_json_leaf_passes_to_the_next_stage_untouched(self) -> None:
+        """`tomllib` dates are `_jsonable`'s business, exactly as before."""
+        moment = datetime.date(2026, 7, 30)
+        self.assertIs(withhold_text({"when": moment})["when"], moment)
+
+
+class TextNeverReachesAnItemTests(ProbeTestCase):
+    """The two reproductions from the review, against the shipped patterns.
+
+    Both values sit under keys the bundled `claude-code` adapter's
+    `sensitive_key_patterns` do not match, which is the whole point: the
+    patterns are loaded from the real adapter, so this fails if someone closes
+    the gap by adding `command` to a list instead of withholding text.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        adapter = json.loads((ADAPTERS_DIR / "claude-code.json").read_text(encoding="utf-8"))
+        self.patterns = adapter["sensitive_key_patterns"]
+
+    def items_for(self, document: object, pointer: str | None) -> list[dict]:
+        self.write(self.user_config / "settings.json", json.dumps(document))
+        probe = {"kind": "hook", "path": "$USER_CONFIG/settings.json", "parse": "json"}
+        if pointer is not None:
+            probe["pointer"] = pointer
+        return run_probe(probe, self.roots, self.patterns)
+
+    def test_a_credential_in_a_hook_command_is_not_copied(self) -> None:
+        document = {
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": "tool --password SYNTHETIC_ONLY_123"}]}
+                ]
+            }
+        }
+        items = self.items_for(document, "/hooks")
+        self.assertEqual([item["name"] for item in items], ["PreToolUse"])
+        self.assertNotIn("SYNTHETIC_ONLY_123", json.dumps(items))
+
+    def test_a_credential_in_a_permission_rule_is_not_copied(self) -> None:
+        document = {"permissions": {"allow": ["Bash(curl -H Authorization:SYNTHETIC_ONLY_456 *)"]}}
+        items = self.items_for(document, "/permissions")
+        self.assertEqual([item["name"] for item in items], ["allow"])
+        self.assertNotIn("SYNTHETIC_ONLY_456", json.dumps(items))
+
+    def test_a_connection_string_under_an_unexpected_key_is_not_copied(self) -> None:
+        document = {
+            "servers": {"db": {"dsn": "postgres://admin:SYNTHETIC_ONLY_789@host/db", "note": ["SYNTHETIC_ONLY_ABC"]}}
+        }
+        items = self.items_for(document, "/servers")
+        self.assertNotIn("SYNTHETIC_ONLY", json.dumps(items))
+
+    def test_the_whole_document_form_copies_no_text_either(self) -> None:
+        items = self.items_for({"anything": {"deep": ["SYNTHETIC_ONLY_DEF"]}}, None)
+        self.assertNotIn("SYNTHETIC_ONLY_DEF", json.dumps(items))
+
+    def test_a_string_at_the_pointed_location_is_one_item_with_a_marker(self) -> None:
+        items = self.items_for({"model": "SYNTHETIC_ONLY_GHI"}, "/model")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(
+            items[0]["attributes"]["value"],
+            {"redacted": True, "digest": canonical_digest("SYNTHETIC_ONLY_GHI")},
+        )
+
+    def test_a_changed_command_changes_its_digest_and_nothing_else(self) -> None:
+        """What is kept is enough to say which leaf changed, without its text."""
+
+        def hook(command: str) -> dict:
+            return {
+                "hooks": {
+                    "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": command}]}]
+                }
+            }
+
+        before = self.items_for(hook("guard.js --strict"), "/hooks")[0]["attributes"]["value"]
+        after = self.items_for(hook("guard.js"), "/hooks")[0]["attributes"]["value"]
+        self.assertNotEqual(before[0]["hooks"][0]["command"], after[0]["hooks"][0]["command"])
+        self.assertEqual(before[0]["matcher"], after[0]["matcher"])
+        self.assertEqual(before[0]["hooks"][0]["type"], after[0]["hooks"][0]["type"])
 
 
 TOML_THREE_SERVERS = """
@@ -1188,13 +1356,15 @@ class ParseTomlTests(ProbeTestCase):
         self.write(self.user_config / "config.toml", TOML_THREE_SERVERS)
         items = run_probe(self.probe(pointer="/mcp_servers"), self.roots, [])
         by_name = {item["name"]: item for item in items}
-        self.assertEqual(by_name["alpha"]["attributes"]["value"], {"command": "uvx"})
+        self.assertEqual(
+            by_name["alpha"]["attributes"]["value"], text_withheld({"command": "uvx"})
+        )
 
     def test_a_pointer_omitted_yields_one_item_for_the_whole_document(self) -> None:
         self.write(self.user_config / "config.toml", 'model = "o3"\n')
         items = run_probe(self.probe(), self.roots, [])
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["attributes"]["value"], {"model": "o3"})
+        self.assertEqual(items[0]["attributes"]["value"], text_withheld({"model": "o3"}))
 
     def test_a_pointer_that_does_not_resolve_yields_one_not_present_item(self) -> None:
         self.write(self.user_config / "config.toml", TOML_THREE_SERVERS)
