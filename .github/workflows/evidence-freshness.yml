@@ -1,0 +1,27 @@
+name: evidence freshness
+
+# The one check that meets the calendar. Adapters and control mappings carry
+# expires_on; this fails when any has expired or will within 14 days, so the
+# maintainer hears about it before a user's scan does.
+#
+# A red run here is not fixed by moving a date. Re-verify the content against
+# its source first; docs/research/ records how.
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: bundled evidence is not stale
+        run: python packaging/scripts/check_evidence_freshness.py --margin-days 14

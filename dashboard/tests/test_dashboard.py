@@ -8,6 +8,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -3183,7 +3184,17 @@ class ResolveAnchoredTests(unittest.TestCase):
             with self.assertRaises(dashboard.PathSafetyError) as ctx:
                 dashboard.resolve_anchored("$R/a", {"R": root})
             self.assertIn("$R/a", str(ctx.exception))
-            self.assertEqual(ctx.exception.reason, "resolve_failed")
+            # The refusal is the property; the reason depends on the
+            # interpreter, and the first CI run (2026-11-19) is what showed it.
+            # Python 3.13 changed non-strict `Path.resolve()`: a symlink loop
+            # no longer raises there, so `_resolve_or_raise` returns a path and
+            # the loop is refused one step later, when the path is inspected.
+            # Each interpreter's actual reason is pinned rather than accepting
+            # either, so a third outcome still fails. Giving both the same
+            # reason is a change to shipped code and is tracked in
+            # `docs/specs/2026-11-19-minimal-ci.md`, section 5.
+            expected = "resolve_failed" if sys.version_info < (3, 13) else "path_inspect_failed"
+            self.assertEqual(ctx.exception.reason, expected)
 
     def test_hardlinked_regular_file_is_refused(self) -> None:
         # I4: a hardlink has no symlink target for rules 4/5 to follow, so
