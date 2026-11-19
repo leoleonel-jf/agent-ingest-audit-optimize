@@ -278,6 +278,22 @@ class PackagePluginTests(unittest.TestCase):
                 self.assertFalse(any("__pycache__" in name for name in names))
                 self.assertFalse(any(name.endswith((".pyc", ".pyo", ".pyd")) for name in names))
 
+    def test_archives_do_not_ship_the_withdrawn_compliance_mappings(self) -> None:
+        # 0.8.0 withdrew the `compliance` command because its control mapping
+        # misnamed articles; a mapping that reappears in an archive would put
+        # those errors back in front of users.
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp)
+            plugin_archive, skill_archive, _ = package_plugin.build(output)
+            with zipfile.ZipFile(plugin_archive) as archive:
+                plugin_names = archive.namelist()
+            with zipfile.ZipFile(skill_archive) as archive:
+                skill_names = archive.namelist()
+
+            for names in (plugin_names, skill_names):
+                self.assertFalse(any("assets/compliance/" in name for name in names))
+                self.assertFalse(any("references/COMPLIANCE.md" in name for name in names))
+
     def test_archives_ship_every_script_module_in_the_source_tree(self) -> None:
         relative_paths = source_script_relative_paths()
         self.assertIn("assets/scripts/dashboard.py", relative_paths)

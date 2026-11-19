@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.8.0 - 2026-11-19
+
+The cut the 2026-11 review decided: one command withdrawn, the roadmap closed in writing, and four
+tools taken out of the Skill's default path. Spec under `docs/specs/2026-11-19-the-cut.md`.
+
+- **`compliance` is withdrawn.** The command remains only to say so: it prints a notice, reads no
+  ledger, writes nothing, and exits `2`. The control mappings, the evaluation code and
+  `references/COMPLIANCE.md` are removed from the bundle;
+- **why, and a correction of what 0.5.0 shipped.** The mapping misidentified what it mapped.
+  It labelled Article 13 of the EU AI Act as human oversight; Article 13 is transparency and
+  information to deployers, and human oversight is Article 14. In ISO/IEC 42001 it named `A.6.2.6`
+  as logging (that control is operation and monitoring; event logs are `A.6.2.8`), `A.7.3` as
+  access management (it is acquisition of data), and `A.8.1`, which does not exist; it tied risk to
+  controls through clause 8.2 where the standard uses 6.1.3 and 8.3. The application date the
+  0.5.0 entry below gives, 2 August 2026, no longer holds for the obligations the mapping was
+  about: Regulation (EU) 2026/1744 moved them. `retention_days: 180` was shorter than six months.
+  **A report or evidence pack produced by `compliance` in 0.5.0 to 0.7.0 carries these errors and
+  should not be relied on.** The 0.5.0 entry, its release notes and its spec stay as written;
+- nothing a user holds is touched: evidence packs written with `--out` are their files, and the
+  command never wrote to a ledger;
+- **`SKILL.md` no longer tells an agent to seal the chain, pin a lockfile, build a dashboard or
+  scan a client on its own.** `chain --seal`, `lock`, `build` and `scan` work as before and keep
+  their tests; they now sit under "Optional tools" and run when the user asks. `verify` stays in
+  the default path. The sentences that keep those tools safe when they do run were carried over
+  unchanged;
+- `SKILL.md` keeps one sentence about compliance: the plugin does not assess it, and nobody is to
+  be told a ledger shows it;
+- **`docs/ROADMAP.md` is closed.** Every item of pillars II and III that was not built is named as
+  abandoned, with the date; the July text stays underneath as history.
+
 ## 0.7.0 - 2026-11-19
 
 The bundled adapters re-verified against the vendors' documentation, and a way for `update` to

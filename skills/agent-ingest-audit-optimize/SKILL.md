@@ -198,27 +198,32 @@ Every finding classified `REJECT`, `NEEDS MORE EVIDENCE`, `RISK EXCEEDS BENEFIT`
 `OBSOLETE`, `NOT APPLICABLE`, and `ALREADY IMPLEMENTED` are terminal and never enter the
 backlog.
 
-After writing the ledger, seal its hash chain (`dashboard.py chain <ledger> --seal`) as routinely
-as you run `verify`; sealing is bookkeeping too. The chain makes tampering **evident, never
-impossible** — never call a sealed ledger tamper-proof.
+After writing the ledger, run `dashboard.py verify` on it. Read
+[references/LEDGER.md](references/LEDGER.md) for storage layout, scope routing, identifiers,
+evidence expiry, and `verify`.
 
-`dashboard.py lock <ledger> --from BASE-YYYY-NNN` pins which installable artifacts should be
-present, and `--check` verifies that pin in CI. It reads nothing from disk, so it never replaces
-`drift`, and a green check says nothing changed since the pin — never that the pin is trustworthy.
+This plugin does not assess regulatory compliance, and its `compliance` command was withdrawn in
+0.8.0. Never state or imply that a ledger shows the user is compliant with anything, however the
+question is phrased.
 
-`dashboard.py compliance <ledger> --framework <name>` inventories evidence and **never certifies
-compliance**. Never state or imply the user is compliant, however the question is phrased: say
-which artifacts exist, which are missing, and that sufficiency is the auditor's judgement.
+## Optional tools
 
-Read [references/LEDGER.md](references/LEDGER.md) for storage layout, scope routing, identifiers,
-evidence expiry, `verify`, the hash chain and its threat table, and the lockfile; read
-[references/COMPLIANCE.md](references/COMPLIANCE.md) before answering any compliance question.
+Run none of these on your own initiative. Each one answers a specific request from the user, and
+none is part of an audit. [references/LEDGER.md](references/LEDGER.md) documents all four.
 
-Run `dashboard.py build` to turn a ledger into a single offline dashboard when reporting on or
-reviewing its contents. Read [references/DASHBOARD.md](references/DASHBOARD.md) for the nine
-panels, the static-injection procedure for machines without Python, and the degraded text view.
+- **Tamper evidence.** `dashboard.py chain <ledger> --seal` seals the ledger's hash chain, for a
+  user who wants later edits to be detectable. The chain makes tampering **evident, never
+  impossible**: never call a sealed ledger tamper-proof.
+- **A lockfile.** `dashboard.py lock <ledger> --from BASE-YYYY-NNN` pins which installable
+  artifacts should be present, and `--check` verifies that pin in CI. It reads nothing from disk,
+  so it never replaces `drift`, and a green check says nothing changed since the pin, never that
+  the pin is trustworthy.
+- **A dashboard.** `dashboard.py build` turns a ledger into a single offline page. Read
+  [references/DASHBOARD.md](references/DASHBOARD.md) for the nine panels, the static-injection
+  procedure for machines without Python, and the degraded text view.
+- **A baseline of a client's configuration.** `dashboard.py scan`, described next.
 
-## Capture a baseline of an unknown client
+### Capture a baseline of an unknown client
 
 `dashboard.py scan` reads one client's configuration and prints a single baseline entry. It is
 read-only, writes nothing, and executes nothing a configuration file names. Take its `BASE`

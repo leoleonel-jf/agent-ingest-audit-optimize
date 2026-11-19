@@ -64,7 +64,7 @@ See [packaging/README.md](packaging/README.md) for the package contract, support
 Add this repository as a marketplace and install the plugin:
 
 ```text
-codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.7.0
+codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.8.0
 codex plugin add agent-ingest-audit-optimize@agent-ingest-audit-optimize
 ```
 
@@ -87,7 +87,7 @@ claude --plugin-dir <path-to-agent-ingest-audit-optimize>
 
 ### Other Agent Skills clients
 
-Download the `agent-ingest-audit-optimize-0.7.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
+Download the `agent-ingest-audit-optimize-0.8.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
 
 ## Use
 
@@ -167,13 +167,11 @@ python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py lock <path
 lockfile says what *should* be there. `--check` reads nothing from the environment — comparing
 against the disk as it is now is `drift`'s job, and one question must not have two answers.
 
-Make tampering with the ledger evident by hash-chaining its records, and inventory what the
-ledger holds against a regulatory framework's controls:
+Make tampering with the ledger evident by hash-chaining its records:
 
 ```text
 python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py chain <path-to-ledger.json> --seal
 python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py verify <path-to-ledger.json> --chain [--expect-head DIGEST]
-python skills/agent-ingest-audit-optimize/assets/scripts/dashboard.py compliance <path-to-ledger.json> --framework eu-ai-act [--out DIR]
 ```
 
 The chain is tamper-**evident**, not tamper-proof: it detects edits, deletions and reordering,
@@ -181,9 +179,9 @@ and a wholly recomputed chain is caught only by comparing `chain --head` against
 recorded outside the ledger. The threat table is in
 [references/LEDGER.md](skills/agent-ingest-audit-optimize/references/LEDGER.md).
 
-`compliance` inventories evidence and **never certifies compliance** — it reports which artifacts
-exist and which are missing; sufficiency is the auditor's judgement. See
-[references/COMPLIANCE.md](skills/agent-ingest-audit-optimize/references/COMPLIANCE.md).
+The `compliance` command was withdrawn in 0.8.0: its control mapping misnamed the articles and
+controls it cited, and this plugin does not assess regulatory compliance. The subcommand remains
+only to say so and exits `2` without reading or writing anything; see `CHANGELOG.md`.
 
 Render a ledger into a single offline HTML dashboard with `build` — vanilla JS, no framework,
 no network request, and it never writes back to the ledger:

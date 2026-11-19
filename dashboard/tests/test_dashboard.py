@@ -4174,5 +4174,137 @@ class ReadmeDriftTests(unittest.TestCase):
         self.assertIn("Both are read-only like `scan`", text)
 
 
+ROADMAP = REPO_ROOT / "docs" / "ROADMAP.md"
+
+
+class TheCutSkillTests(unittest.TestCase):
+    """0.8.0: four tools left the Skill's default path, and one command left.
+
+    Spec `docs/specs/2026-11-19-the-cut.md` section 4. The tools still work;
+    what these tests hold is that `SKILL.md` no longer tells an agent to run
+    them unasked, and that the sentences which keep them safe when they do
+    run were carried over rather than dropped with the reshuffle.
+    """
+
+    OPTIONAL_COMMANDS = (
+        "dashboard.py chain <ledger> --seal",
+        "dashboard.py lock",
+        "dashboard.py build",
+        "dashboard.py scan",
+    )
+
+    def sections(self) -> tuple[str, str]:
+        """`(optional, rest)`: the Optional tools section and everything else."""
+        lines = SKILL.read_text(encoding="utf-8").splitlines()
+        start = lines.index("## Optional tools")
+        end = next(
+            index
+            for index in range(start + 1, len(lines))
+            if lines[index].startswith("## ")
+        )
+        optional = " ".join(" ".join(lines[start:end]).split())
+        rest = " ".join(" ".join(lines[:start] + lines[end:]).split())
+        return optional, rest
+
+    def test_the_optional_section_says_nothing_in_it_runs_unasked(self) -> None:
+        optional, _ = self.sections()
+        self.assertIn("Run none of these on your own initiative", optional)
+
+    def test_the_four_tools_are_named_in_the_optional_section(self) -> None:
+        optional, _ = self.sections()
+        for command in self.OPTIONAL_COMMANDS:
+            with self.subTest(command=command):
+                self.assertIn(command, optional)
+
+    def test_the_default_path_names_none_of_the_four_tools(self) -> None:
+        """The guard that matters: a command the default path names is a
+        command an agent runs on every audit, whatever a later section says."""
+        _, rest = self.sections()
+        for command in self.OPTIONAL_COMMANDS:
+            with self.subTest(command=command):
+                self.assertNotIn(command, rest)
+
+    def test_sealing_is_no_longer_routine(self) -> None:
+        text = _collapsed(SKILL)
+        self.assertNotIn("as routinely as you run `verify`", text)
+        self.assertNotIn("sealing is bookkeeping too", text)
+
+    def test_verify_stays_in_the_default_path(self) -> None:
+        _, rest = self.sections()
+        self.assertIn("After writing the ledger, run `dashboard.py verify` on it", rest)
+
+    def test_the_safety_sentences_survived_the_move(self) -> None:
+        optional, _ = self.sections()
+        for phrase in (
+            "evident, never impossible",
+            "never call a sealed ledger tamper-proof",
+            "never that the pin is trustworthy",
+            "Never read that as a clean environment",
+            "Never infer a path",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, optional)
+
+    def test_the_skill_disclaims_compliance_and_names_no_withdrawn_file(self) -> None:
+        text = _collapsed(SKILL)
+        self.assertIn("does not assess regulatory compliance", text)
+        self.assertIn("Never state or imply that a ledger shows the user is compliant", text)
+        self.assertNotIn("COMPLIANCE.md", text)
+        self.assertNotIn("--framework", text)
+
+
+class RoadmapClosedTests(unittest.TestCase):
+    """0.8.0: the roadmap is closed in writing, item by item.
+
+    A roadmap nobody will build reads as a promise until it says otherwise,
+    and "the rest is abandoned" is a sentence a reader cannot check. Each
+    item is named under the dated heading, so one that quietly comes back
+    has to be taken off this list by someone.
+    """
+
+    ABANDONED = (
+        "assinatura opcional",
+        "`dashboard.py at <data>`",
+        "auto-update",
+        "CycloneDX",
+        "OTel/SIEM",
+        "`dashboard.py due`",
+        "NIST AI RMF",
+        "OWASP",
+        "retenção",
+        "federação",
+        "`rollback --execute`",
+        "`serve`",
+        "policy-as-code",
+        "`credential-store`",
+    )
+
+    def closing_section(self) -> str:
+        lines = ROADMAP.read_text(encoding="utf-8").splitlines()
+        start = lines.index("## 0. Encerramento (2026-11-19)")
+        end = next(
+            index
+            for index in range(start + 1, len(lines))
+            if lines[index].startswith("## ")
+        )
+        return " ".join(" ".join(lines[start:end]).split())
+
+    def test_the_status_line_says_closed(self) -> None:
+        text = ROADMAP.read_text(encoding="utf-8")
+        self.assertIn("- Status: ENCERRADO em 2026-11-19", text)
+        self.assertNotIn("PARCIALMENTE EXECUTADO", text)
+
+    def test_every_abandoned_item_is_named(self) -> None:
+        section = self.closing_section()
+        for item in self.ABANDONED:
+            with self.subTest(item=item):
+                self.assertIn(item, section)
+
+    def test_the_withdrawn_command_is_recorded_as_withdrawn(self) -> None:
+        section = self.closing_section()
+        self.assertIn("`compliance`", section)
+        self.assertIn("retirado na 0.8.0", section)
+
+
 if __name__ == "__main__":
     unittest.main()
