@@ -31,6 +31,10 @@ Spec under `docs/specs/2026-11-19-minimal-ci.md`. Repository tooling only.
   system, a trigger or its strictness, so the gate cannot quietly stop gating.
 - does **not** stop a direct push to `main`; that needs a branch protection rule, which is the
   repository owner's setting to change.
+- records what the first run found: on Python 3.13 a symlink loop is refused with the reason
+  `path_inspect_failed` rather than `resolve_failed`, because non-strict `Path.resolve()` stopped
+  raising on loops in 3.13. The path is refused either way. The test now pins each interpreter's
+  reason; giving both the same reason changes shipped code and is left open in the spec.
 
 ## 0.6.0 - 2026-08-04
 

@@ -64,3 +64,24 @@ pinned date.
 - It does not run model-backed evaluations. Each is a paid model call; they stay manual.
 - Python 3.9, which `README.md` states as the tool's minimum, is not in the matrix. The claim is
   untested and is recorded here as open.
+
+## 5. What the first run found
+
+The first run on GitHub (2026-11-19) passed on Python 3.10 and failed on 3.13, on both systems,
+in one test: `test_symlink_loop_is_refused_instead_of_leaking_runtime_error` expected the reason
+`resolve_failed` and got `path_inspect_failed`.
+
+Cause: Python 3.13 changed non-strict `Path.resolve()`. A symlink loop no longer raises there, so
+`ledgerlib/paths.py:_resolve_or_raise` returns a path and the loop is refused one step later, when
+the path is inspected. The safety property holds on every interpreter: the path is refused with
+`PathSafetyError`. Only the reason string differs.
+
+It was invisible before because the suites were run on Windows without the privilege to create a
+symlink, where this test skips.
+
+What this increment does: the test pins each interpreter's actual reason (`resolve_failed` before
+3.13, `path_inspect_failed` from 3.13), so a third outcome still fails.
+
+What stays open: `paths.py` documents that a caller "need not learn a second key" for a symlink
+loop, and on 3.13 that is no longer true. Restoring one reason on every interpreter changes
+shipped code and gets its own increment.
