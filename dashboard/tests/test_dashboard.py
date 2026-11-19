@@ -3511,11 +3511,14 @@ class AdapterFormatDocumentationTests(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
 
-    def test_reference_documents_the_two_extension_anchors(self) -> None:
+    def test_reference_documents_the_extension_anchors(self) -> None:
         text = _collapsed(REFERENCE)
-        self.assertIn("two anchors beyond the design spec's three", text)
+        self.assertIn("anchors beyond the design spec's three", text)
         self.assertIn("cannot be written as a probe at all", text)
         self.assertIn("against the home directory itself rather than", text)
+        # 0.7.0: the state file's anchor, and why it is not `$HOME`.
+        self.assertIn("is where `.claude.json` lives", text)
+        self.assertIn("read the wrong state file on a relocated installation", text)
 
     def test_reference_documents_parse_and_pointer(self) -> None:
         text = _collapsed(REFERENCE)

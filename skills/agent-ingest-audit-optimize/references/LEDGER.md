@@ -245,6 +245,14 @@ same number, a verified set holding both documents reports the duplicate. Pass `
 the authority in the loop. The reasoning is recorded in
 `docs/specs/2026-08-01-dashboard-open-and-update.md` section 4.
 
+The `update` summary on stdout always carries `findings`, a list of `{"code", "message"}` pairs
+(empty when nothing was found or when the word is `anchors`), and `refused`, `null` unless the
+command declined to write. The codes are `generic_fallback`, `adapter_expired`,
+`user_config_unresolved` and `unredacted_parse`. By default a finding still appends the baseline and
+the exit code `1` carries it. With `--strict`, `update ledger` and `update all` write nothing when the
+scan reports any finding: the ledger keeps its bytes, no dashboard is rendered, `baseline_id` is
+`null`, `refused` is `"strict"` and the exit code is `1`. `--strict` has no effect on `update anchors`.
+
 `verify` checks that a ledger's `sequences` value for a prefix is at least one past the highest
 number that ledger's own records already use. It is a floor, not an equality: a value above it
 passes too, so a padded `sequences` is never flagged. Keeping it at exactly the next free number is
@@ -507,20 +515,25 @@ and `CODEX_HOME` relocate everything, and an adapter that scans the default tree
 clean baseline for a configuration it never looked at. This is why every `$env:` candidate is written
 ahead of the default it overrides.
 
-The shipped adapters declare two anchors beyond the design spec's three, and they are extensions
+The shipped adapters declare anchors beyond the design spec's three, and they are extensions
 rather than part of that design:
 
-- `$SYSTEM_CONFIG`, declared by `codex.json` with the single candidate `/etc/codex`, exists because
-  that location cannot be written as a probe at all: `check_glob` refuses an absolute pattern, so a
-  system path can only reach an adapter as an anchor root.
-- `$HOME`, declared as `~` by both client adapters, exists because the research places
-  `<home>/.claude.json` and `<home>/.agents/skills/` against the home directory itself rather than
-  under the relocatable user configuration root. `CLAUDE_CONFIG_DIR` moves `$USER_CONFIG` and does
-  not move `~/.claude.json`, so anchoring that file to `$USER_CONFIG` would probe a path that stops
-  existing the moment the root is relocated.
+- `$SYSTEM_CONFIG`, declared by `codex.json` as `/etc/codex` on Linux and macOS and
+  `C:/ProgramData/OpenAI/Codex` on Windows, exists because those locations cannot be written as a
+  probe at all: `check_glob` refuses an absolute pattern, so a system path can only reach an
+  adapter as an anchor root. `$MANAGED_CONFIG` and `$LEGACY_MANAGED_CONFIG` in `claude-code.json`
+  exist for the same reason.
+- `$HOME`, declared as `~` by `codex.json`, exists because the research places
+  `<home>/.agents/skills/` against the home directory itself rather than under the relocatable
+  user configuration root.
+- `$APP_STATE`, declared by `claude-code.json` as `CLAUDE_CONFIG_DIR` and then `~`, is where
+  `.claude.json` lives. The file sits in the home directory by default and moves under
+  `CLAUDE_CONFIG_DIR` when that is set, so it needs the variable ahead of the default exactly as
+  `$USER_CONFIG` does, with a different default behind it. Until 0.7.0 the file was probed under
+  `$HOME`, which read the wrong state file on a relocated installation.
 
-Nothing in the path layer treats either name specially: a path found under one is stored anchored,
-and the longest-anchor rule decides between them like any other pair.
+Nothing in the path layer treats any of these names specially: a path found under one is stored
+anchored, and the longest-anchor rule decides between them like any other pair.
 
 **Probes.** Each requires `kind` and exactly one of `glob` or `path` — both is a finding, neither is
 a finding:
@@ -553,8 +566,10 @@ record that it looked. A file that will not parse is `present`, with its digest 
 `parse_unavailable`, never a crash and never a pretence that the file held nothing.
 
 `scope` is recorded and never resolved. It names the layer an item came from — the shipped adapters
-use `user`, `project`, and `system` — and `scan` computes no precedence winner from it; Declared
-resolution below states what `drift` may later make of it.
+use `user`, `project`, `system`, and `managed`. `scan` computes no precedence winner from it;
+Declared resolution below states what `drift` may later make of it. A probe therefore records that
+a file exists, never that the client loaded it: `claude-code.json` probes `AGENTS.md`, which the
+client reads only when no `CLAUDE.md` is in the working directory or above it.
 
 No text a parsed document holds reaches a baseline. Every string value is replaced by
 `{"redacted": true, "digest": "sha256:…"}`, whatever key it sits under, so an item's

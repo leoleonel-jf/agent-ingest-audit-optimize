@@ -496,6 +496,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="the configuration root user adapters are read from; skipped when omitted",
     )
+    update_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="write nothing and exit 1 when the scan reports any finding (ledger and all)",
+    )
 
     arguments = parser.parse_args(argv)
 
@@ -586,6 +591,7 @@ def main(argv: list[str] | None = None) -> int:
             user_config=arguments.user_config,
             project=arguments.project,
             open_after=arguments.open_after,
+            strict=arguments.strict,
         )
 
 

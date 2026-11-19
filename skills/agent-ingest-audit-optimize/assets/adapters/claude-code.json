@@ -1,13 +1,14 @@
 {
   "adapter_version": 2,
   "client": "claude-code",
-  "expires_on": "2026-10-28",
+  "expires_on": "2027-02-17",
   "anchors": {
     "$USER_CONFIG": [
       "$env:CLAUDE_CONFIG_DIR",
       "~/.claude"
     ],
-    "$HOME": [
+    "$APP_STATE": [
+      "$env:CLAUDE_CONFIG_DIR",
       "~"
     ],
     "$PROJECT": [
@@ -59,6 +60,31 @@
       "kind": "model-setting",
       "scope": "managed",
       "path": "$LEGACY_MANAGED_CONFIG/managed-settings.json"
+    },
+    {
+      "kind": "instruction-file",
+      "scope": "managed",
+      "glob": "$MANAGED_CONFIG/CLAUDE.md"
+    },
+    {
+      "kind": "mcp-server",
+      "scope": "managed",
+      "path": "$MANAGED_CONFIG/managed-mcp.json",
+      "parse": "json",
+      "pointer": "/mcpServers",
+      "lockable": true
+    },
+    {
+      "kind": "skill",
+      "scope": "managed",
+      "glob": "$MANAGED_CONFIG/.claude/skills/*/SKILL.md",
+      "lockable": true
+    },
+    {
+      "kind": "agent",
+      "scope": "managed",
+      "glob": "$MANAGED_CONFIG/.claude/agents/*",
+      "lockable": true
     },
     {
       "kind": "instruction-file",
@@ -116,33 +142,6 @@
       "pointer": "/env"
     },
     {
-      "kind": "model-setting",
-      "scope": "user",
-      "path": "$USER_CONFIG/settings.local.json"
-    },
-    {
-      "kind": "permission-rule",
-      "scope": "user",
-      "path": "$USER_CONFIG/settings.local.json",
-      "parse": "json",
-      "pointer": "/permissions"
-    },
-    {
-      "kind": "hook",
-      "scope": "user",
-      "path": "$USER_CONFIG/settings.local.json",
-      "parse": "json",
-      "pointer": "/hooks",
-      "lockable": true
-    },
-    {
-      "kind": "env-var-name",
-      "scope": "user",
-      "path": "$USER_CONFIG/settings.local.json",
-      "parse": "json",
-      "pointer": "/env"
-    },
-    {
       "kind": "plugin",
       "scope": "user",
       "path": "$USER_CONFIG/plugins/installed_plugins.json",
@@ -159,7 +158,7 @@
     {
       "kind": "mcp-server",
       "scope": "user",
-      "path": "$HOME/.claude.json",
+      "path": "$APP_STATE/.claude.json",
       "parse": "json",
       "pointer": "/mcpServers",
       "lockable": true
@@ -182,12 +181,34 @@
     {
       "kind": "instruction-file",
       "scope": "project",
+      "glob": "$PROJECT/AGENTS.md"
+    },
+    {
+      "kind": "instruction-file",
+      "scope": "project",
+      "glob": "$PROJECT/.claude/AGENTS.md"
+    },
+    {
+      "kind": "instruction-file",
+      "scope": "project",
       "glob": "$PROJECT/.claude/rules/**/*.md"
     },
     {
       "kind": "skill",
       "scope": "project",
       "glob": "$PROJECT/.claude/skills/*/SKILL.md",
+      "lockable": true
+    },
+    {
+      "kind": "agent",
+      "scope": "project",
+      "glob": "$PROJECT/.claude/agents/*",
+      "lockable": true
+    },
+    {
+      "kind": "command",
+      "scope": "project",
+      "glob": "$PROJECT/.claude/commands/*",
       "lockable": true
     },
     {
@@ -269,6 +290,7 @@
     "mcp-server": {
       "mode": "override",
       "order": [
+        "managed",
         "project",
         "user"
       ]
@@ -276,8 +298,17 @@
     "skill": {
       "mode": "override",
       "order": [
+        "managed",
         "user",
         "project"
+      ]
+    },
+    "agent": {
+      "mode": "override",
+      "order": [
+        "managed",
+        "project",
+        "user"
       ]
     },
     "instruction-file": {

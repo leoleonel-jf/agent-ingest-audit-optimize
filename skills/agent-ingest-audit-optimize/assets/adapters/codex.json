@@ -1,7 +1,7 @@
 {
   "adapter_version": 2,
   "client": "codex",
-  "expires_on": "2026-10-28",
+  "expires_on": "2027-02-17",
   "anchors": {
     "$USER_CONFIG": [
       "$env:CODEX_HOME",
@@ -15,7 +15,8 @@
     ],
     "$SYSTEM_CONFIG": [
       "$platform:linux:/etc/codex",
-      "$platform:darwin:/etc/codex"
+      "$platform:darwin:/etc/codex",
+      "$platform:win32:C:/ProgramData/OpenAI/Codex"
     ]
   },
   "probes": [
@@ -24,6 +25,22 @@
       "scope": "user",
       "path": "$USER_CONFIG/config.toml",
       "parse": "toml"
+    },
+    {
+      "kind": "mcp-server",
+      "scope": "user",
+      "path": "$USER_CONFIG/config.toml",
+      "parse": "toml",
+      "pointer": "/mcp_servers",
+      "lockable": true
+    },
+    {
+      "kind": "plugin",
+      "scope": "user",
+      "path": "$USER_CONFIG/config.toml",
+      "parse": "toml",
+      "pointer": "/plugins",
+      "lockable": true
     },
     {
       "kind": "model-setting",
@@ -53,10 +70,43 @@
       "lockable": true
     },
     {
+      "kind": "hook",
+      "scope": "user",
+      "path": "$USER_CONFIG/hooks.json",
+      "lockable": true
+    },
+    {
+      "kind": "permission-rule",
+      "scope": "user",
+      "glob": "$USER_CONFIG/rules/*.rules"
+    },
+    {
+      "kind": "agent",
+      "scope": "user",
+      "glob": "$USER_CONFIG/agents/*.toml",
+      "lockable": true
+    },
+    {
       "kind": "model-setting",
       "scope": "project",
       "path": "$PROJECT/.codex/config.toml",
       "parse": "toml"
+    },
+    {
+      "kind": "mcp-server",
+      "scope": "project",
+      "path": "$PROJECT/.codex/config.toml",
+      "parse": "toml",
+      "pointer": "/mcp_servers",
+      "lockable": true
+    },
+    {
+      "kind": "plugin",
+      "scope": "project",
+      "path": "$PROJECT/.codex/config.toml",
+      "parse": "toml",
+      "pointer": "/plugins",
+      "lockable": true
     },
     {
       "kind": "instruction-file",
@@ -75,6 +125,23 @@
       "lockable": true
     },
     {
+      "kind": "hook",
+      "scope": "project",
+      "path": "$PROJECT/.codex/hooks.json",
+      "lockable": true
+    },
+    {
+      "kind": "permission-rule",
+      "scope": "project",
+      "glob": "$PROJECT/.codex/rules/*.rules"
+    },
+    {
+      "kind": "agent",
+      "scope": "project",
+      "glob": "$PROJECT/.codex/agents/*.toml",
+      "lockable": true
+    },
+    {
       "kind": "model-setting",
       "scope": "system",
       "path": "$SYSTEM_CONFIG/config.toml",
@@ -85,6 +152,17 @@
       "scope": "system",
       "glob": "$SYSTEM_CONFIG/skills/*/SKILL.md",
       "lockable": true
+    },
+    {
+      "kind": "hook",
+      "scope": "system",
+      "path": "$SYSTEM_CONFIG/hooks.json",
+      "lockable": true
+    },
+    {
+      "kind": "permission-rule",
+      "scope": "managed",
+      "path": "$SYSTEM_CONFIG/requirements.toml"
     }
   ],
   "sensitive_key_patterns": [
@@ -103,12 +181,7 @@
   ],
   "resolution": {
     "skill": {
-      "mode": "override",
-      "order": [
-        "project",
-        "user",
-        "system"
-      ]
+      "mode": "merge"
     },
     "instruction-file": {
       "mode": "concatenate"
