@@ -31,7 +31,7 @@ EXPIRY_FINDING = re.compile(
 SELECTION_NOTES = ("user adapters were not read:", "selected adapter ")
 # Directories a plugin root may carry besides `skills/`. Listed here, not read
 # from the packager, so the test does not inherit the packager's omissions.
-PLUGIN_COMPONENT_DIRECTORIES = ("commands", "agents", "hooks")
+PLUGIN_COMPONENT_DIRECTORIES = ("skills", "commands", "agents", "hooks")
 # Tracked top-level entries the plugin archive leaves out on purpose.
 NOT_SHIPPED = {
     ".agents",  # the Codex marketplace file describes the repository, not the plugin
@@ -166,7 +166,9 @@ class PackagePluginTests(unittest.TestCase):
             path
             for directory in PLUGIN_COMPONENT_DIRECTORIES
             for path in sorted((REPO_ROOT / directory).rglob("*"))
-            if path.is_file() and "__pycache__" not in path.parts
+            if path.is_file()
+            and "__pycache__" not in path.parts
+            and path.suffix not in (".pyc", ".pyo", ".pyd")
         ]
         self.assertTrue(offered, "no plugin component found on disk; this test would pass on nothing")
         for path in offered:

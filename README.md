@@ -38,15 +38,17 @@ The canonical bundle follows the open Agent Skills directory model: `SKILL.md` c
 
 ## Plugin packaging
 
-The repository is also a dual-manifest plugin:
+The repository is also a plugin, described by three manifests:
 
 ```text
-.codex-plugin/plugin.json
-.claude-plugin/plugin.json
+plugin.json                  Agent Plugins 1.0.0, the portable entry point
+.claude-plugin/plugin.json   Claude Code
+.codex-plugin/plugin.json    Codex compatibility overlay
 skills/agent-ingest-audit-optimize/
+skills/dashboard/
 ```
 
-Both manifests use the same canonical Skill. No platform-specific copy of its behavior is maintained.
+All three manifests name the same canonical Skill. No platform-specific copy of its behavior is maintained. `skills/dashboard/` is a second, user-invoked skill: it renders the ledger's dashboard when you type `/agent-ingest-audit-optimize:dashboard`, and the model cannot start it on its own.
 
 Build and verify the distributable plugin and portable Skill archives with:
 
@@ -64,7 +66,7 @@ See [packaging/README.md](packaging/README.md) for the package contract, support
 Add this repository as a marketplace and install the plugin:
 
 ```text
-codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.8.0
+codex plugin marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.9.0
 codex plugin add agent-ingest-audit-optimize@agent-ingest-audit-optimize
 ```
 
@@ -87,7 +89,7 @@ claude --plugin-dir <path-to-agent-ingest-audit-optimize>
 
 ### Other Agent Skills clients
 
-Download the `agent-ingest-audit-optimize-0.8.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
+Download the `agent-ingest-audit-optimize-0.9.0-skill.zip` release asset and install its single top-level Skill directory according to the client's documentation.
 
 ## Use
 

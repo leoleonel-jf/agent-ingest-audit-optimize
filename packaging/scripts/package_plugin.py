@@ -16,6 +16,10 @@ from typing import Iterable
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CODEX_MANIFEST = REPO_ROOT / ".codex-plugin" / "plugin.json"
 CLAUDE_MANIFEST = REPO_ROOT / ".claude-plugin" / "plugin.json"
+# Agent Plugins 1.0.0 puts the manifest at the plugin root. The two files above
+# stay because each client still reads its own; all three must name one plugin
+# at one version, and `validate_sources` refuses to build when they do not.
+ROOT_MANIFEST = REPO_ROOT / "plugin.json"
 SKILLS_ROOT = REPO_ROOT / "skills"
 LICENSE = REPO_ROOT / "LICENSE"
 PUBLIC_FILES = tuple(
@@ -61,13 +65,14 @@ def load_json(path: Path) -> dict:
 def validate_sources() -> tuple[str, str, Path]:
     codex = load_json(CODEX_MANIFEST)
     claude = load_json(CLAUDE_MANIFEST)
+    root = load_json(ROOT_MANIFEST)
 
-    names = {codex.get("name"), claude.get("name")}
-    versions = {codex.get("version"), claude.get("version")}
+    names = {codex.get("name"), claude.get("name"), root.get("name")}
+    versions = {codex.get("version"), claude.get("version"), root.get("version")}
     if len(names) != 1 or not all(isinstance(value, str) and value for value in names):
-        raise PackagingError("Codex and Claude manifests must use the same non-empty name")
+        raise PackagingError("The three plugin manifests must use the same non-empty name")
     if len(versions) != 1 or not all(isinstance(value, str) and value for value in versions):
-        raise PackagingError("Codex and Claude manifests must use the same non-empty version")
+        raise PackagingError("The three plugin manifests must use the same non-empty version")
 
     name = names.pop()
     version = versions.pop()
@@ -87,7 +92,7 @@ def validate_sources() -> tuple[str, str, Path]:
         raise PackagingError("SKILL.md must start with YAML front matter")
     match = FRONTMATTER_NAME.search(skill_text)
     if match is None or match.group(1) != name:
-        raise PackagingError("SKILL.md front matter name must match both plugin manifests")
+        raise PackagingError("SKILL.md front matter name must match the plugin manifests")
     if codex.get("skills") != "./skills/":
         raise PackagingError("Codex manifest must point its skills field to ./skills/")
     for public_file in PUBLIC_FILES:
@@ -99,9 +104,10 @@ def validate_sources() -> tuple[str, str, Path]:
     for path in (
         CODEX_MANIFEST,
         CLAUDE_MANIFEST,
+        ROOT_MANIFEST,
         *PUBLIC_FILES,
         *ASSETS_ROOT.rglob("*"),
-        *skill_dir.rglob("*"),
+        *SKILLS_ROOT.rglob("*"),
         *(path for root in COMPONENT_ROOTS for path in root.rglob("*")),
     ):
         if path.is_symlink():
@@ -153,6 +159,7 @@ def expected_entries(name: str, skill_dir: Path) -> tuple[list[tuple[Path, str]]
     plugin_entries = [
         (CODEX_MANIFEST, ".codex-plugin/plugin.json"),
         (CLAUDE_MANIFEST, ".claude-plugin/plugin.json"),
+        (ROOT_MANIFEST, "plugin.json"),
     ]
     plugin_entries.extend(
         (path, path.relative_to(REPO_ROOT).as_posix()) for path in PUBLIC_FILES
@@ -167,8 +174,12 @@ def expected_entries(name: str, skill_dir: Path) -> tuple[list[tuple[Path, str]]
         if root.is_dir()
         for path in iter_files(root)
     )
+    # The plugin ships every skill under `skills/`; the portable archive below
+    # ships only the canonical one, because a second skill that reaches into
+    # its sibling for a script is a plugin component, not a standalone Skill.
     plugin_entries.extend(
-        (path, path.relative_to(REPO_ROOT).as_posix()) for path in skill_files
+        (path, path.relative_to(REPO_ROOT).as_posix())
+        for path in iter_files(SKILLS_ROOT)
     )
     skill_entries = [
         (path, f"{name}/{path.relative_to(skill_dir).as_posix()}")

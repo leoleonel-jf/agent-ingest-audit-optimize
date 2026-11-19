@@ -1,0 +1,47 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "agent-ingest-audit-optimize",
+  "version": "0.9.0",
+  "description": "Audit external material and turn verified findings into safe, reversible agent improvements.",
+  "author": {
+    "name": "Leonardo Leonel Sobral",
+    "url": "https://github.com/leoleonel-jf"
+  },
+  "homepage": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
+  "repository": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
+  "license": "MIT",
+  "keywords": [
+    "agent-skills",
+    "audit",
+    "optimization",
+    "safety",
+    "evaluation"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Agent Ingest, Audit & Optimize",
+        "shortDescription": "Evidence-based agent audits",
+        "longDescription": "Verifies external recommendations and converts supported findings into scoped, reversible improvements for agent ecosystems.",
+        "developerName": "Leonardo Leonel Sobral",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "websiteURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize",
+        "supportURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/SUPPORT.md",
+        "privacyPolicyURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/PRIVACY.md",
+        "termsOfServiceURL": "https://github.com/leoleonel-jf/agent-ingest-audit-optimize/blob/main/TERMS.md",
+        "brandColor": "#0B1B4D",
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png",
+        "defaultPrompt": [
+          "Audit this material and verify its recommendations.",
+          "Which agent improvements are safe to adopt globally?",
+          "Turn these findings into scoped, reversible proposals."
+        ]
+      }
+    }
+  }
+}

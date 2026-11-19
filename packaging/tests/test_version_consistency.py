@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # the packager would let one path bug mask another.
 CLAUDE_MANIFEST = REPO_ROOT / ".claude-plugin" / "plugin.json"
 CODEX_MANIFEST = REPO_ROOT / ".codex-plugin" / "plugin.json"
+ROOT_MANIFEST = REPO_ROOT / "plugin.json"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 AGENTS_MARKETPLACE = REPO_ROOT / ".agents" / "plugins" / "marketplace.json"
 README = REPO_ROOT / "README.md"
@@ -80,6 +81,11 @@ class VersionConsistencyTests(unittest.TestCase):
 
     def test_codex_manifest_version_matches(self) -> None:
         self.assertEqual(load_json(CODEX_MANIFEST)["version"], self.version)
+
+    def test_root_manifest_version_matches(self) -> None:
+        """The Agent Plugins manifest. OpenAI takes package identity from it,
+        so a stale version here is the version Codex reports."""
+        self.assertEqual(load_json(ROOT_MANIFEST)["version"], self.version)
 
     def test_claude_marketplace_version_matches(self) -> None:
         plugins = load_json(CLAUDE_MARKETPLACE)["plugins"]
