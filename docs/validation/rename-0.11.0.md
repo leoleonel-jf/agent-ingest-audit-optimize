@@ -162,3 +162,64 @@ saw it pass again. All held.
   its data lives.
 - Activation in Codex, and with a model other than the CLI default.
 - The owner's own installation, which this release does not touch.
+
+## After the release
+
+Added on 2026-11-19, after `v0.11.0` was tagged on merge `29fb4c8` and published. Everything above
+was written before the merge and is unchanged.
+
+### Installing from GitHub
+
+What the trials above could not show, because the repository had not been renamed and the tag did
+not exist: a marketplace added as `owner/repo` from GitHub. Same clients, Claude Code 2.1.326 and
+codex-cli 0.146.0, each trial in its own empty configuration directory (`CLAUDE_CONFIG_DIR` or
+`CODEX_HOME`), `claude plugin` and `codex plugin` commands only, no session.
+
+| Trial | Commands | What the client did |
+|---|---|---|
+| Claude Code, current name | `marketplace add leoleonel-jf/plugin-reviewer`, `install plugin-reviewer@plugin-reviewer`, `list` | `Successfully added marketplace: plugin-reviewer`; installed; `Version: 0.11.0`, enabled |
+| Claude Code, former repository name | `marketplace add leoleonel-jf/agent-ingest-audit-optimize`, `marketplace list`, `install plugin-reviewer@plugin-reviewer`, `list` | the clone follows GitHub's redirect; `Successfully added marketplace: plugin-reviewer`; the list shows `plugin-reviewer` with `Source: GitHub (leoleonel-jf/agent-ingest-audit-optimize)`; installed; `Version: 0.11.0`, enabled |
+| Codex, current name | `marketplace add leoleonel-jf/plugin-reviewer --ref v0.11.0`, `add plugin-reviewer@plugin-reviewer`, `list` | `Added marketplace plugin-reviewer`; `installed, enabled`, `0.11.0`; the cache holds both skills |
+| Codex, former repository name | `marketplace add leoleonel-jf/agent-ingest-audit-optimize --ref v0.11.0`, `add plugin-reviewer@plugin-reviewer`, `list` | `Added marketplace plugin-reviewer` from the former URL; the plugin itself is cloned from the current URL, the one the marketplace file names; `installed, enabled`, `0.11.0` |
+
+So, in both clients, a marketplace added from GitHub under the former repository name is
+registered under the current marketplace name, the one the file declares. Claude Code keeps the
+former repository as its source. That is the opposite half of what the first table of "An existing installation, Claude
+Code" shows: a marketplace registered before the rename keeps the name it was registered under.
+The redirect is GitHub's and lasts for as long as nobody creates a repository under the former
+name.
+
+Two things failed on the way and neither is the plugin's. With `CODEX_HOME` under a deep temporary
+directory, `codex plugin add` exits `1` on Windows: the clone it stages cannot write a pack file,
+`Filename too long`. The marketplace is added and the plugin is not installed. The same commands
+from a short path succeed, and those are the rows above. One `add` also failed once on a name
+lookup and passed when repeated.
+
+The two real data directories and the two paths the new name would occupy were fingerprinted
+(SHA-256 of every file) before the first of these trials and after the last: 31 files and 346
+files, identical, and the new-name paths absent before and after. The user's `settings.json`,
+`installed_plugins.json` and Codex `config.toml` did not change. The user's
+`known_marketplaces.json` did, once, during the first pass: its entry for the official marketplace
+carries a `lastUpdated` inside that window, its entry for this plugin is the one written when the
+owner's installation was moved, and no trial's entry is in it. The trials were then repeated with
+the content of those files hashed after every command, and nothing changed. What refreshed the
+official marketplace was not determined; other Claude Code processes were running on the machine.
+
+Still not shown: the `/plugin` commands typed inside a session, and the background auto-update.
+
+### The owner's installation
+
+The owner asked for it after the release, so the last line of "Not measured" holds for the release
+and not for the machine: the copy installed in Claude Code went from the former marketplace to
+`plugin-reviewer@plugin-reviewer` 0.11.0 by the clean path, removing the former marketplace, adding
+the current one and installing. `settings.json` changed in `enabledPlugins` and
+`extraKnownMarketplaces` only, the former key out and the current one in, and both data
+directories matched the fingerprint taken before. The Codex installation on the same machine was
+not touched.
+
+### The repository
+
+`main` is protected as of 2026-11-19: a pull request is required, the four CI jobs
+(`ubuntu-latest` and `windows-latest`, Python 3.10 and 3.13) must pass, administrators included,
+with no force push and no deletion. The build from an export of commit `29fb4c8` reproduces the
+checksums in `docs/releases/v0.11.0.md`.
