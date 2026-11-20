@@ -5176,6 +5176,13 @@ class AskBeforeRecordingTests(unittest.TestCase):
             text,
         )
 
+    def test_the_readme_and_the_skill_name_the_same_python(self) -> None:
+        """The README said 3.9 while the Skill, and the versions the suites
+        run on, said 3.10. Corrected in 0.12.0."""
+        self.assertIn("run it with Python 3.10 or later", _collapsed(SKILL))
+        self.assertIn("Python 3.10 or later and uses the standard library", _collapsed(README))
+        self.assertNotIn("Python 3.9", _collapsed(README))
+
     def test_the_privacy_page_says_a_record_follows_a_yes(self) -> None:
         self.assertIn(
             "A review's record is written only after the user says yes to it",

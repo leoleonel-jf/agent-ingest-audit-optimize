@@ -8,7 +8,7 @@ machine).
 
 | Suite | 0.11.0 | 0.12.0 |
 |---|---|---|
-| `dashboard/tests` | 1540 | 1584 |
+| `dashboard/tests` | 1540 | 1585 |
 | `packaging/tests` | 92 | 92 |
 | `evals/tests` | 11, over 39 cases | 22, over 43 cases |
 
@@ -23,7 +23,7 @@ the limit moved.
 
 ## Ablations
 
-96 of 96 held. Each case removes or reverses the guarded text in one file, runs the one named
+97 of 97 held. Each case removes or reverses the guarded text in one file, runs the one named
 test and expects it to fail, restores the file byte for byte, and runs the test again expecting
 it to pass. Before any test runs, every mutation is checked to apply exactly once.
 
@@ -37,7 +37,7 @@ it to pass. Before any test runs, every mutation is checked to apply exactly onc
 | `SKILL.md`: around the rule (one record after a yes, the report, not an implementation, the last lines, an authorized change, the optional tools, a subagent) | 13 | same, and `OneRecordPerReviewTests` |
 | The withdrawn wording returning to the Skill, a reference, the suite, the run protocol, or the README | 6 | `test_the_withdrawn_wording_stays_withdrawn` |
 | `references/LEDGER.md` and `PLATFORM_ADAPTATION.md` | 18 | `AskBeforeRecordingTests`, `LedgerReferenceSplitTests` |
-| `README.md`, `PRIVACY.md`, `evals/RUN_PROTOCOL.md` | 5 | `AskBeforeRecordingTests` |
+| `README.md`, `PRIVACY.md`, `evals/RUN_PROTOCOL.md` | 6 | `AskBeforeRecordingTests` |
 | `evals/suite.json`, the run protocol's two turns, and the fixture | 21 | `RecordFollowsAYesTests`, `EvaluationSuiteTests` |
 
 One ablation did its job. The first run was 77 of 78: removing "name both" from the offer left
@@ -118,6 +118,13 @@ owner's decisions, read-only. No blocker. What it found and what was done:
 
 Not taken: adding "and that a yes still records it" to the one-line recall. The owner's decision
 was one line saying that the review was not recorded.
+
+## One correction outside the rule
+
+`README.md` said the tool requires Python 3.9. The Skill says 3.10, and the suites run on 3.10 and
+3.13. The README ships in the plugin archive, so it was corrected in this release, with a test
+that the two files name the same version and its ablation. The behaviour sessions above ran on
+the build before this one-line change; the Skill archive's checksum did not move.
 
 ## Not measured
 

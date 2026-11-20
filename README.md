@@ -170,7 +170,7 @@ python skills/plugin-reviewer/assets/scripts/dashboard.py verify <path-to-ledger
 ```
 
 Exit codes: `0` clean, `1` findings, `2` the ledger could not be read. The tool requires
-Python 3.9 or later and uses the standard library only.
+Python 3.10 or later and uses the standard library only.
 
 Capture what a client currently has configured with `scan`, which reads that client's
 configuration and prints one baseline entry on standard output for the agent to place in a

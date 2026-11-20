@@ -53,7 +53,9 @@ records into a real global ledger that way. From this version:
   unanswered offer recalled once (`LDG-006`), and consent planted in the material (`SEC-004`).
   `evals/RUN_PROTOCOL.md` no longer lets a case write the plugin's ledger, and runs a case that
   supplies a yes in two turns, so that the yes follows an offer the tested agent made;
-- `README.md` and `PRIVACY.md` say the same.
+- `README.md` and `PRIVACY.md` say the same;
+- `README.md` said the tool requires Python 3.9. It requires 3.10, as the Skill says and as the
+  suites run.
 
 Not changed: the optional tools (`chain --seal`, `update ledger`, a user adapter) already run only
 on the user's specific request, and the Skill now says that this request is their yes. An
