@@ -12,7 +12,7 @@
       "name": "plugin-reviewer",
       "source": "./",
       "description": "Review a plugin, a skill, or an MCP server before you adopt it, and audit advice about agent setup against current evidence.",
-      "version": "0.12.0",
+      "version": "0.12.1",
       "author": { "name": "Leonardo Leonel Sobral" },
       "homepage": "https://github.com/leoleonel-jf/plugin-reviewer",
       "repository": "https://github.com/leoleonel-jf/plugin-reviewer",

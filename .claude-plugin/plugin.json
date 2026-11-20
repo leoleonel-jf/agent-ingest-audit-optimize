@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "plugin-reviewer",
   "displayName": "Plugin Reviewer",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Review a plugin, a skill, or an MCP server before you adopt it, and audit advice about agent setup against current evidence.",
   "author": {
     "name": "Leonardo Leonel Sobral"

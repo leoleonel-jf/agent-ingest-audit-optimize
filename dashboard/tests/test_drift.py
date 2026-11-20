@@ -1111,18 +1111,21 @@ class DriftCliTests(DriftCliTestCase):
     def test_selection_by_the_ledgers_client_reuses_the_shared_machinery(
         self,
     ) -> None:
-        # No --adapter: the ledger's own client drives `select_adapter`, and a
-        # client no adapter declares is the same tool error `scan` raises for
-        # an unknown --client -- asserted through the CLI, naming the client.
+        # No --adapter: the ledger's own client drives `select_adapter`. Until
+        # 0.12.1 a client no adapter declares was the tool error `scan` raises
+        # for an unknown --client. It is ledger data, not a typo, so since
+        # 0.12.1 the report still comes out, under detection, and a note on
+        # stderr names the client -- asserted through the CLI.
         document = self.valid_ledger(
             items=[self.item()], client="no-such-client-drift"
         )
         code, stdout, stderr = self.run_cli(
             "drift", str(self.write_ledger(document)), "--project", str(self.tmp)
         )
-        self.assertEqual(code, 2)
-        self.assertEqual(stdout, "")
+        self.assertNotEqual(code, 2)
+        self.assertIn("baselines", json.loads(stdout))
         self.assertIn("no-such-client-drift", stderr)
+        self.assertIn("is not an adapter name", stderr)
 
     def test_a_user_adapter_overrides_selection_on_the_same_terms_as_scan(
         self,

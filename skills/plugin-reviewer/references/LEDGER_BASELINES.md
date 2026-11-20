@@ -258,6 +258,13 @@ covered nothing while looking clean, so it is a finding that names the clients w
 `--client`. The two are told apart by structured data carried out of selection, never by matching on
 the wording of a note.
 
+A ledger's own `client` is read differently, by `drift`, `rollback-preview` and `lock`: it is data,
+not a name someone typed. An adapter name selects that adapter. Ledgers written before adapters
+existed recorded the client as free text, such as "Codex Desktop / Codex CLI". When the text names
+exactly one client, as a whole word with a hyphen read as a space, that adapter is used and a note
+says so; when it names none or several, the adapter is detected as above, with a note. Either way
+the command reports instead of stopping. `--client` stays strict.
+
 A client no bundled adapter covers is served by a user adapter, `adapters/local.json` in the data
 directory in use (the Layout section of [LEDGER.md](LEDGER.md) says which that is). On a machine
 without the former directory:

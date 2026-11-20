@@ -441,14 +441,16 @@ def drift_report(
     findings, one list because they share one stream -- but only findings and
     non-`IN_PLACE` states move `code`. `code` is `0` when every classified
     thing is `IN_PLACE` and nothing was found, `1` otherwise; `2` is not
-    returned here at all. A tool error -- an unknown client named by the
-    ledger, an unreadable adapter -- is raised as `LedgerError`, and the
+    returned here at all. A tool error -- an unreadable adapter -- is raised
+    as `LedgerError`, and the
     command wrapper is the one place that turns it into `2`, exactly as
     `scan_command` does.
 
     Anchor resolution reuses the 0.2.5 machinery unchanged: baseline entries
     name their `client`, the ledger's top-level `client` names the client for
-    run targets, and `--adapter` overrides selection entirely. `drift` does
+    run targets, and `--adapter` overrides selection entirely. Both are
+    ledger data, passed as `ledger_client`: a client that is not an adapter
+    name is read as text and never stops the report. `drift` does
     not get a second resolver, because anchor roots are adapter data and two
     resolvers would eventually disagree about which tree is being compared.
 
@@ -482,7 +484,8 @@ def drift_report(
         key = "--adapter" if adapter is not None else name
         if key not in context_by_client:
             selection = select_adapter_detail(
-                client=name if adapter is None else None,
+                client=None,
+                ledger_client=name if adapter is None else None,
                 adapter=adapter,
                 user_config=user_config,
                 bundled=bundled,

@@ -659,6 +659,7 @@ def select_adapter_detail(
     bundled: Path,
     environ: Mapping[str, str],
     project: Path,
+    ledger_client: object = None,
 ) -> dict:
     """Choose an adapter and explain the choice, in prose and as data.
 
@@ -697,6 +698,17 @@ def select_adapter_detail(
        `generic.json` with a note naming the candidates and the reason.
        Detection never guesses between two plausible clients silently.
 
+    `ledger_client` is the client a ledger recorded, which `drift`,
+    `rollback-preview` and `lock` pass in place of `client`. It is data, not
+    something a person typed, so it is consulted after `adapter` and `client`
+    and it never raises. An adapter name selects that adapter exactly as
+    `client` would. Ledgers written before adapters existed recorded the
+    client as free text ("Codex Desktop / Codex CLI"): the text is searched
+    for the client names in the index, whole words only and a hyphen read as a
+    space, and exactly one name found selects that adapter with a note. None or
+    several fall back to detection, with a note naming the text and what it
+    matched.
+
     The index is keyed by each document's `client` value, not by its file
     name, and a user adapter beats a bundled one with the same key. `client`
     is the identity the ledger, the notes, and `--client` all use; a file
@@ -721,6 +733,35 @@ def select_adapter_detail(
 
     notes: list[str] = []
     index = _index_adapters(bundled=bundled, user_config=user_config, notes=notes)
+
+    if client is None and isinstance(ledger_client, str):
+        if ledger_client in index:
+            client = ledger_client
+        else:
+            named = _clients_named_in(ledger_client, index)
+            if len(named) == 1:
+                chosen = index[named[0]]
+                notes.append(
+                    f"the ledger's client {ledger_client!r} is not an adapter "
+                    f"name; it names {chosen.client!r} and no other client, so "
+                    "that adapter is used"
+                )
+                notes.append(
+                    _selected(chosen.path, chosen.client, "named by the ledger's client")
+                )
+                return _selection(
+                    document=chosen.data,
+                    notes=notes,
+                    client=chosen.client,
+                    path=chosen.path,
+                    reason=SELECTED_BY_CLIENT_NAME,
+                    origin=chosen.origin,
+                )
+            notes.append(
+                f"the ledger's client {ledger_client!r} is not an adapter name "
+                f"and names {named if named else 'none'} of the clients "
+                f"available {sorted(index)}; the adapter is detected instead"
+            )
 
     if client is not None:
         chosen = index.get(client)
@@ -822,6 +863,26 @@ def _selection(
         "origin": origin,
         "candidates": list(candidates) if candidates else [],
     }
+
+
+def _clients_named_in(text: str, index: Mapping[str, object]) -> list[str]:
+    """The client names in `index` that `text` contains, as whole words.
+
+    Both sides are lowered and split on anything that is not a letter or a
+    digit, so "Claude Code" contains `claude-code` and "Codexify" does not
+    contain `codex`. Sorted, so a note that names several is stable.
+    """
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    named = []
+    for name in index:
+        parts = re.findall(r"[a-z0-9]+", name.lower())
+        width = len(parts)
+        if width and any(
+            words[start : start + width] == parts
+            for start in range(len(words) - width + 1)
+        ):
+            named.append(name)
+    return sorted(named)
 
 
 def _selected(path: Path, client: str, why: str) -> str:
