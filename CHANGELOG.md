@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.12.1 - 2026-11-20
+
+`drift`, `rollback-preview` and `lock` read a ledger whose `client` is not an adapter name. Ledgers
+written before adapters existed (July 2026) recorded the client as free text, such as
+"Codex Desktop / Codex CLI", and the three commands stopped with "unknown client" (exit `2`), so a
+ledger the validator accepts could not be checked. Found on 2026-11-20 by a review run in Codex.
+
+- **a ledger's `client` is data, not a typo.** An adapter name selects that adapter, as before.
+  Free text that names exactly one client, as a whole word with a hyphen read as a space, selects
+  that adapter with a note; text that names none or several falls back to detection with a note.
+  The command reports instead of stopping;
+- **`--client` stays strict**: a wrong name typed on the command line is still a tool error;
+- **what it does not fix**: runs recorded before anchors existed name absolute paths and no backup
+  path, so their targets stay `UNVERIFIABLE` and their rollback indicator `BROKEN`. The fix helps the
+  runs recorded from now on in such a ledger, which keep its old `client`.
+
+`select_adapter_detail` takes a new keyword, `ledger_client`. No ledger field, identifier, or schema
+changed; a ledger written by 0.12.0 verifies under 0.12.1 and the reverse. `references/LEDGER_BASELINES.md`
+says the rule under The unknown client. Guarded by `dashboard/tests/test_legacy_ledger_client.py`
+(12 tests, 9 ablations); `test_selection_by_the_ledgers_client_reuses_the_shared_machinery` in
+`test_drift.py` pinned the old exit `2` and now pins the report.
+
 ## 0.12.0 - 2026-11-19
 
 The Skill asks before it records. A review ends by offering its record and writes it only when the

@@ -147,8 +147,8 @@ def rollback_preview(
     `messages` follows `drift_report`'s contract: adapter-selection notes
     first, then findings, one list because they share one stream. `code` is
     `0` for `HEALTHY` with no findings and `1` otherwise; `2` is not returned
-    here at all -- a tool error (an unknown run ID, an unknown client, an
-    unreadable adapter) is raised as `LedgerError`, and the command wrapper
+    here at all -- a tool error (an unknown run ID, an unreadable adapter) is
+    raised as `LedgerError`, and the command wrapper
     is the one place that turns it into `2`, exactly as `drift_command` does.
 
     Anchor resolution reuses the 0.2.5 machinery unchanged, and the ledger's
@@ -174,7 +174,8 @@ def rollback_preview(
 
     client = ledger.get("client")
     selection = select_adapter_detail(
-        client=client if isinstance(client, str) and adapter is None else None,
+        client=None,
+        ledger_client=client if adapter is None else None,
         adapter=adapter,
         user_config=user_config,
         bundled=bundled,

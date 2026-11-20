@@ -229,7 +229,8 @@ def lock_command(
         document = load_json(ledger)
         client = document.get("client")
         selection = select_adapter_detail(
-            client=client if isinstance(client, str) and adapter is None else None,
+            client=None,
+            ledger_client=client if adapter is None else None,
             adapter=adapter,
             user_config=user_config,
             bundled=BUNDLED_ADAPTERS,
