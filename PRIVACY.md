@@ -41,7 +41,8 @@ The workflow may recommend consulting websites, documentation, repositories, fil
 ## Ledger data
 
 The ledger, its records, and its backups are local files created in the user's own
-environment. The plugin never transmits them. Backups may contain configuration values and are
+environment. The plugin never transmits them. A review's record is written only after the user
+says yes to it, in the conversation, and a run with no one to answer writes none. Backups may contain configuration values and are
 always written to the global scope, never inside a project directory, so they are not
 committed by accident.
 

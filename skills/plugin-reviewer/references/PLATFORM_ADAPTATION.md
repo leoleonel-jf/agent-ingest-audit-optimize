@@ -53,7 +53,7 @@ Keep synthesis, classification, prioritization, proposal authoring, and every us
 
 Never delegate implementation. Backup, apply, validate, and record form a single-writer sequence, and a stop condition reached by one worker cannot halt another mid-write. Do not run two authorized proposals concurrently, do not split the steps of one implementation across workers, do not move backup creation or verification away from the context applying the change, and never grant a subagent authority to authorize or to interpret an authorization.
 
-Ledger writes follow the writer: a subagent returns data, and the main context records it.
+Ledger writes follow the writer: a subagent returns data, and the main context records it, after the user's yes.
 
 Detect subagent support; never assume it. Without support, run the same work sequentially in the main context. Delegation is a way to organize the work, never a change to the workflow, the evidence standard, or the result.
 

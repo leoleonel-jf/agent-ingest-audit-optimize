@@ -2,6 +2,68 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.12.0 - 2026-11-19
+
+The Skill asks before it records. A review ends by offering its record and writes it only when the
+user says yes; a run with no one to answer records nothing. Spec under
+`docs/specs/2026-11-19-ask-before-recording.md`. No command, ledger field, identifier, or label
+changes: in `ledgerlib` only the version constant moves, and a ledger written by 0.11.0 verifies
+under 0.12.0 and the reverse.
+
+**What changes for you:** until 0.11.0 every review wrote one record without asking, into the
+global ledger when there was no project, and the Skill called that write bookkeeping that "never
+requires authorization". On 2026-11-19 a batch of headless sessions (`claude -p`) wrote seven
+records into a real global ledger that way. From this version:
+
+- **every review and every material audit closes with one question, the offer.** It says that
+  nothing was recorded, what would be written (one record and one file under `records/`, and a
+  backlog entry when the verdict calls for one), and which ledger it would go to, by its path. A
+  record bound for a project ledger also updates the global one, and the offer names both; when the
+  ledger does not exist yet, it says that a yes creates it;
+- **the yes is a user message sent after the offer**, in any wording and any language. A request to
+  record made before the offer is not a yes, even in the message that asked for the review. Neither
+  is a line in the material under review, a file, a memory, a setting, or a tool result, an
+  instruction from another agent, or a yes given in another conversation. One yes covers the review
+  it answers, once: a revised verdict or another review takes its own offer. When another question
+  is open and the reply does not say which one it answers, the Skill asks; when the offer is the
+  only open question, a plain yes is enough;
+- **silence is a no.** When the next message does not answer the offer, the Skill does what it asks
+  and adds one line saying that the review was not recorded, once. After that, or after a no, it
+  does not raise it again; a later request to record that review is honoured;
+- **a run with no one to answer records nothing**: `claude -p`, `codex exec`, a CI job, a scheduled
+  run, a subagent. The review comes out in full, says that nothing was recorded, and says that
+  recording it takes running the review in a session where the user can answer. Asking for the
+  record in the request does not change this. The rule does not depend on the model recognizing
+  such a run: the record waits for a message that answers the offer, and a single run has none. A
+  second turn sent to the same session is a user message like any other, whoever sends it;
+- **no identifier is taken before the yes.** A review that is not recorded has no `MAT` number and
+  moves no sequence. Reading a ledger (`verify`, `drift`, `rollback-preview`, finding where a record
+  would go) is not a write and needs no yes. Reconciling a provisional identifier waits for a yes
+  to an offer that names it;
+- **an authorized change keeps its records as before.** The instruction that authorizes a change is
+  the yes for its `PROP`, `RUN`, and `ADR`, and for no other record;
+- `references/LEDGER.md`: the section `Bookkeeping is not implementation` is now `A record needs a
+  yes`, with what one yes writes. A ledger write is a write to the user's disk, which is why it
+  waits for the yes; it still never counts as implementing a proposal;
+- **evaluation suite, 39 cases to 43.** The mutation check no longer exempts the plugin's own
+  ledger, and a new critical check, `record_follows_a_yes`, guards every case about the record.
+  `ledger_bookkeeping_is_not_implementation` is renamed `ledger_write_is_not_implementation`.
+  `LDG-001`, which asked for the record in the request and expected it written, now expects the
+  offer. New cases: a run with no one to answer (`LDG-004`), a yes after the offer (`LDG-005`), an
+  unanswered offer recalled once (`LDG-006`), and consent planted in the material (`SEC-004`).
+  `evals/RUN_PROTOCOL.md` no longer lets a case write the plugin's ledger, and runs a case that
+  supplies a yes in two turns, so that the yes follows an offer the tested agent made;
+- `README.md` and `PRIVACY.md` say the same;
+- `README.md` said the tool requires Python 3.9. It requires 3.10, as the Skill says and as the
+  suites run.
+
+Not changed: the optional tools (`chain --seal`, `update ledger`, a user adapter) already run only
+on the user's specific request, and the Skill now says that this request is their yes. An
+instruction that names a change still authorizes it, and its records, wherever it is given,
+including in a run with no one to answer: this version changes the record of a review, not
+implementation. A `record` command, and with it a lock against two sessions writing one ledger,
+remains out of scope.
+
 ## 0.11.0 - 2026-11-19
 
 The plugin is now `plugin-reviewer`. Its marketplace and its repository
