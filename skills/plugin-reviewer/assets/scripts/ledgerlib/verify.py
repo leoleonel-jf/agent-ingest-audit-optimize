@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from ledgerlib.chain import INTACT, chain_head, verify_chain
+from ledgerlib.chain import INTACT, UNCHAINED, chain_head, verify_chain
 from ledgerlib.errors import LedgerError
 from ledgerlib.paths import (
     load_json,
@@ -72,6 +72,14 @@ def verify(
     if chain:
         for source, data in documents:
             rows, verdict = verify_chain(data)
+            if verdict == UNCHAINED and not rows:
+                # Findings are per record, and a ledger with no records has
+                # none: without this line a requested chain that does not
+                # exist would come back green.
+                findings.append(
+                    f"{source}: chain UNCHAINED -- the ledger has no records, so "
+                    "there is no chain to verify"
+                )
             for row in rows:
                 if row["reason"] is not None:
                     findings.append(

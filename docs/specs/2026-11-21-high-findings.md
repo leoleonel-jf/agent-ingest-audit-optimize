@@ -65,7 +65,26 @@ proof, three named tests fail; without the `AT_RISK` branch, two.
 
 ## 3. Sealing a partial chain breaks it (findings 3 and 14)
 
-To be filled by its pull request.
+**Problem.** `verify_chain` counts indices over the sealed subsequence, so a record with no
+`chain` may precede a sealed record of index 0 and the ledger verifies `PARTIAL`. `seal_ledger`
+counted over every position: it gave that record index 0, the sealed record after it became an
+`index_gap`, and `chain --seal` exited `0` with `sealed 1 record(s)`. Separately, `verify --chain`
+reported findings per record, so a ledger with no records came back green.
+
+**Change.** `chain --seal` seals a deep copy, verifies it, and writes only when the copy is
+`INTACT`. Otherwise it names the unchained records that precede the chain, says nothing was
+written, and exits `2`; the file and its head are untouched. Sealing a fresh ledger, extending an
+intact chain with new records, and an idempotent second seal behave as before. `verify --chain`
+on a ledger with no records adds the finding `chain UNCHAINED` and exits `1`; without `--chain`
+the same ledger still passes. Moving those stranded records, or re-sealing from scratch (which
+changes the head), stays the user's call; this release only stops the seal from breaking.
+
+**Tests.** `SealNeverBreaksTheChainTests` and `VerifyChainOnAnEmptyLedgerTests` in
+`dashboard/tests/test_chain.py`: the review's case under LF and CRLF, an unsealed record between
+two sealed ones, a first seal, new records after an intact chain, a byte-identical second seal,
+and the empty ledger with and without `--chain`. Three failed before the change. The seal runs
+under the writer lock of section 1. Ablations: without the copy's verification, the legacy-prefix
+test fails under both line endings; without the empty-ledger finding, its test fails.
 
 ## 4. Minimization trusts a marker it did not create (finding 4)
 
