@@ -132,6 +132,28 @@ def _verify_backup(
     return True, None
 
 
+RECOVERY_UNVERIFIED = "recovery_unverified"
+
+
+def _backup_proves(target: object, backup_digest: object) -> bool:
+    """Whether a verified backup proves this target can be put back.
+
+    Two cases are provable from what a ledger records. A target the run
+    created has no `before_digest`: rolling it back removes it, and no
+    backup bytes are needed. Any other target is proven only by a backup
+    whose digest is that target's own `before_digest` -- the backup is,
+    byte for byte, what the target held before the run. A backup that
+    bundles several files, or holds anything else, verifies as a file and
+    proves no target's recovery.
+    """
+    if not isinstance(target, dict):
+        return False
+    before = target.get("before_digest")
+    if before is None:
+        return True
+    return isinstance(backup_digest, str) and before == backup_digest
+
+
 def rollback_preview(
     ledger: dict,
     run_id: str,
@@ -192,6 +214,10 @@ def rollback_preview(
     # other promise moot -- and that is ALL "first" means: classification and
     # the four sets are computed and reported regardless of the outcome.
     verified, backup_reason = _verify_backup(record.get("backup"), roots)
+    recorded_backup = record.get("backup")
+    recorded_digest = (
+        recorded_backup.get("digest") if isinstance(recorded_backup, dict) else None
+    )
 
     targets = record.get("targets")
     if not isinstance(targets, list):
@@ -223,8 +249,21 @@ def rollback_preview(
             "kind": target.get("kind") if isinstance(target, dict) else None,
             "state": state,
         }
-        if state == IN_PLACE and verified:
+        if state == IN_PLACE and verified and _backup_proves(target, recorded_digest):
             will_be_restored.append(row)
+        elif state == IN_PLACE and verified:
+            # The backup is the file the run recorded, and that is all its
+            # digest proves: nothing ties its bytes to what this target held
+            # before the run. Listing the target as restorable on that basis
+            # promised a recovery nobody checked (finding 2 of the 2026-11-20
+            # review), so it waits here, intact, until a backup that holds its
+            # recorded before-bytes is shown.
+            cannot_be_restored.append({**row, "reason": RECOVERY_UNVERIFIED})
+            findings.append(
+                f"record {run_id!r}: the backup verifies, but it does not hold "
+                f"{anchor!r}'s recorded before_digest, so its recovery is not "
+                "verified"
+            )
         elif state == IN_PLACE:
             # Intact, and still unrestorable: restoring needs the backup, and
             # the backup failed verification. Dropping these rows instead
@@ -249,6 +288,10 @@ def rollback_preview(
         indicator = BROKEN
     elif any(state == DRIFTED for state in states) or residual_effects:
         indicator = AT_RISK
+    elif any(row.get("reason") == RECOVERY_UNVERIFIED for row in cannot_be_restored):
+        # Every target may be intact and the backup sound, yet a rollback
+        # that cannot show it holds a target's bytes is not one to trust.
+        indicator = AT_RISK
     elif all(state == IN_PLACE for state in states):
         indicator = HEALTHY
     else:
@@ -268,7 +311,6 @@ def rollback_preview(
     # backup is a real file this preview verified (or failed to). Resolved
     # through the same binding the rows use, and None -- never a raise --
     # when the backup is absent, malformed, or refuses to resolve.
-    recorded_backup = record.get("backup")
     backup_path = drift.resolved_path(
         recorded_backup.get("path") if isinstance(recorded_backup, dict) else None,
         roots,

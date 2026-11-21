@@ -992,7 +992,9 @@ class BuildPayloadResolvedPathTests(BuildTestCase):
     def test_drift_and_preview_rows_reach_the_payload_with_paths(self) -> None:
         settings = self.write(self.user_config / "settings.json", "after\n")
         run = self.full_run(
-            [self.target(after_digest=self.digest_of(settings))],
+            # A file the run created: any verified backup proves its recovery
+            # (0.13.0), so the row lands in `will_be_restored`.
+            [self.target(before_digest=None, after_digest=self.digest_of(settings))],
             self.verified_backup(),
         )
         payload, _ = self.build(self.valid_ledger(records=[run]))

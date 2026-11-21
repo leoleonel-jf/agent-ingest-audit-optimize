@@ -39,7 +39,29 @@ named tests fail; without it in `chain --seal`, the seal test fails.
 
 ## 2. The rollback preview promises a target the backup does not hold (finding 2)
 
-To be filled by its pull request.
+**Problem.** `rollback-preview` listed every `IN_PLACE` target as `will_be_restored` as soon as
+the backup file's digest matched the recorded one, and called the run `HEALTHY` with exit `0`.
+The digest proves the backup is the file recorded, not what it holds: the project's own fixture,
+a backup holding only `backup bytes`, produced `HEALTHY`.
+
+**Change.** A verified backup proves a target's recovery in exactly two cases the ledger can
+show: the backup's digest equals the target's own `before_digest` (the backup is, byte for byte,
+what the target held), or the target has no `before_digest` (the run created it; rolling back
+deletes it). Any other `IN_PLACE` target under a verified backup goes to `cannot_be_restored`
+with the reason `recovery_unverified`, a line on stderr names it, and the indicator is `AT_RISK`
+(exit `1`). A missing or altered backup is `BROKEN` as before. No schema or ledger field
+changes, and ledgers written before read as they did; what changes is the verdict on a run whose
+backup bundles several files, which the format cannot tie to any one target. A per-target backup
+format, and actually restoring, stay out of this release.
+
+**Tests.** `BackupProvesRecoveryTests` and `BackupProvesRecoveryCliTests` in
+`dashboard/tests/test_rollback.py`: the review's case (a backup of `backup bytes`), the positive
+control (a backup holding the target's before-bytes is `HEALTHY`), one backup proving one of two
+targets, a created file, a missing backup, an altered backup that would have proved, and the
+command's exit and stderr. Four failed before the change. The shared fixture `in_place_target`
+now describes a created file, so the older tests keep what they test; `test_build.py` and
+`test_legacy_ledger_client.py` each needed the same one-field change. Ablations: without the
+proof, three named tests fail; without the `AT_RISK` branch, two.
 
 ## 3. Sealing a partial chain breaks it (findings 3 and 14)
 
