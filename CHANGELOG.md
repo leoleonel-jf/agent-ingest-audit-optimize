@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.13.0 - 2026-11-21
+
+The four high findings of the independent review of 2026-11-20, and one low one. Each made a
+command report success, or promise something, that was not true. Spec under
+`docs/specs/2026-11-21-high-findings.md`; pull requests 37 to 40.
+
+- **two writers no longer lose a change** (finding 1). `update ledger`, `update all` and
+  `chain --seal` hold an operating-system lock on `<ledger>.lock` from before they read the ledger
+  until after they replace it. A writer waits up to 30 seconds, then exits `2` having written
+  nothing, and can be run again. A record written by editing the JSON directly, which is how the
+  Skill writes a review's record, does not take the lock; `references/LEDGER_INTEGRITY.md` says so;
+- **`rollback-preview` stops promising what a backup does not prove** (finding 2). A verified
+  backup proves a target's recovery only when its digest is the target's own `before_digest`, or
+  when the run created the target. Other intact targets go to `cannot_be_restored` with the reason
+  `recovery_unverified`, stderr names them, and the run is `AT_RISK`. **What changes for you:** a
+  run whose backup bundles several files was `HEALTHY` and is now `AT_RISK`, exit `1`;
+- **`chain --seal` never leaves a chain that does not verify** (finding 3). It seals a copy and
+  writes only when the copy verifies `INTACT`; a record with no chain before the sealed records is
+  refused with exit `2` and the file untouched, where before the seal exited `0` and broke the
+  chain;
+- **`verify --chain` on a ledger with no records reports `UNCHAINED`** and exits `1` (finding 14);
+- **a configuration object shaped like a redaction marker is no longer copied** (finding 4).
+  Markers carry their provenance, and only the scanner's own pass through untouched; before, the
+  `digest` string of such an object reached the baseline, the ledger, and the dashboard. Baselines
+  captured before 0.13.0 are not rewritten.
+
+No ledger field, identifier, label, or schema changed; a ledger written by 0.12.1 verifies under
+0.13.0 and the reverse. Beside a ledger that was updated or sealed there is now an empty
+`ledger.json.lock`; a project's `.agent-audit/.gitignore` lists it. Guarded by
+`dashboard/tests/test_ledger_lock.py` (7 tests, real subprocesses) and new classes in
+`test_rollback.py`, `test_chain.py`, and `test_update.py`, each guard proved by ablation.
+
 ## 0.12.1 - 2026-11-20
 
 `drift`, `rollback-preview` and `lock` read a ledger whose `client` is not an adapter name. Ledgers
