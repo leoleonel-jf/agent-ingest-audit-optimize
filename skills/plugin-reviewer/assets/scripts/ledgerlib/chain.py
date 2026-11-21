@@ -32,6 +32,7 @@ one visible.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -365,7 +366,40 @@ def _chain_command(*, ledger: Path, head: bool, seal: bool) -> int:
         print(f"Unreadable ledger: {ledger}: {exc}", file=sys.stderr)
         return 2
 
-    sealed = seal_ledger(document)
+    # Seal a copy and verify it before anything touches the file. A seal is
+    # only ever allowed to extend a chain: if the sealed copy does not verify
+    # INTACT, the original is left byte for byte as it was.
+    candidate = copy.deepcopy(document)
+    sealed = seal_ledger(candidate)
+    if sealed:
+        _rows, candidate_verdict = verify_chain(candidate)
+        if candidate_verdict != INTACT:
+            first_chained = next(
+                (row["position"] for row in rows if row["reason"] is None), None
+            )
+            stranded = [
+                row
+                for row in rows
+                if row["reason"] == "unchained"
+                and first_chained is not None
+                and row["position"] < first_chained
+            ]
+            for row in stranded:
+                print(
+                    f"{ledger}: records[{row['position']}] {row['id']!r} has no "
+                    "chain and comes before the sealed records",
+                    file=sys.stderr,
+                )
+            print(
+                f"{ledger}: refusing to seal: sealing these records would "
+                "re-index the chain that follows them and break it. Nothing was "
+                "written; the ledger still verifies as it did. Records written "
+                "before the chain stay unchained (see the hash chain section of "
+                "references/LEDGER_INTEGRITY.md).",
+                file=sys.stderr,
+            )
+            return 2
+        document = candidate
     if sealed:
         newline, indent, trailing = _detect_format(original)
         text = json.dumps(document, indent=indent, ensure_ascii=False)

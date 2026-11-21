@@ -76,8 +76,12 @@ record onward, which is the normal state right after migration.
 **Sealing.** `chain --seal` writes `chain` onto records that lack it and leaves existing ones
 alone, so it is byte-idempotent. It refuses a ledger that does not validate, and it refuses to
 seal over a chain that is already broken — resealing would recompute the links and erase the
-evidence, which is the one thing this command must never do. It preserves the file's indentation
-and line endings, and writes through `os.replace`.
+evidence, which is the one thing this command must never do. It seals a copy first and writes
+only when that copy verifies `INTACT`: a record with no `chain` that comes before sealed records
+cannot be sealed without re-indexing the chain after it, so that seal is refused (exit `2`,
+nothing written) and the record stays unchained. It preserves the file's indentation and line
+endings, and writes through `os.replace`. `verify --chain` on a ledger with no records reports
+`UNCHAINED` and exits `1`: there is no chain to vouch for.
 
 ## One writer at a time: `ledger.json.lock`
 
