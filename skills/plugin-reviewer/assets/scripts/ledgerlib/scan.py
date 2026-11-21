@@ -168,6 +168,22 @@ def _is_sensitive(key: object, patterns: Sequence[str]) -> bool:
     )
 
 
+class _Marker(dict):
+    """A replacement marker this module made, as opposed to one a file held.
+
+    Serializes exactly like the plain `{"redacted": True, "digest": ...}` it
+    is, so nothing downstream changes. What it adds is provenance: parsing
+    JSON or TOML never yields this type, so `withhold_text` can leave
+    `redact`'s markers alone without also leaving alone a file's object that
+    merely has their shape -- whose `digest` would otherwise be copied as
+    written (finding 4 of the 2026-11-20 review).
+    """
+
+
+def _marker(value: object) -> _Marker:
+    return _Marker(redacted=True, digest=_value_digest(value))
+
+
 def redact(value: object, patterns: Sequence[str]) -> object:
     """Copy `value`, replacing every sensitive key's value with a marker.
 
@@ -199,7 +215,7 @@ def redact(value: object, patterns: Sequence[str]) -> object:
         result: dict = {}
         for key, item in value.items():
             if _is_sensitive(key, patterns):
-                result[key] = {"redacted": True, "digest": _value_digest(item)}
+                result[key] = _marker(item)
             else:
                 result[key] = redact(item, patterns)
         return result
@@ -237,9 +253,12 @@ def withhold_text(value: object) -> object:
     guess at a short or common string by hashing it.
     """
     if isinstance(value, str):
-        return {"redacted": True, "digest": _value_digest(value)}
+        return _marker(value)
     if isinstance(value, dict):
-        if _is_marker(value):
+        # Provenance, never shape: only a marker `redact` made is passed
+        # through. An object from the file with the same two keys is walked
+        # like any other, so its `digest` string is digested too.
+        if isinstance(value, _Marker):
             return value
         return {key: withhold_text(item) for key, item in value.items()}
     if isinstance(value, list):
