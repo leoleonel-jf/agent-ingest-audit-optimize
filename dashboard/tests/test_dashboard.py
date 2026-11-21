@@ -2453,6 +2453,7 @@ LEDGER_SECTIONS = {
     "LEDGER_INTEGRITY.md": (
         "Pinning the supply chain: `agent.lock`",
         "Tamper-evidence: the hash chain",
+        "One writer at a time: `ledger.json.lock`",
         "Recovering `ledger.json` from a git merge conflict",
     ),
 }

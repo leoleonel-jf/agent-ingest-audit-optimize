@@ -25,7 +25,7 @@ This file holds what writing a record needs. Open another only for its subject:
 | Path anchors, path safety, and the reasons a path is refused | [LEDGER_PATHS.md](LEDGER_PATHS.md) |
 | Baselines, `scan`, the adapter format, the unknown client, and what a baseline does not cover | [LEDGER_BASELINES.md](LEDGER_BASELINES.md) |
 | Runs, `drift`, and `rollback-preview` | [LEDGER_CHANGES.md](LEDGER_CHANGES.md) |
-| `agent.lock`, the hash chain, and recovering from a git merge conflict | [LEDGER_INTEGRITY.md](LEDGER_INTEGRITY.md) |
+| `agent.lock`, the hash chain, the writer lock, and recovering from a git merge conflict | [LEDGER_INTEGRITY.md](LEDGER_INTEGRITY.md) |
 
 ## One review, one record
 
@@ -130,10 +130,10 @@ Project scope, at the project root:
 Backups always live in the global scope, even for project-scoped changes. Backups may contain
 configuration values and must never be committed by accident.
 
-When first creating a project-scope `.agent-audit/`, also write `.agent-audit/.gitignore`
-containing exactly one line, `dashboard.html`. Records are meant to be committed; a generated
-dashboard is not — it is regenerable from the ledger with `dashboard.py build` (see
-[references/DASHBOARD.md](DASHBOARD.md)) and carries no information the ledger itself lacks.
+When first creating a project-scope `.agent-audit/`, also write `.agent-audit/.gitignore` with two
+lines, `dashboard.html` and `ledger.json.lock` (the writer lock, see [LEDGER_INTEGRITY.md](LEDGER_INTEGRITY.md)).
+Records are meant to be committed; a generated dashboard is not — it is regenerable from the ledger
+with `dashboard.py build` (see [references/DASHBOARD.md](DASHBOARD.md)) and adds nothing it lacks.
 
 This layout is a convention `verify` does not check — `verify` validates the ledger document's
 contents only, never the directory structure or where backups are stored.

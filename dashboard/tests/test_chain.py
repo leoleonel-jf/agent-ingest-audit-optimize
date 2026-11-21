@@ -414,10 +414,13 @@ class ChainCommandTests(ChainCliTestCase):
         self.assertNotIn(b"\r\n", path.read_bytes())
 
     def test_seal_writes_exactly_one_file(self) -> None:
+        # The ledger, plus the writer-lock sidecar `ledgerlib.locking` keeps
+        # beside it on purpose; no temporary file is left behind.
         path = self.write(self.valid_ledger())
         self.run_cli("chain", str(path), "--seal")
         self.assertEqual(
-            sorted(child.name for child in self.tmp.iterdir()), ["ledger.json"]
+            sorted(child.name for child in self.tmp.iterdir()),
+            ["ledger.json", "ledger.json.lock"],
         )
 
 
