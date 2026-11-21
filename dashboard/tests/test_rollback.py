@@ -141,12 +141,21 @@ class RollbackTestCase(unittest.TestCase):
     # can hold several states at once without the fixtures colliding.
 
     def in_place_target(self, name: str = "settings.json", **overrides) -> dict:
+        # No `before_digest` by default: a file the run created, whose rollback
+        # removes it, so any verified backup proves its recovery (0.13.0). The
+        # tests about a backup that must hold a target's bytes use
+        # `unproven_target` or pass their own.
         current = self.write(self.user_config / name, f"after {name}\n")
+        fields = {"before_digest": None, **overrides}
         return self.target(
             anchor=f"$USER_CONFIG/{name}",
             after_digest=self.digest_of(current),
-            **overrides,
+            **fields,
         )
+
+    def unproven_target(self, name: str = "settings.json") -> dict:
+        """Intact, with prior bytes no fixture backup holds."""
+        return self.in_place_target(name, before_digest="sha256:" + "0" * 64)
 
     def reverted_target(self, name: str = "reverted.json", **overrides) -> dict:
         current = self.write(self.user_config / name, f"before {name}\n")
@@ -1067,6 +1076,120 @@ class ResolvedPathTests(RollbackTestCase):
         report, _, _ = self.preview([record])
         self.assertEqual(report["indicator"], "BROKEN")
         self.assertIsNone(report["backup"]["path"])
+
+
+class BackupProvesRecoveryTests(RollbackTestCase):
+    """0.13.0: a verified backup proves its own bytes, not a target's recovery.
+
+    A backup's digest says the backup file is the one the run recorded. It
+    says nothing about whether those bytes are what a target held before the
+    run. Until 0.12.1 a verified backup was enough to list every intact
+    target as `will_be_restored` and to call the run `HEALTHY`, even when the
+    backup held only the text `backup bytes`. The one relation this ledger
+    format can prove is a backup whose digest is the target's own recorded
+    `before_digest`, and a target the run created (no `before_digest`), whose
+    rollback removes it and needs no bytes at all.
+    """
+
+    def proving_backup(self, name: str = "settings.json") -> tuple[dict, dict]:
+        """A target and a backup that holds exactly its recorded before-bytes."""
+        backup_file = self.write(
+            self.user_config / "backups" / f"{RUN_ID}.bak", f"before {name}\n"
+        )
+        target = self.in_place_target(name, before_digest=self.digest_of(backup_file))
+        backup = {
+            "path": f"$USER_CONFIG/backups/{RUN_ID}.bak",
+            "digest": self.digest_of(backup_file),
+            "verified": True,
+        }
+        return target, backup
+
+    def test_valid_backup_digest_does_not_prove_target_recovery(self) -> None:
+        report, messages, code = self.preview(
+            [self.run_record([self.unproven_target()], self.verified_backup())]
+        )
+        self.assertTrue(report["backup"]["verified"])
+        self.assertEqual(report["will_be_restored"], [])
+        self.assertEqual(
+            [row["reason"] for row in report["cannot_be_restored"]],
+            ["recovery_unverified"],
+        )
+        self.assertEqual(report["indicator"], "AT_RISK")
+        self.assertEqual(code, 1)
+        self.assertTrue(
+            any("recovery" in m and "settings.json" in m for m in messages), messages
+        )
+
+    def test_a_backup_holding_the_targets_before_bytes_proves_its_recovery(self) -> None:
+        target, backup = self.proving_backup()
+        report, messages, code = self.preview([self.run_record([target], backup)])
+        self.assertEqual(
+            [row["anchor"] for row in report["will_be_restored"]],
+            ["$USER_CONFIG/settings.json"],
+        )
+        self.assertEqual(report["cannot_be_restored"], [])
+        self.assertEqual(report["indicator"], "HEALTHY")
+        self.assertEqual(code, 0)
+        self.assertFalse([m for m in messages if "recovery" in m], messages)
+
+    def test_one_backup_proves_only_the_target_it_holds(self) -> None:
+        target, backup = self.proving_backup("a.json")
+        other = self.unproven_target("b.json")
+        report, _, code = self.preview([self.run_record([target, other], backup)])
+        self.assertEqual(
+            [row["anchor"] for row in report["will_be_restored"]],
+            ["$USER_CONFIG/a.json"],
+        )
+        self.assertEqual(
+            [(row["anchor"], row["reason"]) for row in report["cannot_be_restored"]],
+            [("$USER_CONFIG/b.json", "recovery_unverified")],
+        )
+        self.assertEqual(report["indicator"], "AT_RISK")
+        self.assertEqual(code, 1)
+
+    def test_a_target_the_run_created_needs_no_backup_bytes(self) -> None:
+        created = self.in_place_target("new.json")
+        report, _, code = self.preview(
+            [self.run_record([created], self.verified_backup())]
+        )
+        self.assertEqual(
+            [row["anchor"] for row in report["will_be_restored"]],
+            ["$USER_CONFIG/new.json"],
+        )
+        self.assertEqual(report["indicator"], "HEALTHY")
+        self.assertEqual(code, 0)
+
+    def test_a_missing_backup_is_still_broken(self) -> None:
+        report, _, code = self.preview(
+            [self.run_record([self.unproven_target()], None)]
+        )
+        self.assertEqual(report["indicator"], "BROKEN")
+        self.assertEqual(report["backup"]["reason"], "missing")
+        self.assertEqual(code, 1)
+
+    def test_a_corrupted_backup_is_still_broken_even_when_it_would_prove(self) -> None:
+        target, backup = self.proving_backup()
+        self.write(self.user_config / "backups" / f"{RUN_ID}.bak", "changed\n")
+        report, _, _ = self.preview([self.run_record([target], backup)])
+        self.assertEqual(report["indicator"], "BROKEN")
+        self.assertEqual(report["backup"]["reason"], "digest_mismatch")
+        self.assertEqual(report["will_be_restored"], [])
+
+
+class BackupProvesRecoveryCliTests(RollbackCliTestCase):
+    """The command reads the same report, and says why on stderr."""
+
+    def test_the_command_exits_one_and_names_the_unproven_target(self) -> None:
+        ledger = self.write_ledger(
+            self.valid_ledger(
+                [self.full_run([self.unproven_target()], self.verified_backup())]
+            )
+        )
+        code, out, err = self.run_cli(*self.rollback_arguments(ledger))
+        self.assertEqual(code, 1, err)
+        self.assertEqual(json.loads(out)["will_be_restored"], [])
+        self.assertIn("recovery", err)
+        self.assertIn("settings.json", err)
 
 
 if __name__ == "__main__":

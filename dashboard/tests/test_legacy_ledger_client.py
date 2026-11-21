@@ -178,7 +178,9 @@ class LegacyLedgerCommandTests(LegacyClientTestCase):
                         {
                             "anchor": "$USER_CONFIG/settings.json",
                             "kind": "mcp-server",
-                            "before_digest": "sha256:" + "0" * 64,
+                            # A created file, so the preview can be HEALTHY
+                            # without a backup holding prior bytes (0.13.0).
+                            "before_digest": None,
                             "after_digest": digest(current),
                             "reversible": True,
                             "residual_effect": None,
