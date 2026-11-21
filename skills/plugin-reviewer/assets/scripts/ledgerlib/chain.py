@@ -42,6 +42,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from ledgerlib.errors import LedgerError
+from ledgerlib.locking import ledger_lock
 from ledgerlib.paths import load_json
 from ledgerlib.validate import validate_ledger
 
@@ -272,6 +273,24 @@ def _write_atomically(path: Path, text: str, newline: str) -> None:
 
 
 def chain_command(*, ledger: Path, head: bool, seal: bool) -> int:
+    """`chain`, holding the ledger's writer lock while it seals.
+
+    `--seal` reads, seals, and replaces the ledger, so it takes the same lock
+    as `update` (`ledgerlib.locking`) from before the read until after the
+    replace. `--head` only reads and takes none. A lock that cannot be had
+    exits `2` with nothing written.
+    """
+    if not seal:
+        return _chain_command(ledger=ledger, head=head, seal=seal)
+    try:
+        with ledger_lock(ledger):
+            return _chain_command(ledger=ledger, head=head, seal=seal)
+    except LedgerError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+
+def _chain_command(*, ledger: Path, head: bool, seal: bool) -> int:
     """`chain` as a command: print the head, or seal the ledger.
 
     Exit codes follow the house split: `0` on success, `1` when there is no
