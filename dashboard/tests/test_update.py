@@ -839,3 +839,82 @@ class TextNeverReachesTheLedgerTestCase(UpdateFixtureTestCase):
         for item in items:
             self.assertEqual(item["state"], "present")
             self.assertRegex(json.dumps(item["attributes"]["value"]), r'"digest": "sha256:[0-9a-f]{64}"')
+
+
+class MarkerShapedInputTestCase(TextNeverReachesTheLedgerTestCase):
+    """0.13.0: a file cannot smuggle text in by looking like a marker.
+
+    `withhold_text` leaves `redact`'s markers alone, and until 0.12.1 it told
+    a marker by its shape only: an object with exactly `redacted: true` and a
+    `digest`. A configuration file holding an object of that shape kept the
+    `digest` string as written, into the baseline, the ledger, and the page
+    (finding 4 of the 2026-11-20 review). Two sentinels, because a fix that
+    only checked the `digest`'s format would stop the plain one and still let
+    a credential that already looks like a digest through.
+    """
+
+    PLAIN = "SYNTHETIC_ONLY_MARKER_TEXT_5c21"
+    HEXLIKE = "sha256:" + "5c21" * 16
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.user_config / "settings.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {"PreToolUse": [{"redacted": True, "digest": self.PLAIN}]},
+                    "permissions": {"allow": [{"redacted": True, "digest": self.HEXLIKE}]},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def assert_no_secret(self, text: str, where: str) -> None:
+        for secret in (self.PLAIN, self.HEXLIKE, self.HEXLIKE[len("sha256:"):]):
+            self.assertNotIn(secret, text, f"{secret} reached {where}")
+
+    def test_source_values_are_minimized_through_dashboard_build(self) -> None:
+        ledger_path = self.write_ledger(self.bare_ledger())
+        code, out, err = self.run_update(
+            ledger_path, "all", adapter=self.adapter_path, today="2026-08-01"
+        )
+        self.assertEqual(code, 0, err)
+        self.assert_no_secret(ledger_path.read_text(encoding="utf-8"), "ledger.json")
+        self.assert_no_secret(
+            (self.tmp / "dashboard.html").read_text(encoding="utf-8"), "dashboard.html"
+        )
+        self.assert_no_secret(out, "stdout")
+        self.assert_no_secret(err, "stderr")
+
+    def test_neither_credential_reaches_the_ledger_the_page_or_a_stream(self) -> None:
+        self.test_source_values_are_minimized_through_dashboard_build()
+
+    def test_the_baseline_still_records_that_both_were_there(self) -> None:
+        ledger_path = self.write_ledger(self.bare_ledger())
+        self.run_update(ledger_path, "ledger", adapter=self.adapter_path, today="2026-08-01")
+        items = json.loads(ledger_path.read_text(encoding="utf-8"))["baselines"][0]["items"]
+        self.assertEqual({item["name"] for item in items}, {"PreToolUse", "allow"})
+
+
+class MarkersAreNotTransformedTwiceTestCase(unittest.TestCase):
+    """The controls: real markers stay one level deep, strings digest once."""
+
+    def test_a_sensitive_key_keeps_its_single_marker(self) -> None:
+        from ledgerlib.scan import _value_digest, redact, withhold_text
+
+        result = withhold_text(redact({"token": "abc", "name": "x"}, ["token"]))
+        self.assertEqual(result["token"], {"redacted": True, "digest": _value_digest("abc")})
+        self.assertEqual(result["name"], {"redacted": True, "digest": _value_digest("x")})
+
+    def test_a_marker_shaped_input_is_walked_like_any_object(self) -> None:
+        from ledgerlib.scan import _value_digest, withhold_text
+
+        result = withhold_text({"redacted": True, "digest": "text"})
+        self.assertEqual(
+            result, {"redacted": True, "digest": {"redacted": True, "digest": _value_digest("text")}}
+        )
+
+    def test_the_minimized_document_is_plain_json(self) -> None:
+        from ledgerlib.scan import redact, withhold_text
+
+        result = withhold_text(redact({"token": "abc"}, ["token"]))
+        self.assertEqual(json.loads(json.dumps(result)), result)

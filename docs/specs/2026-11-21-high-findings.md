@@ -88,4 +88,25 @@ test fails under both line endings; without the empty-ledger finding, its test f
 
 ## 4. Minimization trusts a marker it did not create (finding 4)
 
-To be filled by its pull request.
+**Problem.** `withhold_text` replaces every string a configuration file holds with a marker,
+`{"redacted": true, "digest": "sha256:..."}`, and leaves `redact`'s markers alone so it does not
+digest a digest. It told a marker by its shape only. A file holding an object of that shape kept
+its `digest` string as written. The review rated this plausible; the test below confirmed it: a
+sentinel under `hooks` and a digest-looking sentinel under `permissions` both reached the
+baseline, `ledger.json`, and the rendered page.
+
+**Change.** `redact` and `withhold_text` build their markers as `_Marker`, a `dict` subclass that
+serializes exactly like the plain object, and `withhold_text` passes through only that type.
+Parsing JSON or TOML never yields it, so a file's marker-shaped object is walked like any other
+and its `digest` string is digested. A format check on `digest` was rejected: it would stop a
+plain sentinel and still copy a credential that already looks like a digest. Real markers stay
+one level deep and strings are digested once. Baselines captured before 0.13.0 are not rewritten:
+a ledger that already holds such text keeps it until those baselines are removed by hand.
+
+**Tests.** `MarkerShapedInputTestCase` in `dashboard/tests/test_update.py` runs `update all`
+from a file through the ledger, the page, and both streams, with a plain sentinel and a 64-hex
+`sha256:` sentinel; `MarkersAreNotTransformedTwiceTestCase` holds the controls.
+`test_an_existing_marker_is_left_exactly_as_it_is` in `test_scan.py` hand-built its marker, which
+is exactly the input this change stops trusting, and now takes it from `redact`. Three failed
+before the change. Ablations: checking shape instead of type fails three named tests; a `redact`
+that builds plain dicts fails three others.
