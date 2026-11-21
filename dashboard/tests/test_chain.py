@@ -414,10 +414,13 @@ class ChainCommandTests(ChainCliTestCase):
         self.assertNotIn(b"\r\n", path.read_bytes())
 
     def test_seal_writes_exactly_one_file(self) -> None:
+        # The ledger, plus the writer-lock sidecar `ledgerlib.locking` keeps
+        # beside it on purpose; no temporary file is left behind.
         path = self.write(self.valid_ledger())
         self.run_cli("chain", str(path), "--seal")
         self.assertEqual(
-            sorted(child.name for child in self.tmp.iterdir()), ["ledger.json"]
+            sorted(child.name for child in self.tmp.iterdir()),
+            ["ledger.json", "ledger.json.lock"],
         )
 
 
@@ -480,6 +483,105 @@ class VerifyChainCliTests(ChainCliTestCase):
             "verify", str(path), "--expect-head", "sha256:" + "0" * 64
         )
         self.assertEqual(code, 2)
+
+
+class SealNeverBreaksTheChainTests(ChainCliTestCase):
+    """0.13.0: `chain --seal` refuses any seal whose result would not verify.
+
+    `verify_chain` counts indices over the sealed subsequence, so a legacy
+    record with no `chain` may precede a sealed record of index 0 and the
+    ledger still verifies (`PARTIAL`). `seal_ledger` counted indices over
+    every position instead: it gave the legacy record index 0, and the sealed
+    record after it became an `index_gap`. The command exited `0`, printed
+    `sealed 1 record(s)`, and left a chain `verify --chain` calls broken
+    (finding 3 of the 2026-11-20 review).
+    """
+
+    def materials(self, count: int) -> list[dict]:
+        return [record(f"MAT-2026-{number:03d}") for number in range(count)]
+
+    def ledger_of(self, records: list[dict]) -> dict:
+        document = self.valid_ledger(records)
+        document["sequences"]["MAT"] = len(records)
+        return document
+
+    def legacy_prefix(self) -> dict:
+        """One unsealed record, then a record sealed as index 0 after it."""
+        document = self.ledger_of(self.materials(2))
+        seal_ledger(document, start=1)
+        return document
+
+    def test_seal_refuses_legacy_prefix_without_rewriting(self) -> None:
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=repr(newline)):
+                path = self.write(self.legacy_prefix(), newline=newline)
+                before = path.read_bytes()
+                _, head_before, _ = self.run_cli("chain", str(path), "--head")
+                code, _out, err = self.run_cli("chain", str(path), "--seal")
+                self.assertEqual(code, 2, err)
+                self.assertIn("MAT-2026-000", err)
+                self.assertIn("nothing was written", err.lower())
+                self.assertEqual(path.read_bytes(), before)
+                _, head_after, _ = self.run_cli("chain", str(path), "--head")
+                self.assertEqual(head_after, head_before)
+                verify_code, _, verify_err = self.run_cli("verify", str(path), "--chain")
+                self.assertNotIn("index_gap", verify_err)
+
+    def test_an_unsealed_record_between_two_sealed_ones_is_refused(self) -> None:
+        document = self.ledger_of(self.materials(3))
+        seal_ledger(document)
+        del document["records"][1]["chain"]
+        path = self.write(document)
+        before = path.read_bytes()
+        code, _out, err = self.run_cli("chain", str(path), "--seal")
+        self.assertEqual(code, 2, err)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_a_first_seal_chains_every_record(self) -> None:
+        path = self.write(self.ledger_of(self.materials(3)))
+        code, _out, err = self.run_cli("chain", str(path), "--seal")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(verify_chain(json.loads(path.read_text(encoding="utf-8")))[1], "INTACT")
+
+    def test_new_records_after_an_intact_chain_are_sealed_onto_it(self) -> None:
+        document = self.ledger_of(self.materials(2))
+        seal_ledger(document)
+        document["records"].append(record("MAT-2026-002"))
+        document["sequences"]["MAT"] = 3
+        path = self.write(document)
+        code, _out, err = self.run_cli("chain", str(path), "--seal")
+        self.assertEqual(code, 0, err)
+        sealed = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(verify_chain(sealed)[1], "INTACT")
+        self.assertEqual(sealed["records"][2]["chain"]["index"], 2)
+
+    def test_a_second_seal_is_byte_identical(self) -> None:
+        path = self.write(self.ledger_of(self.materials(2)))
+        self.run_cli("chain", str(path), "--seal")
+        once = path.read_bytes()
+        code, _out, _err = self.run_cli("chain", str(path), "--seal")
+        self.assertEqual(code, 0)
+        self.assertEqual(path.read_bytes(), once)
+
+
+class VerifyChainOnAnEmptyLedgerTests(ChainCliTestCase):
+    """0.13.0: asking for the chain of a ledger with no records is not green.
+
+    `verify --chain` reported findings per record, and a ledger with zero
+    records has none, so it printed `1 ledger(s) validated` and exited `0`
+    for a chain that does not exist (finding 14 of the 2026-11-20 review).
+    """
+
+    def test_verify_chain_empty_ledger_reports_unchained(self) -> None:
+        path = self.write(self.valid_ledger([]))
+        code, _out, err = self.run_cli("verify", str(path), "--chain")
+        self.assertEqual(code, 1, err)
+        self.assertIn("UNCHAINED", err)
+
+    def test_the_same_ledger_passes_verify_without_the_flag(self) -> None:
+        path = self.write(self.valid_ledger([]))
+        code, _out, err = self.run_cli("verify", str(path))
+        self.assertEqual(code, 0, err)
 
 
 if __name__ == "__main__":

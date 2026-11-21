@@ -15,7 +15,7 @@ SCHEMA_VERSION = "1.0"
 # *other* copy of the version to that one source; this one is kept in step
 # by the same release step that bumps the rest, not by an import that would
 # require shipping the manifest inside the bundle.
-TOOL_VERSION = "0.12.1"
+TOOL_VERSION = "0.13.0"
 
 REQUIRED_LEDGER_FIELDS = {
     "schema_version",

@@ -76,8 +76,26 @@ record onward, which is the normal state right after migration.
 **Sealing.** `chain --seal` writes `chain` onto records that lack it and leaves existing ones
 alone, so it is byte-idempotent. It refuses a ledger that does not validate, and it refuses to
 seal over a chain that is already broken — resealing would recompute the links and erase the
-evidence, which is the one thing this command must never do. It preserves the file's indentation
-and line endings, and writes through `os.replace`.
+evidence, which is the one thing this command must never do. It seals a copy first and writes
+only when that copy verifies `INTACT`: a record with no `chain` that comes before sealed records
+cannot be sealed without re-indexing the chain after it, so that seal is refused (exit `2`,
+nothing written) and the record stays unchained. It preserves the file's indentation and line
+endings, and writes through `os.replace`. `verify --chain` on a ledger with no records reports
+`UNCHAINED` and exits `1`: there is no chain to vouch for.
+
+## One writer at a time: `ledger.json.lock`
+
+`update ledger`, `update all`, and `chain --seal` read the ledger, build a new document from what
+they read, and replace the file. Each takes an operating-system lock on `ledger.json.lock`, beside
+the ledger, from before the read until after the replace, so two of them never overwrite each
+other's change. A writer that waits more than 30 seconds gives up with exit `2`, writes nothing,
+and can be run again. The operating system drops the lock when the holder exits, even after a
+crash. The file is empty and is left in place on purpose: deleting it while a writer runs defeats
+the lock. Keep it out of version control.
+
+The lock covers only those commands. A record written by editing `ledger.json` directly, by hand
+or by an agent, does not take it: write records while no `update` or seal runs on the same ledger,
+and run `verify` afterwards.
 
 ## Recovering `ledger.json` from a git merge conflict
 

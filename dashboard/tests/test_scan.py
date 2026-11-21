@@ -1221,10 +1221,13 @@ class WithheldTextTests(unittest.TestCase):
 
         A marker's `digest` is a string, and `redact` runs first. Walking into
         it would replace the one thing a later comparison needs with a digest
-        of a digest.
+        of a digest. The marker is the one `redact` made: since 0.13.0 a
+        hand-built object of the same shape is walked like any other
+        (`MarkerShapedInputTestCase` in `test_update.py`).
         """
-        marker = {"redacted": True, "digest": canonical_digest("s3cr3t")}
-        self.assertEqual(withhold_text({"token": marker}), {"token": marker})
+        redacted = redact({"token": "s3cr3t"}, ["token"])
+        expected = {"token": {"redacted": True, "digest": canonical_digest("s3cr3t")}}
+        self.assertEqual(withhold_text(redacted), expected)
 
     def test_equal_text_has_an_equal_digest_and_different_text_does_not(self) -> None:
         one = withhold_text({"a": "same", "b": "same", "c": "other"})

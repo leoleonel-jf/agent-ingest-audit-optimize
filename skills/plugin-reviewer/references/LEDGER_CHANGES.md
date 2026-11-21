@@ -147,12 +147,19 @@ entire point: a preview that wrote anything would be lying about its name.
 
 All four sets are always present in the report, an empty one as `[]`:
 
-1. **`will_be_restored`** — targets `IN_PLACE` under a verified backup.
+1. **`will_be_restored`** — targets `IN_PLACE` under a verified backup that proves their
+   recovery: the backup's digest is the target's own `before_digest` (the backup is, byte for
+   byte, what the target held), or the target has no `before_digest` (the run created it, and
+   rolling back removes it).
 2. **`will_not_change`** — targets already `REVERTED`.
 3. **`cannot_be_restored`** — targets `DRIFTED` (restoring would destroy a later, unrelated
    edit), `MISSING`, or `UNVERIFIABLE`, each carrying its state as the reason; and, under a
    backup that failed verification, the `IN_PLACE` targets too, carrying the backup's failure
-   reason — intact and unrestorable, because the backup is what there is to restore *from*.
+   reason — intact and unrestorable, because the backup is what there is to restore *from*;
+   and, under a verified backup, the `IN_PLACE` targets it does not prove, with the reason
+   `recovery_unverified`. A backup's digest proves the backup file is the one recorded, never
+   what it holds: a backup that bundles several files proves no target's recovery, and the
+   preview says so on stderr instead of promising it.
    The three target sets partition the run's targets: every target appears in exactly one,
    whatever the backup did.
 4. **`residual_effects`** — every non-null `residual_effect` on the run's targets, verbatim: the
@@ -163,8 +170,8 @@ The health indicator is one of `HEALTHY`, `AT_RISK`, or `BROKEN`:
 
 | Indicator | Condition |
 |---|---|
-| `HEALTHY` | the backup verifies, every target is `IN_PLACE`, and no residual effects exist |
-| `AT_RISK` | the backup verifies, but at least one target is not `IN_PLACE`, or residual effects exist |
+| `HEALTHY` | the backup verifies and proves every target's recovery, every target is `IN_PLACE`, and no residual effects exist |
+| `AT_RISK` | the backup verifies, but at least one target is not `IN_PLACE`, or residual effects exist, or a target's recovery is unverified (`recovery_unverified`) |
 | `BROKEN` | the backup is missing, unreadable, or its digest mismatches the recorded one |
 
 `BROKEN` is decided first, because a backup that cannot be trusted makes every other promise

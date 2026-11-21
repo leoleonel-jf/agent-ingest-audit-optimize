@@ -32,6 +32,7 @@ from ledgerlib import build as build_module
 from ledgerlib.chain import _detect_format, _write_atomically
 from ledgerlib.constants import RECORD_ID
 from ledgerlib.errors import LedgerError
+from ledgerlib.locking import ledger_lock
 from ledgerlib.paths import _path_key, file_digest, load_json
 from ledgerlib.scan import scan_detail
 from ledgerlib.validate import _prefix_and_number, validate_collection, validate_ledger
@@ -219,6 +220,30 @@ def _append_baseline(
 
 
 def update_command(
+    ledger: Path,
+    what: str,
+    **options: object,
+) -> int:
+    """`update`, holding the ledger's writer lock for `ledger` and `all`.
+
+    The lock is taken before the ledger is read and released after the
+    dashboard is written, so no other locking writer can replace the file
+    between this command's read and its write (`ledgerlib.locking`).
+    `anchors` writes no ledger and takes no lock. Arguments and exit codes
+    are `_update_command`'s; a lock that cannot be had exits `2` with nothing
+    written.
+    """
+    if what not in ("ledger", "all"):
+        return _update_command(ledger, what, **options)  # type: ignore[arg-type]
+    try:
+        with ledger_lock(ledger):
+            return _update_command(ledger, what, **options)  # type: ignore[arg-type]
+    except LedgerError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+
+def _update_command(
     ledger: Path,
     what: str,
     *,
